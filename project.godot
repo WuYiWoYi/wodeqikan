@@ -1,0 +1,32 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="我的骑砍"
+run/main_scene="res://Scenes/MainMenu/main_menu.tscn"
+config/features=PackedStringArray("4.6", "Forward Plus")
+config/icon="res://icon.svg"
+
+[autoload]
+
+EventBus="*res://Scripts/Autoload/event_bus.gd"
+TimeManager="*res://Scripts/Autoload/time_manager.gd"
+SaveManager="*res://Scripts/Autoload/save_manager.gd"
+SceneManager="*res://Scripts/Autoload/scene_manager.gd"
+GameManager="*res://Scripts/Autoload/game_manager.gd"
+
+[physics]
+
+3d/physics_engine="Jolt Physics"
+
+[rendering]
+
+rendering_device/driver.windows="d3d12"
