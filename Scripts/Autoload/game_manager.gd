@@ -16,6 +16,7 @@ const PAUSE_REASON_LOADING: StringName = &"loading"
 const PAUSE_REASON_UI_PANEL: StringName = &"ui_panel"
 const PAUSE_REASON_WORLD_DIALOGUE: StringName = &"world_dialogue"
 const PAUSE_REASON_SMALL_SCENE: StringName = &"small_scene"
+const PAUSE_REASON_BATTLE: StringName = &"battle"
 
 var game_state: GameState = GameState.BOOT
 var world_context: WorldContext = null
@@ -113,6 +114,9 @@ func continue_game() -> bool:
 func save_game(slot_name: String) -> Error:
 	if world_context == null:
 		return ERR_UNCONFIGURED
+	if world_context.battle_manager.current_battle != null:
+		push_error("战斗期间不能存档")
+		return ERR_BUSY
 	if not world_context.is_valid_world():
 		push_error("当前世界数据不完整，拒绝保存")
 		return ERR_INVALID_DATA

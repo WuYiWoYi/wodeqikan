@@ -38,6 +38,13 @@ func _run() -> void:
 	if party_a == null:
 		return
 
+	# Milestone 2 新游戏会预置双方测试士兵；本测试从空世界开始。
+	for party: PartyData in context.party_manager.get_all_parties():
+		for unit_id: String in party.member_unit_ids.duplicate():
+			context.party_manager.remove_member(party.party_id, unit_id)
+			context.unit_manager.remove_unit(unit_id)
+	_check(context.unit_manager.get_all_units().is_empty(), "清空预置测试士兵")
+
 	var militia_ids: Array[String] = []
 	for i: int in range(3):
 		var unit := context.unit_manager.create_unit(militia, WorldInitializer.PLAYER_FACTION_ID)

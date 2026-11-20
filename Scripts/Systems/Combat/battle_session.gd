@@ -25,6 +25,14 @@ var attacker_party_ids: Array[String] = []
 var defender_party_ids: Array[String] = []
 var reinforcement_party_ids: Array[String] = []
 
+## 双方参战单位 ID，顺序与生成顺序一致。
+var attacker_unit_ids: Array[String] = []
+var defender_unit_ids: Array[String] = []
+
+## 双方阵营，用于战斗场景显示与后续阵营规则。
+var attacker_faction_id: String = ""
+var defender_faction_id: String = ""
+
 ## unit_id -> BattleUnitState
 var unit_states: Dictionary = {}
 
@@ -48,3 +56,22 @@ func is_party_involved(party_id: String) -> bool:
 		or defender_party_ids.has(party_id)
 		or reinforcement_party_ids.has(party_id)
 	)
+
+
+func is_attacker_party(party_id: String) -> bool:
+	return attacker_party_ids.has(party_id)
+
+
+func get_party_unit_ids(party_id: String) -> Array[String]:
+	if attacker_party_ids.has(party_id):
+		return attacker_unit_ids.duplicate()
+	if defender_party_ids.has(party_id):
+		return defender_unit_ids.duplicate()
+	return []
+
+
+func get_all_unit_ids() -> Array[String]:
+	var unit_ids: Array[String] = []
+	unit_ids.append_array(attacker_unit_ids)
+	unit_ids.append_array(defender_unit_ids)
+	return unit_ids

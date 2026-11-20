@@ -2,7 +2,8 @@
 
 **核心数据：** `Scripts/Entities/Unit/unit_data.gd`、`Scripts/Config/unit_config.gd`
 **核心逻辑：** `Scripts/Core/World/unit_manager.gd`、`Scripts/Core/Gameplay/stat_calculator.gd`
-**状态：** 数据层完成（创建、查询、删除约束、属性初始化、存档）；表现与控制未实现
+**战斗表现：** `Scripts/Systems/Combat/unit_actor.gd`、`unit_controller.gd`
+**状态：** 数据层与最小实时战斗表现完成；正式美术、受击硬直与复杂状态机未实现
 
 ---
 
@@ -70,7 +71,21 @@
 
 ## 4. 表现层
 
-### 4.1 节点结构
+### 4.1 当前最小实现（Milestone 2 Step 2）
+
+战斗场景目前使用程序绘制的占位表现，尚未接入正式部件美术：
+
+| 节点/类 | 职责 |
+|---|---|
+| `UnitActor`（Node2D） | 读取 `UnitData` 与 `BattleUnitState`，绘制身体、朝向武器、血条、名称；玩家蓝色、敌方红色 |
+| `UnitController`（RefCounted） | 移动、自动索敌、攻击、受伤、死亡；由 `BattleScene` 逐帧驱动 |
+| `BattleScene` | 生成/移除 `UnitActor`，提供玩家点击命令，判定胜负并显示结果 |
+
+- `UnitActor` 不修改 `UnitData.current_hp`，只读取静态属性与 `BattleUnitState.battle_hp`。
+- 死亡时 `UnitActor` 被场景移除，`BattleUnitState` 保留到 `BattleManager` 结算。
+- 当前没有独立 `UnitVisual` 部件树、受击硬直动画与正式资源；这些仍按下述结构实现。
+
+### 4.2 规划中的节点结构
 
 ```text
 Unit (Node2D)
@@ -99,7 +114,7 @@ Unit (Node2D)
 - 不要求所有部件都有独立动画；初期可做整体摆动 + 武器挥动 + 腿部交替。
 - 临时美术当前位于 `art/我的骑砍临时美术/`，接入时不直接引用临时路径，应在 `Assets/` 下建立正式资源后再绑定。
 
-### 4.2 视角与朝向
+### 4.3 视角与朝向
 
 - 小场景为横版侧视 + 纵深移动，单位可在 XY 平面移动。
 - 按 `position.y` 进行 Y 排序，形成前后遮挡。
@@ -108,7 +123,7 @@ Unit (Node2D)
 - 目标在左侧时，恢复正方向。
 - 纵向移动不改变朝向。
 
-### 4.3 阴影
+### 4.4 阴影
 
 - 阴影独立于单位身体，跟随地面位置。
 - 骑马与步行使用不同阴影素材。
@@ -116,7 +131,16 @@ Unit (Node2D)
 
 ## 5. UnitController
 
-### 5.1 状态机
+### 5.0 当前实现（Milestone 2 Step 2）
+
+- 每 `0.3` 秒重新选择最近的存活敌人（1000 像素内）。
+- 目标在 `attack_range + 8` 内时按 `attack_interval` 攻击；否则以 `move_speed` 直线接近。
+- 伤害 = `UnitData.attack`，只写入目标 `BattleUnitState.battle_hp`。
+- HP 归零后停止移动、攻击与受伤；场景移除表现节点。
+- 玩家左键点击地面时，所有存活己方单位移动到一个带间距的目标点；到达前不主动攻击。
+- 尚未实现受击硬直、攻击动画状态、阵型站位与寻路。
+
+### 5.1 规划状态机
 
 ```text
 Idle
@@ -190,10 +214,12 @@ Idle
 | 删除归属约束 | 已实现：已归属单位禁止直接删除 |
 | `StatCalculator` | 基础实现：复制配置属性；等级成长/装备加成 TODO(阶段3) |
 | 成员归属 | 由 `PartyManager` 维护，见 [Party_System.md](Party_System.md) |
-| `UnitController` | TODO(阶段3) |
+| `UnitActor` | 已实现占位表现：阵营颜色、血条、名称、朝向 |
+| `UnitController` | 已实现最小行为：移动、索敌、攻击、受伤、死亡 |
+| 玩家点击移动命令 | 已实现 |
 | 部件视觉与动画 | TODO(阶段3) |
-| 攻击/受击/死亡 | TODO(阶段3) |
-| 初始世界/招募生成士兵 | TODO(阶段3) |
+| 受击硬直 / 攻击动画 | TODO(阶段3) |
+| 初始世界/招募生成士兵 | 已用临时测试兵力打通；招募系统 TODO(阶段3) |
 
 ## 9. 待确认
 
@@ -204,3 +230,7 @@ Idle
 - 等级成长公式与装备加成上限（KI120）。
 - 跨阵营招募、俘虏与叛变的单位归属规则（KI119）。
 - `joined_at_game_time` / 招募来源字段的实际写入时机。
+- 伤害公式（当前直接使用 `attack`，无防御/护甲）。
+- 攻击判定是圆形距离还是左右矩形（当前按圆形距离 + 8 像素容差）。
+- 阵亡单位永久删除是否合适，何时引入伤兵/俘虏数据。
+- 玩家移动命令是否改为选中单位、阵型站位或拖拽框选。

@@ -6,6 +6,8 @@ extends Node2D
 
 const INTERACTION_RADIUS: float = 40.0
 const INTERACTION_EXIT_RADIUS: float = 64.0
+const PARTY_INTERACTION_RADIUS: float = 40.0
+const PARTY_INTERACTION_EXIT_RADIUS: float = 64.0
 const CAMERA_FOLLOW_SPEED: float = 8.0
 const CAMERA_PAN_SPEED: float = 650.0
 const CAMERA_ZOOM_MIN: float = 0.5
@@ -34,6 +36,16 @@ var _settlement_panel: PanelContainer = null
 var _settlement_name_label: Label = null
 var _settlement_type_label: Label = null
 var _settlement_pause_active: bool = false
+
+var _party_panel: PanelContainer = null
+var _party_name_label: Label = null
+var _party_faction_label: Label = null
+var _party_troop_label: Label = null
+var _party_status_label: Label = null
+var _party_fight_button: Button = null
+var _party_pause_active: bool = false
+var _party_latch_id: String = ""
+var _battle_transition_started: bool = false
 
 var _save_dim: ColorRect = null
 var _save_panel: PanelContainer = null
@@ -76,6 +88,7 @@ func _process(delta: float) -> void:
 	_update_camera(delta)
 	_update_player_info()
 	_check_settlement_interaction()
+	_check_party_interaction()
 	_last_player_position = _player_party.world_position
 
 
@@ -140,6 +153,7 @@ func _build_ui() -> void:
 	_build_top_bar()
 	_build_bottom_bar()
 	_build_settlement_panel()
+	_build_party_dialogue_panel()
 	_build_save_panel()
 
 
@@ -257,6 +271,74 @@ func _build_settlement_panel() -> void:
 	column.add_child(leave_button)
 
 
+func _build_party_dialogue_panel() -> void:
+	_party_panel = PanelContainer.new()
+	_party_panel.name = "PartyDialoguePanel"
+	_party_panel.visible = false
+	_party_panel.anchor_left = 1.0
+	_party_panel.anchor_top = 0.5
+	_party_panel.anchor_right = 1.0
+	_party_panel.anchor_bottom = 0.5
+	_party_panel.offset_left = -370.0
+	_party_panel.offset_top = -150.0
+	_party_panel.offset_right = -20.0
+	_party_panel.offset_bottom = 150.0
+	_ui_root.add_child(_party_panel)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 20)
+	margin.add_theme_constant_override("margin_right", 20)
+	margin.add_theme_constant_override("margin_top", 18)
+	margin.add_theme_constant_override("margin_bottom", 18)
+	_party_panel.add_child(margin)
+
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 10)
+	margin.add_child(column)
+
+	_party_name_label = _make_label("", 24)
+	_party_name_label.name = "PartyNameLabel"
+	_party_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(_party_name_label)
+
+	_party_faction_label = _make_label("", 15)
+	_party_faction_label.name = "PartyFactionLabel"
+	_party_faction_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(_party_faction_label)
+
+	_party_troop_label = _make_label("", 15)
+	_party_troop_label.name = "PartyTroopLabel"
+	_party_troop_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(_party_troop_label)
+
+	_party_status_label = _make_label("", 13)
+	_party_status_label.name = "PartyDialogueStatus"
+	_party_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_party_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_party_status_label.custom_minimum_size = Vector2(0.0, 34.0)
+	column.add_child(_party_status_label)
+
+	var spacer := Control.new()
+	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	column.add_child(spacer)
+
+	var buttons := HBoxContainer.new()
+	buttons.add_theme_constant_override("separation", 10)
+	column.add_child(buttons)
+
+	_party_fight_button = _make_button("发起战斗", "PartyFightButton")
+	_party_fight_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_party_fight_button.custom_minimum_size = Vector2(0.0, 38.0)
+	_party_fight_button.pressed.connect(_on_party_fight_pressed)
+	buttons.add_child(_party_fight_button)
+
+	var leave_button := _make_button("离开", "PartyLeaveButton")
+	leave_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	leave_button.custom_minimum_size = Vector2(0.0, 38.0)
+	leave_button.pressed.connect(_on_party_leave_pressed)
+	buttons.add_child(leave_button)
+
+
 func _build_save_panel() -> void:
 	_save_dim = ColorRect.new()
 	_save_dim.name = "SaveDim"
@@ -366,7 +448,9 @@ func _set_camera_zoom(value: float) -> void:
 
 
 func _check_settlement_interaction() -> void:
-	if _save_panel.visible or _settlement_panel.visible:
+	if _battle_transition_started:
+		return
+	if _save_panel.visible or _settlement_panel.visible or _party_panel.visible:
 		return
 
 	if _settlement_latch_id.is_empty():
@@ -406,6 +490,131 @@ func _on_settlement_leave_pressed() -> void:
 	# 不恢复时间：离开地点后仍保持暂停，玩家需主动选择 1x / 2x。
 	_set_time_buttons_enabled(true)
 	_update_time_ui()
+
+
+func _check_party_interaction() -> void:
+	if _battle_transition_started or _context == null or _player_party == null:
+		return
+	if _save_panel.visible or _settlement_panel.visible or _party_panel.visible:
+		return
+
+	if _party_latch_id.is_empty():
+		for party: PartyData in _context.party_manager.get_all_parties():
+			if party.party_id == _context.player_party_id:
+				continue
+			# 已被击溃的空部队不再触发交互。
+			if party.member_unit_ids.is_empty():
+				continue
+			var closest := Geometry2D.get_closest_point_to_segment(
+				party.world_position, _last_player_position, _player_party.world_position
+			)
+			if closest.distance_to(party.world_position) <= PARTY_INTERACTION_RADIUS:
+				_open_party_dialogue(party)
+				return
+	else:
+		var active := _context.party_manager.get_party(_party_latch_id)
+		if active == null \
+				or _player_party.world_position.distance_to(active.world_position) \
+				> PARTY_INTERACTION_EXIT_RADIUS:
+			_party_latch_id = ""
+
+
+func _open_party_dialogue(party: PartyData) -> void:
+	if _party_panel.visible or party == null:
+		return
+	if party.party_id == _context.player_party_id:
+		return
+
+	_party_latch_id = party.party_id
+	_battle_transition_started = false
+	_context.world_map_manager.stop_party(_context.player_party_id)
+
+	if not _party_pause_active:
+		TimeManager.push_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_party_pause_active = true
+
+	_party_name_label.text = party.party_name
+	_party_faction_label.text = "阵营：%s" % _faction_display_name(party.faction_id)
+	_party_troop_label.text = "兵力：%d" % party.member_unit_ids.size()
+	_party_status_label.text = ""
+	var same_faction: bool = party.faction_id == _player_party.faction_id
+	_party_fight_button.disabled = (
+		same_faction
+		or party.member_unit_ids.is_empty()
+		or _player_party.member_unit_ids.is_empty()
+	)
+	if same_faction:
+		_party_status_label.text = "同一阵营无法开战"
+	elif _party_fight_button.disabled:
+		_party_status_label.text = "双方都需要至少一名士兵才能开战"
+
+	_party_panel.visible = true
+	_set_time_buttons_enabled(false)
+	_update_time_ui()
+
+
+func _on_party_leave_pressed() -> void:
+	_close_party_dialogue()
+	_set_time_buttons_enabled(true)
+	_update_time_ui()
+
+
+func _close_party_dialogue() -> void:
+	_party_panel.visible = false
+	if _party_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_party_pause_active = false
+
+
+## 只创建战斗会话并锁定部队，不切换场景；供 UI 与自动化测试共用。
+func begin_battle_with_party() -> BattleSession:
+	if _battle_transition_started or _context == null or _player_party == null:
+		return null
+	var enemy := _context.party_manager.get_party(_party_latch_id)
+	if enemy == null or enemy.party_id == _context.player_party_id:
+		return null
+	if enemy.faction_id == _player_party.faction_id:
+		_party_status_label.text = "同一阵营无法开战"
+		return null
+	if _player_party.member_unit_ids.is_empty() or enemy.member_unit_ids.is_empty():
+		_party_status_label.text = "双方都需要至少一名士兵才能开战"
+		return null
+
+	var attacker_ids: Array[String] = [_context.player_party_id]
+	var defender_ids: Array[String] = [enemy.party_id]
+	var session := _context.battle_manager.start_battle(
+		attacker_ids, defender_ids, enemy.world_position
+	)
+	if session == null:
+		_party_status_label.text = "无法开始战斗"
+		return null
+
+	_battle_transition_started = true
+	# 先由 start_battle 压入战斗暂停，再释放对话暂停，避免中间帧恢复世界时间。
+	if _party_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_party_pause_active = false
+	_party_panel.visible = false
+	return session
+
+
+func _on_party_fight_pressed() -> void:
+	var session := begin_battle_with_party()
+	if session == null:
+		return
+
+	var error: Error = SceneManager.change_scene(SceneManager.BATTLE_SCENE)
+	if error != OK:
+		_context.battle_manager.finish_battle(
+			session.battle_id, BattleSession.BattleResult.ABORTED
+		)
+		_battle_transition_started = false
+		TimeManager.push_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_party_pause_active = true
+		_party_panel.visible = true
+		_party_status_label.text = "战斗场景加载失败"
+		_set_time_buttons_enabled(false)
+		_update_time_ui()
 
 
 func _on_pause_pressed() -> void:
@@ -526,7 +735,9 @@ func _set_time_buttons_enabled(enabled: bool) -> void:
 
 
 func _is_input_blocked() -> bool:
-	return _save_panel != null and (_save_panel.visible or _settlement_panel.visible)
+	return _save_panel != null and (
+		_save_panel.visible or _settlement_panel.visible or _party_panel.visible
+	)
 
 
 func _set_full_rect(control: Control) -> void:
@@ -574,6 +785,16 @@ func _settlement_type_text(type: SettlementData.SettlementType) -> String:
 			return "城镇"
 		_:
 			return "村庄"
+
+
+func _faction_display_name(faction_id: String) -> String:
+	match faction_id:
+		WorldInitializer.PLAYER_FACTION_ID:
+			return "玩家"
+		WorldInitializer.LOCAL_FACTION_ID:
+			return "本地势力"
+		_:
+			return faction_id if not faction_id.is_empty() else "未知"
 
 
 func _default_slot_name() -> String:

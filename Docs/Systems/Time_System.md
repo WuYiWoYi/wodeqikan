@@ -1,7 +1,7 @@
 # 时间系统
 
 **核心脚本：** `Scripts/Autoload/time_manager.gd`
-**状态：** 核心循环、暂停栈、时间 UI、读档时间恢复已实现
+**状态：** 核心循环、暂停栈、时间 UI、读档时间恢复、战斗暂停已实现
 
 ---
 
@@ -9,8 +9,8 @@
 
 | 时间域 | 用途 | 驱动 | 倍率 |
 |---|---|---|---|
-| WorldTime | 大地图世界模拟 | `TimeManager._process` 累积固定步长 | 0 / 1 / 2，战斗覆盖 0.5 |
-| SceneTime | 小场景角色与物理 | 场景 `_physics_process` | 固定 1.0 |
+| WorldTime | 大地图世界模拟 | `TimeManager._process` 累积固定步长 | 0 / 1 / 2；屏幕内战斗暂停为 0 |
+| SceneTime | 小场景 / 战斗场景角色与物理 | 场景 `_physics_process` | 固定 1.0 |
 | UITime | UI 动画、加载动画 | 真实帧时间 | 不受游戏暂停影响 |
 
 禁止用 `Engine.time_scale` 缩放全局时间，也禁止用 `get_tree().paused` 实现游戏暂停。原因：
@@ -31,14 +31,16 @@
 
 由 `TimeManager.set_base_world_speed()` 设置，只允许 0 / 1 / 2。
 
-### 2.2 战斗覆盖
+### 2.2 战斗暂停
 
-战斗期间 WorldTime 为 0.5。由 `BattleManager` 调用：
+屏幕内战斗期间 WorldTime 为 0。由 `BattleManager` 使用暂停原因栈实现：
 
 ```gdscript
-TimeManager.set_battle_mode(true)   # 战斗开始
-TimeManager.set_battle_mode(false)  # 战斗结束
+TimeManager.push_pause(GameManager.PAUSE_REASON_BATTLE)  # 战斗开始
+TimeManager.pop_pause(GameManager.PAUSE_REASON_BATTLE)   # 战斗结束
 ```
+
+`TimeManager.set_battle_mode(true/false)` 仍保留 0.5 倍速覆盖能力，预留给未来的离屏 AI 战斗；当前屏幕内战斗不使用它。
 
 ### 2.3 暂停原因栈
 
@@ -52,8 +54,9 @@ TimeManager.pop_pause(&"ui_panel")
 
 - 任一原因存在 → 有效倍率 0。
 - 同一原因重复 push 只记一次；pop 必须成对。
-- 已定义原因：`main_menu`、`loading`、`ui_panel`、`world_dialogue`、`small_scene`。
+- 已定义原因：`main_menu`、`loading`、`ui_panel`、`world_dialogue`、`small_scene`、`battle`。
 - 新增原因写在这里，并在使用方保证成对释放。
+- 进入战斗时先压入 `battle`，再释放对话的 `ui_panel`，保证切换期间世界不恢复运行。
 
 ### 2.4 有效倍率计算顺序
 
@@ -64,7 +67,7 @@ elif 战斗模式:              0.5
 else:                       基础倍率（1 或 2）
 ```
 
-含义：玩家显式暂停优先级最高；战斗覆盖 1 倍和 2 倍，但不能覆盖显式暂停。
+含义：暂停原因优先级最高；`battle_mode` 能覆盖 1 倍和 2 倍，但不能覆盖显式暂停。当前屏幕内战斗通过 `battle` 暂停原因直接停住世界，`battle_mode` 暂未使用。
 
 ## 3. 固定步长世界模拟
 
@@ -110,10 +113,11 @@ else:                       基础倍率（1 或 2）
 | 部队管理面板 | 0 | 无 | `ui_panel` 暂停 |
 | 地点交互面板 | 0 | 无 | 基础倍率 0 + `ui_panel` 暂停；离开后仍为 0 |
 | 大地图保存面板 | 0 | 无 | `ui_panel` 暂停；关闭后恢复原基础倍率 |
+| 大地图部队对话 | 0 | 无 | `ui_panel` 暂停；离开后恢复原基础倍率 |
 | 大地图对话 | 0 | 无 | `world_dialogue` 暂停 |
 | 小场景普通探索 | 0 | 1.0 | `small_scene` 暂停 |
 | 小场景对话 | 0 | 1.0 | 保持 `small_scene` |
-| 小场景战斗 | 0.5 | 1.0 | `battle_mode` |
+| 屏幕内战斗 | 0 | 1.0 | `battle` 暂停；战斗场景使用物理帧推进 |
 
 注意：源规划中“小场景对话时世界仍以 0.5 倍速运行”的描述与上表不一致。当前采用上表（小场景探索/对话 WorldTime = 0），后续若需要修改，必须同步更新本表与 `Technical_Decisions.md`。
 
@@ -127,7 +131,7 @@ else:                       基础倍率（1 或 2）
 | `set_base_world_speed(speed)` | 0 / 1 / 2 |
 | `get_base_world_speed()` | 当前基础倍率（不受暂停原因影响） |
 | `restore_world_time(seconds, base_speed)` | 读档恢复累计时间与基础倍率 |
-| `set_battle_mode(active)` | 战斗时间覆盖 |
+| `set_battle_mode(active)` | 战斗 0.5 倍速覆盖（预留给离屏战斗） |
 | `push_pause(reason)` / `pop_pause(reason)` | 暂停原因栈 |
 | `clear_pauses()` | 清理所有暂停 |
 | `get_effective_world_scale()` | 当前有效倍率 |
@@ -148,13 +152,15 @@ else:                       基础倍率（1 或 2）
 |---|---|
 | 固定步长累积 | 已实现 |
 | 暂停原因栈 | 已实现 |
-| 战斗覆盖 | 已实现（战斗场景未实现） |
+| 战斗暂停（`battle`） | 已实现，屏幕内战斗 WorldTime = 0 |
+| 战斗 0.5 倍速覆盖 | 接口保留，未使用 |
 | 读档时间恢复 | 已实现 |
 | UI 时间显示/按钮 | 已实现（暂停 / 1x / 2x） |
 | 游戏内日期 | 部分实现（第 N 天 HH:MM:SS，无年月） |
 
 ## 9. 待确认
 
+- 屏幕内战斗是否应改为 0.5 倍速（当前按 0 处理，见 D028）。
 - 小场景对话期间世界是否应保持 0.5 倍速（当前按 0 处理）。
 - 是否需要“快进到指定时间”功能（等待、训练）。
 - 完整日历（年/月/日）与季节系统。

@@ -3,7 +3,7 @@
 **所属层：** 玩法逻辑 / 表现
 **核心脚本：** `Scripts/Systems/WorldMap/world_map_manager.gd`、`Scripts/UI/WorldMap/world_map.gd`
 **场景：** `Scenes/WorldMap/world_map.tscn`
-**状态：** Milestone 1 基础移动与地点交互已实现
+**状态：** 基础移动、地点交互、玩家接近部队遭遇与战斗交接已实现
 
 ---
 
@@ -121,20 +121,27 @@ WorldSimulation 更新 PartyData.world_position
 
 ## 7. 遭遇与战斗交接
 
-**状态：** TODO(阶段 2/4)，Milestone 1 未实现。
+**状态：** 玩家接近 AI 部队的最小遭遇已实现（场景侧检测）；视野与 AI 对 AI 遭遇未实现。
 
 ```text
-双方距离 <= 遭遇阈值
-  → 判断阵营关系
-  → 触发遭遇事件
-  → BattleManager.start_battle(...)
+每帧检查玩家部队
+  → 用“上一帧位置到当前位置”的线段与非玩家、非空部队做最近点距离
+  → 距离 <= 40 像素：停止玩家部队、打开 PartyDialoguePanel、压入 ui_panel 暂停
+  → 离开面板：移除暂停原因，恢复此前基础倍率
+  → 发起战斗：
+      → BattleManager.start_battle([玩家], [敌方], 位置)
+      → 先压入 battle 暂停，再释放 ui_panel
+      → SceneManager.change_scene(BattleScene)
 ```
 
-需要明确：
+规则：
 
-- 玩家参与的遭遇 → 加载 `BattleScene`。
-- AI 对 AI 的遭遇 → 初期策略见 `Development/Known_Issues.md`（倾向自动结算，尚未最终确认）。
+- 同一时间只有一个对话面板；离开 64 像素后才会再次触发。
+- 空部队（被击溃）不再触发交互。
+- 同阵营部队不能开战；任一方无兵时战斗按钮禁用。
 - 战斗触发后，双方部队立即锁定，不能同时在大地图移动。
+- AI 对 AI 的遭遇尚未实现，策略见 `Development/Known_Issues.md`（倾向自动结算）。
+- 当前遭遇检测在场景控制器，不在 `WorldSimulation`，因此仅大地图加载时生效。
 
 ## 8. 扩展方向
 
@@ -154,7 +161,8 @@ WorldSimulation 更新 PartyData.world_position
 | `update_party_movement` | 已实现（直线/到达/边界） |
 | `stop_party` | 已实现 |
 | `update_visibility` | TODO(阶段2) |
-| 遭遇检测 | TODO(阶段2/4) |
+| 玩家接近 AI 部队遭遇 | 已实现（场景侧检测 + 对话） |
+| AI 对 AI 遭遇 | TODO(阶段2/4) |
 | 表现层图标 | 已实现（程序绘制） |
 | 摄像机跟随/平移/缩放 | 已实现 |
 | 地点交互 | 已实现（场景侧检测） |

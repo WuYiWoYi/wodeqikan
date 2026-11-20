@@ -108,7 +108,7 @@ GameplayScene (Node2D)
 
 - 暂停必须通过 `TimeManager.push_pause/pop_pause`。
 - 大地图时间按钮只能调用 `TimeManager.set_base_world_speed`。
-- 战斗时间覆盖只能由 `BattleManager` 调用 `set_battle_mode`。
+- 屏幕内战斗由 `BattleManager` 压入 `battle` 暂停原因；0.5 倍速覆盖只能由 `BattleManager` 调用 `set_battle_mode`（预留给离屏战斗）。
 - UI 动画、加载动画使用真实时间，不读世界倍率。
 
 ## 6. UI 规范

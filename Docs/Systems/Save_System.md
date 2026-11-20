@@ -135,9 +135,10 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 
 ## 8. 存档限制
 
-- 初期只允许安全状态存档；战斗系统接入后需要增加战斗中禁止保存的检查。
+- 战斗中禁止保存：`GameManager.save_game()` 在 `world_context.battle_manager.current_battle != null` 时返回 `ERR_BUSY`。
+- `BattleSession` / `BattleUnitState` 不进入存档；战斗期间不序列化实时 HP、位置与索敌目标。
 - 暂停原因不存档；读档后由新的进入状态建立。
-- 读档统一回到大地图，不恢复小场景。
+- 读档统一回到大地图，不恢复小场景或战斗。
 - 当前不支持 Schema v1 的完整恢复（旧存档缺少 `world_id`，会被判定为无效）。
 
 ## 9. 版本与迁移
@@ -183,6 +184,7 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 | 恢复 `SaveData → WorldContext` | 已实现 |
 | 版本检查 | 已实现 |
 | 士兵-部队成员关系校验 | 已实现（D025） |
+| 战斗中禁止保存 | 已实现（`ERR_BUSY`） |
 | v1 → v2 完整迁移 | 未完成 |
 | 自动存档 | 未实现 |
 | 其他跨实体引用校验 | 未实现（KI117） |

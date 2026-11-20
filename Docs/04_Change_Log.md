@@ -4,6 +4,42 @@
 
 ---
 
+## 2026-11-20 · Milestone 2 Step 2 大地图遭遇与首次实战
+
+### 新增
+
+- `PartyDialoguePanel`：显示部队名称、阵营、兵力，提供离开/发起战斗。
+- `Scenes/Battle/battle.tscn` 与 `BattleScene`：战场、士兵生成、玩家点击命令、结果面板。
+- `UnitActor`：程序绘制士兵、阵营颜色、朝向、血条与名称。
+- `UnitController`：自动索敌、移动、攻击、受伤、死亡与手动移动命令。
+- `BattleSession` 新增双方 `unit_id` 列表与阵营字段。
+- `WorldInitializer.create_test_battle_forces()`：玩家与河畔商队各 3 民兵 + 2 职业步兵。
+- 测试：`unit_controller_test`、`battle_manager_test`、`party_dialogue_test`、`battle_scene_test`、`milestone2_flow_test`。
+
+### 变更
+
+- `BattleManager.start_battle()`：校验部队、阵营、可用性与存活士兵，生成 `BattleUnitState`，锁定部队并压入 `battle` 暂停。
+- `BattleManager.finish_battle()`：写回存活 HP，移除阵亡单位并删除 `UnitData`，解锁部队，清理会话，防止重复结算。
+- `GameManager` 新增 `PAUSE_REASON_BATTLE`；战斗期间 `save_game()` 返回 `ERR_BUSY`。
+- 屏幕内战斗 WorldTime 改为 0（暂停原因栈），`set_battle_mode(0.5)` 保留给未来离屏战斗。
+- 大地图新增部队遭遇检测与对话 UI；离开后恢复此前时间状态。
+- `unit_party_serialization_test` 开始时清理新游戏预置的测试士兵。
+
+### 决策
+
+- D027：战斗会话、场景与结算职责分离。
+- D028：屏幕内战斗暂停世界时间，替代 D008 的屏幕内 0.5 倍速方案。
+- D029：阵亡单位移除归属并删除数据；存活单位写回剩余 HP。
+- D030：初始测试兵力为临时调试配置，后续由招募系统替换。
+
+### 验证
+
+- Step 1 四个单元测试、`unit_controller_test`、`battle_manager_test`、`party_dialogue_test`、`battle_scene_test`、`milestone2_flow_test` 全部通过。
+- `skeleton_smoke_test`、`milestone1_test`、`milestone1_flow_test` 回归通过。
+- 未修改存档 Schema；测试存档已清理。
+
+---
+
 ## 2026-11-20 · Milestone 2 Step 1 士兵数据层
 
 ### 新增

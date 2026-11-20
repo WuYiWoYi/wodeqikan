@@ -59,7 +59,7 @@ GameManager (Autoload)
 - `WorldContext`：数据与管理器的生命周期容器，不写玩法逻辑；
 - `WorldSimulation`：只消费 `world_tick`，按固定顺序推进世界数据。
 
-这样大地图场景未加载时（例如玩家正在战斗），世界模拟仍然可以照常运行。
+这样大地图场景未加载时，只要世界时间未被暂停，`WorldSimulation` 仍可运行。当前屏幕内战斗会压入 `battle` 暂停原因冻结世界；未来的离屏 AI 战斗可改用 0.5 倍速覆盖。
 
 ### 3.2 全局单例约束
 
@@ -216,22 +216,27 @@ Continue / Load Game
 ### 8.3 大地图 ↔ 战斗
 
 ```text
-大地图遭遇
-  → BattleManager.start_battle()
-      ├── 创建 BattleSession
-      ├── 参战部队 battle_state = IN_BATTLE
-      ├── 生成 BattleUnitState
-      ├── TimeManager.set_battle_mode(true)（WorldTime = 0.5）
-      └── SceneManager.change_scene(BattleScene)
+大地图接近 AI 部队
+  → 部队对话面板（push_pause ui_panel）
+  → 玩家选择“发起战斗”
+      → BattleManager.start_battle()
+          ├── 创建 BattleSession
+          ├── 校验双方部队与存活士兵
+          ├── 参战部队 battle_state = IN_BATTLE
+          ├── 生成 BattleUnitState（battle_hp = current_hp）
+          └── push_pause(battle)
+      → 场景控制器 SceneManager.change_scene(BattleScene)
   → 战斗结束
-      → BattleManager.finish_battle()
-          ├── 写回 HP / 死亡 / 经验 / 成员关系
+      → 场景控制器调用 BattleManager.finish_battle()
+          ├── 写回存活 HP
+          ├── 移除阵亡单位的部队归属并删除 UnitData
           ├── 解锁参战部队
-          ├── TimeManager.set_battle_mode(false)
-          └── SceneManager.change_scene(WorldMap)
+          ├── 清理 BattleSession
+          └── pop_pause(battle)
+      → 场景控制器 SceneManager.change_scene(WorldMap)
 ```
 
-`WorldContext` 和 `WorldSimulation` 在战斗期间保持存在并继续运行。
+`WorldContext` 和 `WorldSimulation` 在战斗期间保持存在；屏幕内战斗通过 `battle` 暂停原因冻结世界模拟，战斗场景使用自身物理帧推进。场景切换由场景控制器负责，`BattleManager` 只处理数据与结算。
 
 ### 8.4 返回主菜单
 

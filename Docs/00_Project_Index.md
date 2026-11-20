@@ -1,6 +1,6 @@
 # 我的骑砍 · 项目总索引
 
-**文档版本：** V0.5（Milestone 2 Step 1 完成）
+**文档版本：** V0.6（Milestone 2 Step 2 完成）
 **更新日期：** 2026-11-20
 **引擎：** Godot 4.6.1 / GDScript
 **源规划：** [2D 中世纪沙盒战略游戏核心架构设计与开发规划 V0.2](../md/2D%20中世纪沙盒战略游戏核心架构设计与开发规划.md)
@@ -112,9 +112,10 @@ WorldContext（一局游戏，跨场景常驻）
 - 阶段 0：完成。
 - 阶段 1（Milestone 1）：完成。主菜单、初始世界、大地图移动、时间控制、地点交互、保存/读取闭环已实现。
 - 阶段 2：部分完成。世界固定 tick 与直线移动已接入，视野、NPC 自主行为、遭遇检测仍待开发。
-- 阶段 3：部分完成（Milestone 2 Step 1）。士兵创建、兵种配置、成员增删/转队、属性初始化、读档成员校验已实现；表现与战斗未开始。
-- 阶段 4–7：未开始。
-- 最近验证：4 个士兵/部队单元测试、冒烟测试、Milestone 1 数据测试全部通过。
+- 阶段 3：部分完成（Milestone 2 Step 1 + Step 2）。士兵数据层、UnitActor/UnitController 最小战斗表现、玩家点击移动与自动索敌已实现；正式美术、受击动画与阵型未开始。
+- 阶段 4：部分完成（Milestone 2 Step 2）。大地图遭遇对话 → 战斗场景 → 实时战斗 → 结算 → 返回 → 存档闭环已实现；援军、离屏结算与战败处理未开始。
+- 阶段 5–7：未开始。
+- 最近验证：Step 1 四个单元测试、UnitController、部队对话、战斗场景、Milestone 2 全流程、冒烟测试、Milestone 1 数据/流程测试全部通过。
 
 详见 [Development/Current_Status.md](Development/Current_Status.md)。
 
@@ -135,11 +136,16 @@ Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/unit_man
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/party_manager_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/stat_calculator_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/unit_party_serialization_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/unit_controller_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/battle_manager_test.tscn
 
 # 系统测试套件
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/skeleton_smoke_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/milestone1_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/milestone1_flow_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/party_dialogue_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/battle_scene_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/milestone2_flow_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/main_menu_ui_test.tscn
 
 # 跨进程存档：先保存退出，再新进程读取

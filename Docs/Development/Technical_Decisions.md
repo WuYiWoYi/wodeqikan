@@ -132,6 +132,8 @@
 
 **影响：** 战斗结束必须关闭覆盖；读档/返回主菜单要清理该状态。
 
+**更新（D028）：** 屏幕内战斗改为通过 `battle` 暂停原因冻结世界（WorldTime = 0）；0.5 倍速覆盖保留给未来的离屏 AI 对 AI 战斗。
+
 ---
 
 ## D009 · 仅 5 个 Autoload
@@ -407,3 +409,77 @@
 **原因：** 避免 `UnitManager` 与 `StatCalculator` 各维护一套属性规则，导致后续成长/装备系统接入时出现两套真实来源。
 
 **影响：** 所有运行时属性重算必须经过 `StatCalculator`；新增属性先扩展该接口，再接入调用方。
+
+---
+
+## D027 · 战斗会话、场景与结算职责分离
+
+**日期：** 2026-11-20
+**状态：** 已确定
+
+**决策：**
+
+- `BattleManager.start_battle()` 只创建 `BattleSession`、校验部队、生成 `BattleUnitState`、锁定参战部队并压入战斗暂停；不切换场景。
+- 大地图交互控制器创建会话后调用 `SceneManager` 进入 `BattleScene`。
+- `BattleScene` 读取会话生成 `UnitActor`，逐帧驱动 `UnitController`；伤害只写 `BattleUnitState.battle_hp`，不修改 `UnitData` / `PartyData`。
+- 玩家点击“返回大地图”时，`BattleScene` 调用 `BattleManager.finish_battle()` 完成统一结算，再由场景控制器切回 `WorldMap`。
+
+**原因：** 数据结算与场景导航职责不同；把场景切换放进 `BattleManager` 会让会话逻辑依赖表现层，也降低可测试性。
+
+**影响：** `start_battle` / `finish_battle` 不负责场景切换；`BattleManager` 是唯一的战斗结算写入口；场景节点不持有权威数据。
+
+---
+
+## D028 · 屏幕内战斗暂停世界时间
+
+**日期：** 2026-11-20
+**状态：** 已确定（替代 D008 的屏幕内 0.5 倍速方案）
+
+**决策：**
+
+- 屏幕内战斗通过 `TimeManager.push_pause(GameManager.PAUSE_REASON_BATTLE)` 冻结 WorldTime（有效倍率 0）。
+- 战斗场景使用 `_physics_process` 独立推进，不受世界暂停影响。
+- 战斗结束移除 `battle` 暂停原因，恢复进入战斗前的基础倍率与其他暂停原因。
+- `TimeManager.set_battle_mode(0.5)` 保留给未来的离屏 AI 对 AI 战斗，当前屏幕内战斗不使用。
+- 大地图对话使用 `ui_panel` 暂停；发起战斗时先压入 `battle`，再释放 `ui_panel`，避免中间帧恢复世界。
+
+**原因：** Milestone 2 要求进入战斗时暂停大地图模拟；暂停原因栈能保留其他系统的暂停状态。
+
+**影响：** `Time_System.md` 的屏幕内战斗时间改为 0；D008 的 0.5 倍速仍可作为离屏战斗方案。
+
+---
+
+## D029 · 阵亡单位结算规则
+
+**日期：** 2026-11-20
+**状态：** 已确定
+
+**决策：**
+
+- 战斗期间阵亡只写 `BattleUnitState`（`battle_hp = 0`、`alive = false`）。
+- 结算时阵亡单位：`UnitData.current_hp = 0` → `PartyManager.remove_member()` 清空归属 → `UnitManager.remove_unit()` 删除数据 → 广播 `unit_died`。
+- 存活单位：`UnitData.current_hp = clamp(BattleUnitState.battle_hp, 0, max_hp)`，保留原 `unit_id` 与成员关系。
+- 全员阵亡的 `PartyData` 保留但成员为空；空部队不再触发大地图交互。
+- `finish_battle()` 校验 `battle_id` 与会话状态，重复调用直接失败。
+
+**原因：** 不允许“场景中已消失但仍作为正常成员保留”的士兵；同时保持 `member_unit_ids` 与 `current_party_id` 双向一致。
+
+**影响：** 当前阵亡即永久删除；伤兵、俘虏、战后恢复需要后续新增专用数据与结算流程。
+
+---
+
+## D030 · 初始测试兵力为临时调试配置
+
+**日期：** 2026-11-20
+**状态：** 临时方案
+
+**决策：**
+
+- `WorldInitializer.create_test_battle_forces()` 在创建新世界时给玩家部队和已有“河畔商队”各生成 3 民兵 + 2 职业步兵。
+- 复用现有 `UnitManager` / `PartyManager` / `UnitConfig`，不另建测试数据体系。
+- 测试单位标记 `recruit_source = "milestone2_test"`，便于识别与清理。
+- 不新增部队、不修改存档 Schema；旧存档读档不会自动补兵。
+
+**原因：** 招募系统尚未实现，但 Milestone 2 需要真实士兵数据才能验证完整战斗闭环。
+
+**影响：** 新游戏会带 10 名临时士兵；招募/部队初始化系统完成后应移除该入口，并处理旧存档的补员策略（KI121）。
