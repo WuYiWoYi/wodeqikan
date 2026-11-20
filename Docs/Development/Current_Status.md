@@ -51,6 +51,12 @@
 - `Scenes/`：6 个场景占位文件
 - `Data/`、`Tests/`：目录与 `.gitkeep`
 
+### 版本管理
+
+- 本地 Git 仓库，分支 `main`。
+- 私有远程：<https://github.com/WuYiWoYi/wodeqikan>
+- 首个提交：`ea99719`（架构文档与工程骨架）。
+
 ## 3. 验证记录
 
 命令：
@@ -86,7 +92,6 @@ Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/skelet
 - 大地图坐标尺度未定，阶段 1 前必须确定。
 - 渲染器仍为 Forward+，2D 项目是否需要切 Compatibility 待验证。
 - `LordData` / `SettlementData` / `FactionData` 尚无仓储管理器。
-- 项目尚未初始化 Git 仓库，版本管理未建立。
 
 ## 6. 快速文件索引
 

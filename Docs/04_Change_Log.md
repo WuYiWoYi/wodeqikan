@@ -27,6 +27,12 @@
 - 暂停使用“原因栈”，而不是单一布尔值。
 - 不使用 `Engine.time_scale` 或 `get_tree().paused` 实现游戏暂停。
 
+### 版本管理
+
+- 初始化本地 Git 仓库，默认分支 `main`。
+- 创建私有远程仓库并推送首个提交：<https://github.com/WuYiWoYi/wodeqikan>。
+- 仓库级代理配置为 `http://127.0.0.1:10808`。
+
 ### 未决
 
 - 离屏 AI 对 AI 战斗是否自动结算，见 `Development/Known_Issues.md`。

@@ -24,6 +24,7 @@
 | 世界时间 | 固定步长 0.1 秒，由 `TimeManager` 统一推进 |
 | 全局单例 | 仅 5 个 Autoload：`EventBus`、`TimeManager`、`SaveManager`、`SceneManager`、`GameManager` |
 | 代码规范 | 静态类型 GDScript；标识符英文，注释与文档中文 |
+| 版本管理 | Git，私有远程 [WuYiWoYi/wodeqikan](https://github.com/WuYiWoYi/wodeqikan) |
 
 ## 3. 架构速览
 
