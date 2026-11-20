@@ -4,6 +4,86 @@
 
 ---
 
+## 2026-11-20 · Milestone 2 Step 1 士兵数据层
+
+### 新增
+
+- `Data/Units/infantry_militia.tres`（民兵）与 `infantry_trained.tres`（职业步兵）兵种配置。
+- `StatCalculator` 基础实现：`compute_final_stats()` / `apply_to_unit()` 统一初始化 `max_hp`、`attack`、`attack_interval`、`move_speed`、`attack_range`。
+- `PartyManager.transfer_member()`：转队接口，与 `add_member()` 共用底层规则。
+- `PartyManager.validate_membership_consistency()`：校验成员存在、部队存在、唯一归属与双向一致。
+- `Tests/UnitTests/`：`unit_manager_test`、`party_manager_test`、`stat_calculator_test`、`unit_party_serialization_test`。
+
+### 变更
+
+- `UnitManager.create_unit()` 通过 `StatCalculator` 初始化属性，出生满血并清空归属。
+- `UnitManager.remove_unit()`、`PartyManager.remove_party()` 改为返回 `bool`。
+- `UnitManager.add_unit()` / `PartyManager.add_party()` 拒绝重复 ID，失败时原实体不变。
+- `PartyManager.add_member()` 支持原子转队：先从所有其他部队移除，再写入目标部队；要求阵营一致。
+- `remove_member()` 只清空归属，不删除 `UnitData`；`remove_party()` 清空成员归属并保留单位。
+- `WorldContext.load_from_save_data()` 在两个仓储恢复后校验成员关系，失败时报告错误并拒绝加载。
+- `load_from_dict()` 遇到重复实体 ID 时报错并跳过，不再静默覆盖。
+
+### 修复
+
+- 一个士兵可能同时存在于两支部队成员列表（D024）。
+- 重复实体 ID 静默覆盖（D024）。
+- 删除已归属士兵后产生悬空成员引用（D024）。
+- 读档后缺少士兵-部队关系校验（D025）。
+
+### 验证
+
+- 4 个新增单元测试全部通过。
+- `skeleton_smoke_test`、`milestone1_test` 回归通过。
+- 未修改存档 Schema；测试存档已清理。
+
+---
+
+## 2026-11-20 · 测试范围控制规范
+
+### 变更
+
+- 引入 L1–L4 测试分级：局部、关联、集成、全量。
+- 默认只运行验证本次修改的最小测试集；公共接口/核心数据/跨系统改动扩大范围；重大重构与里程碑才运行全量。
+- 开发前必须说明改动文件、涉及系统、接口影响、将执行与不执行的测试；完成后汇报测试结果与未验证风险。
+- 更新 `Docs/03_Design_Conventions.md`、`Docs/00_Project_Index.md`、`Docs/02_Development_Roadmap.md`。
+
+---
+
+## 2026-11-20 · V0.4 Milestone 1 完成
+
+### 新增
+
+- `WorldInitializer`：生成世界 ID、3000×2000 地图、玩家部队、2 支 NPC 部队、4 个地点。
+- `SettlementManager`：地点仓储、创建、查询、序列化，接入 `WorldContext`。
+- `SaveData` Schema v2：世界 ID、创建时间、世界尺寸、玩家部队 ID。
+- `SaveManager`：临时文件 + 校验 + `.bak` 备份替换；存档头、列表、最近有效存档。
+- `WorldContext.to_save_data()` / `load_from_save_data()`。
+- `GameManager.save_game()` / `continue_game()` / 完整读档流程。
+- `TimeManager.get_base_world_speed()` / `restore_world_time()`。
+- 大地图场景：草地/道路/河流背景、部队/地点图标、摄像机跟随/平移/缩放。
+- 主菜单：新游戏、继续、读取列表、设置占位、退出。
+- 大地图 UI：世界时间、暂停/1x/2x、玩家坐标、保存面板、返回主菜单。
+- 地点交互：40 像素触发、线段检测、到达停止、暂停、离开仍暂停。
+- `UiTheme`：中文字体主题，覆盖 UI 与地图图标标签。
+- 测试：`milestone1_test.tscn`、`milestone1_flow_test.tscn`、`main_menu_ui_test.tscn`、`milestone1_restart_test.tscn`（跨进程存档）。
+
+### 变更
+
+- `WorldMapManager.update_party_movement()` 实现直线移动、到达判定、边界 clamp。
+- `PartyIcon` / `SettlementIcon` / `MapBackground` 程序绘制表现。
+- 主菜单与大地图 UI 改为程序化构建，关键控件使用稳定名称。
+- 初始实体 ID 使用 `WORLD_000001` / `PARTY_000001` / `SETTLEMENT_000001`，而非需求示例中的 `settlement_001`（D019）。
+
+### 验证
+
+- 原有 18 项冒烟测试通过。
+- Milestone 1 数据/UI 测试、端到端流程测试、主菜单 UI 测试全部通过。
+- 主场景无头启动无解析错误与运行时报错。
+- 测试存档已清理，`user://saves/` 无残留。
+
+---
+
 ## 2026-11-20 · V0.3 架构基线
 
 ### 新增

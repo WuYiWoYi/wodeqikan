@@ -1,7 +1,7 @@
 # 核心架构
 
-**文档版本：** V0.3
-**状态：** 架构基线（阶段 0 已验证骨架）
+**文档版本：** V0.4
+**状态：** Milestone 1 已实现并通过端到端测试
 
 本文定义全局结构、依赖方向与写权限。各系统的细节见 `Systems/`。
 
@@ -44,6 +44,7 @@ GameManager (Autoload)
     ├── IdGenerator                               │
     ├── UnitManager                               │
     ├── PartyManager                              │
+    ├── SettlementManager                         │
     ├── WorldMapManager                           │
     ├── AIManager                                 │
     ├── BattleManager                             │
@@ -87,6 +88,7 @@ GameManager (Autoload)
 | `WorldSimulation` | 固定顺序推进世界 | 渲染、UI |
 | `UnitManager` | `UnitData` 增删查、按配置生成单位 | 单位 AI、场景表现 |
 | `PartyManager` | `PartyData` 增删查、成员关系维护 | 部队 AI |
+| `SettlementManager` | `SettlementData` 增删查、序列化 | 地点图标、交互面板 |
 | `WorldMapManager` | 部队坐标、目标、移动、视野 | 图标节点、UI |
 | `AIManager` | 三层决策调度 | 直接改场景、UI |
 | `BattleManager` | `BattleSession`、部队锁定、结算 | 直接修改大地图节点 |
@@ -159,7 +161,7 @@ Manager → EventBus（只发事实）
 | `PartyData.member_unit_ids` | `PartyManager` | 与 `UnitData.current_party_id` 双向一致 |
 | `PartyData.battle_state` | `BattleManager` | 锁定/解锁 |
 | `LordData` 目标与状态 | `AIManager` / 领主 AI | 通过明确方法 |
-| `SettlementData` 归属、驻军 | 未来的 `SettlementManager` / `BattleManager` | 初期只读 |
+| `SettlementData` 归属、驻军 | `SettlementManager` / 未来的战斗系统 | 地点交互只读 |
 | 世界时间、倍率 | `TimeManager` | 其他系统只能请求 |
 | 战斗临时状态 | `BattleSession` | 结算后写回 `UnitData` |
 
@@ -174,8 +176,25 @@ MainMenu → GameManager.start_new_game()
   ├── 清理旧 WorldContext
   ├── TimeManager.start_session()（默认暂停 0 倍速）
   ├── 创建 WorldContext（装配管理器）
-  ├── 读取初始配置，生成玩家部队/初始单位（阶段 1）
+  ├── WorldInitializer.create_new_world()
+  │     ├── 生成 WORLD ID、世界尺寸
+  │     ├── 玩家部队 + 两支 NPC 部队
+  │     └── 四个初始地点
   └── SceneManager.change_scene(WorldMap)
+```
+
+读档使用同一条恢复路径：
+
+```text
+Continue / Load Game
+  → SaveManager.load_game(slot)
+  → GameManager 创建新的 WorldContext
+  → WorldContext.load_from_save_data(save)
+      ├── 恢复 IdGenerator 计数
+      ├── 恢复 Unit / Party / Settlement
+      └── 恢复世界 ID、尺寸、玩家部队
+  → TimeManager.restore_world_time(时间, 基础倍率)
+  → SceneManager.change_scene(WorldMap)
 ```
 
 ### 8.2 大地图 ↔ 小场景

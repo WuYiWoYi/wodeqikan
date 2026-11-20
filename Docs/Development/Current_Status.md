@@ -1,8 +1,8 @@
 # 当前开发状态
 
 **更新日期：** 2026-11-20
-**当前阶段：** 阶段 0（工程基础架构）
-**整体状态：** 文档与工程骨架完成并验证，阶段 0 剩余启动/读档流程
+**当前阶段：** Milestone 1 完成；Milestone 2 Step 1（士兵数据层）完成
+**整体状态：** 士兵个体、部队成员关系、属性初始化与存档往返已通过自动化验收；士兵表现与战斗尚未开始
 
 ---
 
@@ -10,90 +10,151 @@
 
 | 阶段 | 状态 | 说明 |
 |---|---|---|
-| 0 工程基础架构 | 进行中 | 骨架与核心时间器完成，主菜单/读档流程未完成 |
-| 1 大地图基础 | 未开始 | 场景为空场景 |
-| 2 世界模拟 | 未开始 | 移动/视野为 TODO |
-| 3 士兵与部队 | 未开始 | 数据层已具备 |
+| 0 工程基础架构 | 完成 | Autoload、数据层、主菜单、存档闭环 |
+| 1 大地图基础 | 完成 | Milestone 1 全部功能已实现 |
+| 2 世界模拟 | 部分完成 | 固定 tick / 直线移动已实现；视野、遭遇、NPC AI 待开发 |
+| 3 士兵与部队 | 部分完成 | 数据层完成：士兵创建、成员管理、转队、属性初始化、读档校验；表现与控制未开始 |
 | 4 基础战斗 | 未开始 | 会话数据结构已具备 |
 | 5 AI 领主与交互 | 未开始 | 数据层已具备 |
 | 6 援军与高级战斗 | 未开始 | 编队接口为空 |
 | 7 沙盒扩展 | 未开始 | — |
 
-## 2. 已完成内容
+## 2. Milestone 1 已完成内容
 
-### 文档
+### 世界与数据
 
-- `Docs/00_Project_Index.md`：总索引
-- `Docs/01_Core_Architecture.md`：核心架构
-- `Docs/02_Development_Roadmap.md`：开发路线
-- `Docs/03_Design_Conventions.md`：设计规范
-- `Docs/04_Change_Log.md`：变更日志
-- 11 份系统文档
-- 3 份开发状态文档
+- `WorldInitializer`：新游戏生成世界 ID、3000×2000 地图、玩家部队、2 支 NPC 部队、4 个地点。
+- `SettlementManager`：地点数据仓储与序列化，已接入 `WorldContext`。
+- `WorldContext`：新增 `to_save_data()` / `load_from_save_data()`，聚合与恢复世界状态。
+- `SaveData`：Schema v2，新增世界 ID、创建时间、世界尺寸、玩家部队 ID。
+- `SaveManager`：临时文件 + 校验 + `.bak` 备份替换；存档头信息、排序、最近有效存档查询。
+- `TimeManager`：新增 `get_base_world_speed()`、`restore_world_time()`。
+- `GameManager`：新游戏、读档、Continue、保存、同步销毁旧世界。
 
-### 工程
+### 大地图
 
-- `project.godot`：注册 5 个 Autoload，主场景指向主菜单占位。
-- `Scripts/Autoload/`
-  - `event_bus.gd`：核心事实信号
-  - `time_manager.gd`：0.1 秒固定步长、暂停原因栈、战斗覆盖
-  - `save_manager.gd`：JSON 存档读写、槽位列表/删除
-  - `scene_manager.gd`：场景切换
-  - `game_manager.gd`：游戏状态与 `WorldContext` 生命周期
-- `Scripts/Core/`
-  - `Entity/id_generator.gd`
-  - `Save/save_data.gd`
-  - `World/world_context.gd`、`world_simulation.gd`、`unit_manager.gd`、`party_manager.gd`
-  - `Gameplay/stat_calculator.gd`（TODO）
-- `Scripts/Config/`：`UnitConfig`、`EquipmentConfig`、`FactionConfig`
-- `Scripts/Entities/`：`UnitData`、`PartyData`、`LordData`、`SettlementData`、`FactionData`
-- `Scripts/Systems/`：`WorldMapManager`、`BattleManager`、`BattleSession`、`BattleUnitState`、`AIManager`、`FormationManager`、`DialogueManager`
-- `Scenes/`：6 个场景占位文件
-- `Data/`、`Tests/`：目录与 `.gitkeep`
+- 3000×2000 手绘式背景：草地、网格、道路、河流、边界。
+- 玩家部队 + 2 支 NPC 部队图标，4 个地点图标（村庄/城堡）。
+- 点击地图设置目标，直线移动，2 像素到达阈值，地图边界 clamp。
+- 摄像机跟随、方向键平移、滚轮缩放。
+- 图标读取数据并插值，不写回权威数据。
+
+### 时间与交互
+
+- 暂停 / 1x / 2x 时间按钮，UI 显示世界时间与倍率。
+- 新游戏默认暂停；读档恢复存档中的基础倍率。
+- 地点 40 像素交互半径，带路径段检测，避免高倍速穿过地点时漏判。
+- 到达地点自动停止、暂停并打开面板；离开后仍保持暂停。
+- 保存面板打开时使用暂停原因栈，关闭后恢复原倍率。
+
+### 主菜单
+
+- 新游戏、继续、读取存档、设置占位、退出。
+- Continue 自动选择最近有效存档，无存档时禁用。
+- 读取列表显示存档名与保存时间，支持双击读取。
+- 设置占位面板。
 
 ### 版本管理
 
-- 本地 Git 仓库，分支 `main`。
 - 私有远程：<https://github.com/WuYiWoYi/wodeqikan>
-- 首个提交：`ea99719`（架构文档与工程骨架）。
+- 当前工作区包含 Milestone 1 改动（尚未提交，等待确认）。
 
-## 3. 验证记录
+## 3. Milestone 2 Step 1 已完成内容
 
-命令：
+### 士兵配置与创建
+
+- `Data/Units/infantry_militia.tres`（民兵）与 `Data/Units/infantry_trained.tres`（职业步兵）。
+- `UnitManager.create_unit()` 按配置生成独立 `UnitData`；ID 由 `IdGenerator` 生成，两次创建互不相同。
+- `StatCalculator` 成为属性初始化的唯一入口：当前复制配置基础属性，保留等级与装备扩展点。
+- 出生时 `current_party_id` 为空，`current_hp = max_hp`；多个士兵不共享运行时状态。
+
+### 成员关系
+
+- `PartyManager.add_member()` 支持转队：先从所有其他部队移除，再加入目标部队；一个单位最多属于一支部队。
+- 重复加入同一部队不会产生重复成员；转队操作在全部校验通过后一次性修改，避免半转移状态。
+- `transfer_member()` 与 `add_member()` 共用同一套底层规则。
+- 本阶段要求单位与部队 `faction_id` 一致，拒绝跨阵营加入。
+- `remove_member()` 只清空归属，不删除 `UnitData`。
+- `remove_party()` 清空所有成员归属，单位保留在 `UnitManager`。
+
+### 数据安全
+
+- `UnitManager.add_unit()` / `PartyManager.add_party()` 拒绝覆盖已存在 ID，失败时原实体不变。
+- `UnitManager.remove_unit()` 拒绝删除仍属于部队的单位。
+- `PartyManager.validate_membership_consistency()` 校验四类关系：成员存在、部队存在、唯一归属、双向一致。
+- `WorldContext.load_from_save_data()` 在恢复两个仓储后统一校验；失败时 `push_error` 并返回 `false`，不自动改写存档。
+
+### 测试
+
+- 新增 `Tests/UnitTests/` 四个测试：`unit_manager_test`、`party_manager_test`、`stat_calculator_test`、`unit_party_serialization_test`。
+- 序列化测试覆盖 5 名士兵、Party A/B、移除与转队、保存/读取、二次往返、读档后继续转队、损坏引用拒绝加载。
+
+## 4. 自动化验收
+
+### 测试套件
+
+| 测试 | 覆盖 |
+|---|---|
+| `Tests/UnitTests/unit_manager_test.tscn` | 创建、独立实例、不同兵种属性、满血初始化、无效配置、重复 ID、删除归属约束 |
+| `Tests/UnitTests/party_manager_test.tscn` | 成员增删、重复加入、转队、阵营拒绝、重复部队 ID、解散、双向一致性校验 |
+| `Tests/UnitTests/stat_calculator_test.tscn` | 两种兵种属性、属性写入、HP clamp、空输入 |
+| `Tests/UnitTests/unit_party_serialization_test.tscn` | 5 名士兵与多部队存档往返、成员关系恢复、继续转队、二次往返、损坏引用拒绝加载 |
+| `Tests/SystemTests/skeleton_smoke_test.tscn` | 原有 18 项：时间 tick、实体序列化、存档往返、WorldContext 装配 |
+| `Tests/SystemTests/milestone1_test.tscn` | 世界初始化、移动、边界、存档/读档、NPC/地点恢复、ID 恢复、读档后移动、损坏存档、地点交互、时间暂停、保存面板 |
+| `Tests/SystemTests/milestone1_flow_test.tscn` | New Game → WorldMap → 移动 → 保存 → 主菜单 → Load/Continue → WorldMap；Autoload 与旧场景残留检查 |
+| `Tests/SystemTests/main_menu_ui_test.tscn` | 主菜单按钮、读取面板、设置占位面板 |
+| `Tests/SystemTests/milestone1_restart_test.tscn` | 两次独立 Godot 进程：保存退出 → 新进程读档，校验位置/时间/倍率/实体/ID |
+
+### 运行命令
 
 ```bash
 Godot_v4.6.1-stable_win64.exe --headless --path . --import
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/unit_manager_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/party_manager_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/stat_calculator_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/unit_party_serialization_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/skeleton_smoke_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/milestone1_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/milestone1_flow_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/main_menu_ui_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/milestone1_restart_test.tscn -- save
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/milestone1_restart_test.tscn -- load
 ```
 
-结果：18 项检查全部通过，包括：
+本次实际执行：4 个新增单元测试、`skeleton_smoke_test`、`milestone1_test`，全部通过。其余 UI/端到端/跨进程测试未执行（本次未修改对应模块）。测试存档已清理；未改变存档 Schema。
 
-- `WorldContext` 装配 `UnitManager` / `PartyManager`
-- 配置生成单位、ID 格式、出生 HP
-- 创建部队、加入成员、双向归属一致
-- `UnitData` / `PartyData` 序列化往返
-- 存档写入、读取、单位/部队/时间字段一致
-- 0.5 秒内产生 5 次世界 tick
+### 手动验证步骤
 
-主场景无头启动无解析错误与运行时报错。
+1. 启动游戏，进入主菜单。
+2. New Game → 大地图默认暂停。
+3. 点击地图移动玩家部队；切换 1x / 2x 观察速度变化。
+4. 移动至任意地点，确认自动停止并打开面板；点击离开，确认世界仍暂停。
+5. 打开保存面板，输入名称并保存。
+6. 返回主菜单，点击 Continue 或 Load Game，确认位置、目标、NPC、地点和时间恢复。
+7. 读档后继续移动并再次保存。
 
-## 4. 下一步任务（按顺序）
+## 5. 下一步任务
 
-1. 主菜单按钮与新游戏入口接通。
-2. 实现 `WorldContext ↔ SaveData` 聚合和恢复。
-3. 读档流程与版本检查接入 `GameManager`。
-4. 会话销毁清理检查（暂停原因、信号、场景）。
-5. 输入映射：暂停、正常、二倍速。
-6. 进入阶段 1：大地图背景、玩家部队、点击移动、时间 UI。
+1. 阶段 3 表现层：UnitController、单位场景、移动/攻击/受击/死亡状态机。
+2. 阶段 3 数据层后续：等级成长与装备加成公式（`StatCalculator`），以及初始世界/招募流程生成真实士兵。
+3. 部队管理面板：显示成员、属性与编队入口。
+4. 阶段 2：视野、遭遇检测、NPC 自主目标与简单 AI。
+5. 存档：Schema v1 → v2 完整迁移策略、其他跨实体引用校验、自动存档。
+6. 表现：正式美术资源目录与地图素材替换。
 
-## 5. 当前风险
+## 6. 当前风险
 
-- 离屏 AI 对 AI 战斗处理方式未定，会影响阶段 2/4 的世界模拟设计。
-- 大地图坐标尺度未定，阶段 1 前必须确定。
+- 离屏 AI 对 AI 战斗处理方式未定，会影响阶段 4。
+- NPC 部队尚无自主行为，当前仅验证多实体存档。
+- 大地图采用直线移动，无寻路与地形阻挡。
 - 渲染器仍为 Forward+，2D 项目是否需要切 Compatibility 待验证。
-- `LordData` / `SettlementData` / `FactionData` 尚无仓储管理器。
+- `LordData` / `FactionData` 尚无仓储管理器。
+- 项目尚无正式美术资源目录；地图与图标目前为程序绘制。
+- `StatCalculator` 目前只复制兵种基础属性，等级与装备尚不生效。
+- 单位-部队归属已校验；阵营、地点、领主等其他引用尚未统一校验。
+- 跨阵营收编、俘虏、叛变与雇佣兵规则未实现，当前直接拒绝阵营不一致。
 
-## 6. 快速文件索引
+## 7. 快速文件索引
 
 | 想了解 | 看这里 |
 |---|---|
@@ -101,6 +162,9 @@ Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/skelet
 | 下一步做什么 | `Docs/02_Development_Roadmap.md` |
 | 为什么这样设计 | `Docs/Development/Technical_Decisions.md` |
 | 还有什么坑 | `Docs/Development/Known_Issues.md` |
+| 士兵数据与属性 | `Docs/Systems/Unit_System.md` |
+| 部队与成员关系 | `Docs/Systems/Party_System.md` |
 | 时间规则 | `Docs/Systems/Time_System.md` |
-| 战斗流程 | `Docs/Systems/Combat_System.md` |
+| 大地图 | `Docs/Systems/World_Map_System.md` |
+| 地点 | `Docs/Systems/Settlement_System.md` |
 | 存档结构 | `Docs/Systems/Save_System.md` |

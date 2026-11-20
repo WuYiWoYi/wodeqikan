@@ -5,6 +5,7 @@ extends RefCounted
 ## 格式：<PREFIX>_<6 位序号>，例如 UNIT_000001。
 ## ID 计数器随存档保存，ID 永不复用；禁止用节点名、节点路径或数组下标代替 ID。
 
+const WORLD: String = "WORLD"
 const UNIT: String = "UNIT"
 const PARTY: String = "PARTY"
 const LORD: String = "LORD"

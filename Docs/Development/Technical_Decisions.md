@@ -237,3 +237,173 @@
 **原因：** 保证数据与表现分离，场景重载/切换不会破坏权威状态。
 
 **影响：** 大地图图标、单位 Visual、UI 都不得直接写 `PartyData` / `UnitData`。
+
+---
+
+## D017 · 新增 SettlementManager
+
+**日期：** 2026-11-20
+**状态：** 已确定
+
+**决策：** 新增 `SettlementManager`（`RefCounted`）并由 `WorldContext` 持有，负责地点数据仓储与序列化。
+
+**原因：** Milestone 1 需要权威地点数据、存档与初始世界生成；把它塞进 `WorldContext` 或场景节点都会破坏数据与表现分离。
+
+**影响：** `WorldContext` 装配 `SettlementManager`；地点图标与交互面板只读数据。`LordManager` 仍未建立。
+
+---
+
+## D018 · 存档 Schema v2 与原子写入
+
+**日期：** 2026-11-20
+**状态：** 已确定
+
+**决策：**
+
+- Schema v2 增加 `world.world_id`、`world.created_at`、`world.size`、`player.party_id`。
+- 保存流程改为“临时文件 → 校验 → 旧档备份 → 替换 → 清理备份”。
+- 新增存档头信息、按保存时间倒序列表、最近有效存档查询。
+
+**原因：** Milestone 1 要求世界 ID、世界尺寸、玩家部队可恢复；直接覆盖写入在中断时可能损坏唯一存档。
+
+**影响：**
+
+- `SaveData.CURRENT_SCHEMA_VERSION = 2`。
+- Schema v1 仍可解析，但缺少世界 ID，无法通过 `WorldContext.is_valid_world()`，因此不能完整恢复。
+- Continue 与 Load Game 共用 `GameManager.load_game()`。
+
+---
+
+## D019 · 初始实体 ID 使用 IdGenerator 格式
+
+**日期：** 2026-11-20
+**状态：** 已确定
+
+**决策：** 需求文档示例中的 `settlement_001` 等 ID 不作为字面值使用；统一采用 `SETTLEMENT_000001`、`PARTY_000001`、`WORLD_000001`。
+
+**原因：** 项目已确定 ID 生成器与存档计数器机制；混用两套 ID 会导致计数器失效和重复冲突。
+
+**影响：** 地点名称、类型、坐标严格按需求；ID 使用项目统一格式。文档与测试均按新格式。
+
+---
+
+## D020 · 新游戏默认暂停，读档恢复存档倍率
+
+**日期：** 2026-11-20
+**状态：** 已确定
+
+**决策：**
+
+- 新游戏进入大地图后基础倍率为 0，玩家主动选择 1x/2x。
+- 读档恢复存档中的 `world_base_speed`，而不是强制暂停。
+- 保存面板使用暂停原因栈临时暂停，关闭后恢复原基础倍率。
+
+**原因：** 满足“新游戏默认暂停”和“读档世界状态一致”，同时避免保存面板改变游戏状态。
+
+**影响：** `TimeManager.restore_world_time()` 读档时恢复时间与倍率；暂停原因不写入存档。
+
+---
+
+## D021 · 地点交互由大地图场景控制器检测
+
+**日期：** 2026-11-20
+**状态：** 初步确定
+
+**决策：**
+
+- 地点交互触发检测放在 `world_map.gd`，不放进 `WorldMapManager`。
+- 使用“上一帧位置 → 当前位置”线段与地点最近距离，半径 40 像素，离开 64 像素后解锁。
+- 触发时通过 `WorldMapManager.stop_party()` 停止移动；时间通过 `TimeManager` 暂停。
+
+**原因：** 移动属于世界模拟，交互属于游戏流程/表现层；线段检测解决 2x 下跨过地点的问题。
+
+**影响：** 地点交互目前不能在无大地图场景时发生。未来遭遇/战斗检测仍应放在世界模拟层。
+
+---
+
+## D022 · 程序化 UI 与中文字体主题
+
+**日期：** 2026-11-20
+**状态：** 已确定（可在后续美术阶段替换）
+
+**决策：**
+
+- MainMenu 与 WorldMap UI 由 GDScript 程序化构建，关键控件设置稳定 `name`。
+- 使用 `UiTheme` + `SystemFont` 优先加载 Microsoft YaHei / SimHei，避免 CJK 缺字。
+- 地图图标标签显式套用同一主题。
+
+**原因：** Milestone 1 以功能闭环为先；程序化 UI 降低手写 `.tscn` 的出错率，并便于测试查找控件。
+
+**影响：** 正式 UI/美术阶段可以将 UI 迁回可编辑场景，但必须保留控件命名与测试兼容性。
+
+---
+
+## D023 · Milestone 1 不实现单位与 NPC AI
+
+**日期：** 2026-11-20
+**状态：** 已确定
+
+**决策：** 玩家部队与 NPC 部队只有 `PartyData`，没有士兵成员；NPC 不移动、不做决策。
+
+**原因：** 本阶段验证世界数据、时间、场景、存档协同；提前实现单位/NPC AI 会扩大范围并掩盖存档问题。
+
+**影响：** 大地图只有玩家可移动；`AIManager` 保持调度骨架。阶段 2/3 再补 NPC 行为与单位表现。
+
+---
+
+## D024 · 实体注册、删除与成员转移的安全规则
+
+**日期：** 2026-11-20
+**状态：** 已确定
+
+**决策：**
+
+- `UnitManager.add_unit()` / `PartyManager.add_party()` 遇到已存在 ID 时拒绝注册，返回空字符串并 `push_error`，原实体不变。
+- `UnitManager.remove_unit()` 拒绝删除 `current_party_id` 非空的单位，必须先经 `PartyManager.remove_member()`。
+- `PartyManager.add_member()` 是转队的唯一入口：先完成部队/单位存在性与阵营校验，再从所有其他部队成员列表移除，最后加入目标部队并更新 `current_party_id`。
+- 重复加入同一部队不重复写入；同一部队成员列表中的重复项会被归一化为一条。
+- 本阶段要求单位与部队 `faction_id` 相等，跨阵营加入直接拒绝。
+- `remove_party()` 清空所有指向该部队的 `current_party_id`，单位保留在 `UnitManager`。
+
+**原因：** 保持“一个单位最多属于一支部队”和双向归属一致；避免重复 ID 静默覆盖与删除单位后留下悬空成员引用。
+
+**影响：** 删除单位必须先处理归属；跨阵营招募需要未来新增专门接口，不能绕过 `add_member()`；`remove_unit` / `remove_party` 改为返回 `bool`。
+
+---
+
+## D025 · 读档后校验士兵-部队成员关系
+
+**日期：** 2026-11-20
+**状态：** 已确定
+
+**决策：**
+
+- `PartyManager.validate_membership_consistency()` 返回错误描述列表，检查：
+  1. 每个成员 ID 都有对应 `UnitData`；
+  2. 每个非空 `current_party_id` 都有对应 `PartyData`；
+  3. 一个单位最多出现在一支部队的成员列表中；
+  4. `current_party_id` 与所在部队成员列表双向一致（含同一列表内重复项）。
+- `WorldContext.load_from_save_data()` 在两个仓储恢复完成后调用校验；失败时逐条 `push_error` 并返回 `false`。
+- 本阶段不自动修复：无法确定原始数据意图时，保留读入状态并拒绝进入游戏，避免擅自改写存档。
+
+**原因：** 两个管理器各自反序列化成功，不代表跨实体引用正确；静默修复可能掩盖存档损坏。
+
+**影响：** 损坏成员关系的存档无法加载，需要后续显式迁移/修复工具；其他实体引用（阵营、地点、领主）尚未纳入同一校验入口。
+
+---
+
+## D026 · StatCalculator 作为属性初始化的唯一入口
+
+**日期：** 2026-11-20
+**状态：** 已确定
+
+**决策：**
+
+- `UnitManager.create_unit()` 只负责身份、配置引用、阵营、装备与注册；基础属性统一调用 `StatCalculator.apply_to_unit()`。
+- 当前 `compute_final_stats()` 直接复制 `UnitConfig` 的 `base_max_hp` / `base_attack` / `attack_interval` / `move_speed` / `attack_range`。
+- `apply_to_unit()` 写入属性缓存并只对 `current_hp` 做上限 clamp；出生满血由 `UnitManager` 显式设置。
+- 等级成长与装备加成暂不实现，接口参数保留。
+
+**原因：** 避免 `UnitManager` 与 `StatCalculator` 各维护一套属性规则，导致后续成长/装备系统接入时出现两套真实来源。
+
+**影响：** 所有运行时属性重算必须经过 `StatCalculator`；新增属性先扩展该接口，再接入调用方。

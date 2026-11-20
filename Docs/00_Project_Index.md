@@ -1,6 +1,6 @@
 # 我的骑砍 · 项目总索引
 
-**文档版本：** V0.3（架构基线）
+**文档版本：** V0.5（Milestone 2 Step 1 完成）
 **更新日期：** 2026-11-20
 **引擎：** Godot 4.6.1 / GDScript
 **源规划：** [2D 中世纪沙盒战略游戏核心架构设计与开发规划 V0.2](../md/2D%20中世纪沙盒战略游戏核心架构设计与开发规划.md)
@@ -40,6 +40,7 @@ WorldContext（一局游戏，跨场景常驻）
 ├── IdGenerator
 ├── UnitManager
 ├── PartyManager
+├── SettlementManager
 ├── WorldMapManager
 ├── AIManager
 ├── BattleManager
@@ -93,6 +94,7 @@ WorldContext（一局游戏，跨场景常驻）
 3. 阅读任务对应的系统文档。
 4. 检查相关代码与 `Technical_Decisions.md`。
 5. 写出本次改动的接口、数据结构与验收方式，再动手。
+6. 按改动影响确定测试级别（L1–L4），明确将执行和明确不执行的测试。
 
 开发后：
 
@@ -101,15 +103,18 @@ WorldContext（一局游戏，跨场景常驻）
 3. 记录重要架构变化与技术决策。
 4. 更新 `Known_Issues.md` 与 `04_Change_Log.md`。
 5. 检查本索引的导航是否需要调整。
+6. 汇报实际执行的测试、结果与未验证的关联风险。
 
 规则：禁止让不同 Markdown 文件长期保存互相矛盾的设计。冲突处理见 [01_Core_Architecture.md](01_Core_Architecture.md) 第 12 节。
 
 ## 6. 当前状态快照
 
-- 阶段 0：进行中。文档体系、目录骨架、5 个 Autoload 骨架、实体数据类、JSON 存档基础接口已完成。
-- 阶段 1–7：未开始。
-- 最近验证：`Tests/SystemTests/skeleton_smoke_test.tscn` 全部通过（时间 tick、实体序列化、存档往返、WorldContext 装配）。
-- 下一步：完成主菜单启动流程、WorldContext ↔ SaveData 聚合、读档重建。
+- 阶段 0：完成。
+- 阶段 1（Milestone 1）：完成。主菜单、初始世界、大地图移动、时间控制、地点交互、保存/读取闭环已实现。
+- 阶段 2：部分完成。世界固定 tick 与直线移动已接入，视野、NPC 自主行为、遭遇检测仍待开发。
+- 阶段 3：部分完成（Milestone 2 Step 1）。士兵创建、兵种配置、成员增删/转队、属性初始化、读档成员校验已实现；表现与战斗未开始。
+- 阶段 4–7：未开始。
+- 最近验证：4 个士兵/部队单元测试、冒烟测试、Milestone 1 数据测试全部通过。
 
 详见 [Development/Current_Status.md](Development/Current_Status.md)。
 
@@ -125,6 +130,19 @@ WorldContext（一局游戏，跨场景常驻）
 # 无头导入
 Godot_v4.6.1-stable_win64.exe --headless --path . --import
 
-# 冒烟测试
+# 士兵/部队数据层单元测试
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/unit_manager_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/party_manager_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/stat_calculator_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/unit_party_serialization_test.tscn
+
+# 系统测试套件
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/skeleton_smoke_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/milestone1_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/milestone1_flow_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/main_menu_ui_test.tscn
+
+# 跨进程存档：先保存退出，再新进程读取
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/milestone1_restart_test.tscn -- save
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/milestone1_restart_test.tscn -- load
 ```

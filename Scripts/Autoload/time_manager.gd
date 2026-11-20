@@ -69,6 +69,10 @@ func get_effective_world_scale() -> float:
 	return _base_world_speed
 
 
+func get_base_world_speed() -> float:
+	return _base_world_speed
+
+
 func set_base_world_speed(speed: float) -> void:
 	if speed != SPEED_PAUSED and speed != SPEED_NORMAL and speed != SPEED_DOUBLE:
 		push_warning("无效的大地图时间倍率: %s（仅允许 0 / 1 / 2）" % speed)
@@ -77,6 +81,20 @@ func set_base_world_speed(speed: float) -> void:
 		return
 	_base_world_speed = speed
 	_emit_speed_changed()
+
+
+## 读档时恢复世界累计时间与基础倍率。暂停原因由 GameManager 负责清理。
+func restore_world_time(total_seconds: float, base_speed: float) -> void:
+	world_elapsed_seconds = maxf(0.0, total_seconds)
+	_world_accumulator = 0.0
+	_battle_mode_active = false
+	_base_world_speed = base_speed
+	if _base_world_speed != SPEED_PAUSED \
+			and _base_world_speed != SPEED_NORMAL \
+			and _base_world_speed != SPEED_DOUBLE:
+		_base_world_speed = SPEED_PAUSED
+	_emit_speed_changed()
+	world_time_changed.emit(world_elapsed_seconds)
 
 
 func set_battle_mode(active: bool) -> void:

@@ -2,7 +2,7 @@
 
 **核心数据：** `Scripts/Entities/Party/party_data.gd`
 **核心逻辑：** `Scripts/Core/World/party_manager.gd`
-**状态：** 数据与成员管理已实现，移动/AI/UI 未实现
+**状态：** 数据、成员管理（含转队与读档校验）、初始部队与大地图移动已实现；部队 AI/UI 未实现
 
 ---
 
@@ -48,7 +48,13 @@ party.member_unit_ids.has(unit.unit_id)
 - 加入/离开部队只能通过 `PartyManager.add_member()` / `remove_member()`。
 - 不允许其他系统直接 append/erase `member_unit_ids`。
 - 单位转队时 `unit_id` 不变，只改归属。
-- 部队解散时，成员 `current_party_id` 清空。
+- 部队解散时，成员 `current_party_id` 清空，`UnitData` 保留。
+- 一个单位最多属于一支部队：加入新部队前先从所有其他部队移除。
+- 重复加入同一部队不产生重复成员。
+- 本阶段要求单位与部队 `faction_id` 相等；跨阵营加入被拒绝。
+- 转队在全部校验通过后一次性修改两个方向，避免只移除旧归属的半转移状态。
+- 新增部队时不允许覆盖已存在的 `party_id`；读档遇到重复 ID 报错并跳过。
+- 读档后由 `validate_membership_consistency()` 校验双向归属，见第 4.1 节。
 
 ## 4. PartyManager API
 
@@ -56,17 +62,37 @@ party.member_unit_ids.has(unit.unit_id)
 |---|---|
 | `setup(unit_manager, id_generator)` | 装配 |
 | `create_party(faction_id, position, name)` | 创建部队 |
-| `add_party(party)` | 加入仓储 |
-| `get_party(party_id)` | 查询 |
-| `remove_party(party_id)` | 解散并清理成员归属 |
-| `add_member(party_id, unit_id)` | 加入成员 |
-| `remove_member(party_id, unit_id)` | 移除成员 |
-| `get_units_of_party(party_id)` | 获取成员数据 |
-| `to_dict()` / `load_from_dict()` | 存档序列化 |
+| `add_party(party) -> String` | 加入仓储；重复 ID 拒绝并返回空字符串 |
+| `get_party(party_id)` / `has_party(party_id)` | 查询 |
+| `remove_party(party_id) -> bool` | 解散，清空成员与悬空归属，单位保留 |
+| `add_member(party_id, unit_id) -> bool` | 加入或转队；校验存在性与阵营，失败不改数据 |
+| `transfer_member(unit_id, target_party_id) -> bool` | 转队，内部复用 `add_member` |
+| `remove_member(party_id, unit_id) -> bool` | 移除成员并清空归属；单位保留 |
+| `get_member_ids(party_id)` / `get_units_of_party(party_id)` | 获取成员 ID / 数据 |
+| `validate_membership_consistency() -> Array[String]` | 双向归属校验，空列表表示通过 |
+| `to_dict()` / `load_from_dict()` | 存档序列化；读档重复 ID 报错并跳过 |
+
+### 4.1 读档成员关系校验
+
+`WorldContext.load_from_save_data()` 在 `UnitManager` 与 `PartyManager` 都恢复完成后调用
+`validate_membership_consistency()`，检查：
+
+1. 每个成员 ID 都能找到对应 `UnitData`。
+2. 每个非空 `current_party_id` 都能找到对应 `PartyData`。
+3. 一个单位最多出现在一支部队的成员列表中（同一列表内也不得重复）。
+4. `UnitData.current_party_id` 与 `PartyData.member_unit_ids` 双向一致。
+
+失败处理：逐条 `push_error` 后返回 `false`，拒绝进入游戏；不自动修复或改写存档数据（D025）。
 
 ## 5. 移动速度
 
-初期使用简单值：`PartyData.movement_speed`。
+Milestone 1 使用简单固定值：
+
+| 部队 | 初始位置 | 速度（像素/游戏秒） |
+|---|---|---|
+| 玩家部队 | (760, 620) | 300 |
+| 河畔商队 | (900, 1500) | 220 |
+| 北境巡逻队 | (2350, 1100) | 220 |
 
 后续考虑：
 
@@ -79,7 +105,7 @@ party.member_unit_ids.has(unit.unit_id)
 
 公式在阶段 2 确定，并写入本文件。
 
-## 6. 部队管理 UI
+## 6. 部队管理 UI（TODO 阶段 3）
 
 ```text
 点击大地图部队按钮
@@ -128,14 +154,24 @@ party.member_unit_ids.has(unit.unit_id)
 |---|---|
 | `PartyData` 与序列化 | 已实现 |
 | 成员增删与双向一致 | 已实现 |
-| 创建部队 | 已实现基础版 |
-| 移动速度公式 | TODO(阶段2) |
+| 创建部队 | 已实现 |
+| 初始玩家/NPC 部队 | 已实现 |
+| 大地图直线移动 | 已实现 |
+| 移动速度公式 | 固定值（阶段 2 再扩展） |
+| 转队与重复成员防护 | 已实现（D024） |
+| 重复部队 ID 防护 | 已实现（D024） |
+| 读档成员关系校验 | 已实现（D025） |
+| 非跨阵营成员规则 | 已实现；跨阵营流程未实现（KI119） |
+| 部队 AI | 未实现（阶段 2/5） |
 | 部队管理 UI | TODO(阶段3) |
 | 编队 | TODO(阶段6) |
 | 拆分/合并 | TODO(阶段7) |
 
+初始玩家/NPC 部队目前仍不生成真实士兵成员（`member_unit_ids` 为空）；士兵数据层与成员管理已可用，招募/初始化流程留待后续（KI115）。
+
 ## 11. 待确认
 
 - 玩家部队上限与部队规模上限。
-- 部队解散时单位的去向（回城/消失/加入其他部队）。
+- 跨阵营招募、俘虏、叛变与雇佣兵的归属变更流程（KI119）。
 - 军团系统是否在阶段 7 前提供最小接口。
+- 移动速度公式与负重/骑兵比例的关系。

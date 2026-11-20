@@ -1,7 +1,7 @@
 # 场景系统
 
 **核心脚本：** `Scripts/Autoload/scene_manager.gd`
-**状态：** 基础切换已实现，场景内容未实现
+**状态：** MainMenu 与 WorldMap 已实现；小场景仍为占位
 
 ---
 
@@ -40,7 +40,20 @@ GameplayScene (Node2D)
 └── SceneUI (CanvasLayer)
 ```
 
-大地图场景可以有不同结构，但必须遵守“表现读取数据，不写权威数据”。
+Milestone 1 大地图实际结构：
+
+```text
+WorldMap (Node2D)
+├── MapBackground (Node2D，程序绘制)
+├── WorldEntities (Node2D，Y 排序)
+│   ├── PartyIcon_*
+│   └── SettlementIcon_*
+├── Camera2D
+└── UI (CanvasLayer，由脚本构建)
+    └── WorldMapUI
+```
+
+大地图 UI 通过 `world_map.gd` 程序化构建，关键控件设置稳定名称以便测试。UI 根节点 `mouse_filter = IGNORE`，地图点击由 `_unhandled_input` 接收。
 
 ## 4. 生命周期
 
@@ -62,6 +75,13 @@ GameplayScene (Node2D)
 5. 返回大地图，恢复进入前的时间倍率。
 
 进入前的大地图倍率由 `GameManager` 保存/恢复，不由场景自己决定。
+
+Milestone 1 已验证：
+
+- New Game 创建 `WorldContext` 后进入 WorldMap。
+- 返回主菜单会销毁 `WorldContext`，不残留旧场景节点。
+- 读档会重建 `WorldContext` 并进入 WorldMap。
+- 场景切换不会重复创建 Autoload。
 
 ### 4.3 场景切换与 WorldContext
 
@@ -103,9 +123,11 @@ GameplayScene (Node2D)
 |---|---|
 | 场景路径常量 | 已实现 |
 | `change_scene` | 已实现（无过渡动画） |
-| 场景占位文件 | 已创建 |
-| 场景内容 | 未开始 |
-| 加载画面/过渡 | TODO(阶段1+) |
+| MainMenu | 已实现（新游戏/继续/读取/设置/退出） |
+| WorldMap | 已实现（地图/图标/时间/交互/保存） |
+| Village / Town / Castle | 空场景占位 |
+| BattleScene | 空场景占位 |
+| 加载画面/过渡 | TODO |
 | 异步加载 | TODO |
 
 ## 9. 扩展方向
@@ -114,3 +136,4 @@ GameplayScene (Node2D)
 - 场景切换淡入淡出。
 - 小场景内返回大地图的统一入口。
 - 场景对象池（大量单位时）。
+- 大地图 UI 迁移为可编辑场景（当前为程序化构建）。

@@ -2,7 +2,7 @@
 
 **核心数据：** `Scripts/Entities/Unit/unit_data.gd`、`Scripts/Config/unit_config.gd`
 **核心逻辑：** `Scripts/Core/World/unit_manager.gd`、`Scripts/Core/Gameplay/stat_calculator.gd`
-**状态：** 数据骨架完成，表现与控制未实现
+**状态：** 数据层完成（创建、查询、删除约束、属性初始化、存档）；表现与控制未实现
 
 ---
 
@@ -42,6 +42,31 @@
 - 最终属性 = 等级基础属性 + 装备加成 + 其他加成。
 - 最终属性可以缓存在 `UnitData` 中，但必须能通过 `StatCalculator` 重算。
 - 不允许把最终属性写回 `UnitConfig`。
+
+### 3.1 示例兵种（数据层验证用）
+
+| 文件 | `config_id` | 名称 | HP | 攻击 | 攻击间隔 | 移速 | 射程 |
+|---|---|---|---|---|---|---|---|
+| `Data/Units/infantry_militia.tres` | `infantry_militia` | 民兵 | 30 | 5 | 1.2 | 60 | 20 |
+| `Data/Units/infantry_trained.tres` | `infantry_trained` | 职业步兵 | 45 | 8 | 1.0 | 55 | 20 |
+
+### 3.2 当前属性初始化规则（Milestone 2 Step 1）
+
+`StatCalculator` 是运行时属性的唯一计算入口：
+
+- `compute_final_stats(unit, config)` 返回 `max_hp` / `attack` / `attack_interval` / `move_speed` / `attack_range`。
+- 当前直接取 `UnitConfig` 的 `base_*` 静态值；等级成长与装备加成尚未实现（KI120）。
+- `apply_to_unit(unit, config)` 写入属性缓存，只对 `current_hp` 做上限 clamp，不重置当前生命。
+- `UnitManager.create_unit()` 调用 `apply_to_unit()` 后显式设置 `current_hp = max_hp`，并清空 `current_party_id`。
+
+### 3.3 UnitManager 数据安全规则
+
+- 每个 `UnitData` 是独立实例，ID 由 `IdGenerator` 生成。
+- `add_unit()` 遇到已存在 ID 时拒绝注册并返回空字符串，不覆盖原单位。
+- `remove_unit()` 在 `current_party_id` 非空时拒绝删除；必须先经 `PartyManager.remove_member()`。
+- `remove_unit()` 成功返回 `true`，单位不存在或仍被部队引用返回 `false`。
+- `load_from_dict()` 遇到重复单位 ID 时报告错误并跳过后续记录，避免静默覆盖。
+- 单位归属只由 `PartyManager` 写入；`UnitManager` 不修改 `PartyData`。
 
 ## 4. 表现层
 
@@ -159,11 +184,16 @@ Idle
 |---|---|
 | `UnitData` 与序列化 | 已实现 |
 | `UnitConfig` | 已实现 |
-| `UnitManager` 生成单位 | 已实现基础版 |
-| `StatCalculator` | TODO(阶段3) |
+| 两种示例兵种 `.tres` | 已实现 |
+| `UnitManager` 生成单位 | 已实现：独立实例、唯一 ID、满血出生 |
+| 重复 ID 防护 | 已实现：`add_unit` 拒绝覆盖，读档跳过重复并报错 |
+| 删除归属约束 | 已实现：已归属单位禁止直接删除 |
+| `StatCalculator` | 基础实现：复制配置属性；等级成长/装备加成 TODO(阶段3) |
+| 成员归属 | 由 `PartyManager` 维护，见 [Party_System.md](Party_System.md) |
 | `UnitController` | TODO(阶段3) |
 | 部件视觉与动画 | TODO(阶段3) |
 | 攻击/受击/死亡 | TODO(阶段3) |
+| 初始世界/招募生成士兵 | TODO(阶段3) |
 
 ## 9. 待确认
 
@@ -171,3 +201,6 @@ Idle
 - 纵向移动速度是否低于横向。
 - 单位碰撞层与阵营过滤的具体配置。
 - 大量单位时是否使用对象池。
+- 等级成长公式与装备加成上限（KI120）。
+- 跨阵营招募、俘虏与叛变的单位归属规则（KI119）。
+- `joined_at_game_time` / 招募来源字段的实际写入时机。

@@ -38,30 +38,95 @@ func enter_main_menu() -> void:
 	SceneManager.change_scene(SceneManager.MAIN_MENU_SCENE)
 
 
-## 阶段 0 只建立世界上下文与场景入口；初始数据在阶段 1 补充。
-func start_new_game() -> void:
+## 新游戏：创建初始世界数据并进入大地图。进入大地图后默认暂停。
+func start_new_game() -> bool:
 	_teardown_world()
 	TimeManager.clear_pauses()
 	TimeManager.start_session()
 	TimeManager.set_base_world_speed(TimeManager.SPEED_PAUSED)
 
-	world_context = WorldContext.new()
-	world_context.name = "WorldContext"
-	add_child(world_context)
+	var context := WorldContext.new()
+	context.name = "WorldContext"
+	add_child(context)
+	world_context = context
 
+	if not WorldInitializer.create_new_world(context):
+		push_error("初始世界数据创建失败")
+		_teardown_world()
+		TimeManager.stop_session()
+		return false
+
+	player_party_id = context.player_party_id
 	_set_game_state(GameState.IN_GAME)
 	EventBus.game_session_started.emit()
-	SceneManager.change_scene(SceneManager.WORLD_MAP_SCENE)
+
+	var error: Error = SceneManager.change_scene(SceneManager.WORLD_MAP_SCENE)
+	if error != OK:
+		_teardown_world()
+		TimeManager.stop_session()
+		return false
+	return true
 
 
-## TODO(阶段0)：由 SaveManager 读取存档后重建 WorldContext。
-func load_game(_slot_name: String) -> bool:
-	push_warning("GameManager.load_game 尚未实现")
-	return false
+## 读档是 Continue 与 Load Game 共用的唯一恢复入口。
+func load_game(slot_name: String) -> bool:
+	var save := SaveManager.load_game(slot_name)
+	if save == null:
+		return false
+
+	_teardown_world()
+	TimeManager.clear_pauses()
+	TimeManager.start_session()
+
+	var context := WorldContext.new()
+	context.name = "WorldContext"
+	add_child(context)
+	world_context = context
+
+	if not context.load_from_save_data(save):
+		push_error("存档数据不完整，无法恢复世界: %s" % slot_name)
+		_teardown_world()
+		TimeManager.stop_session()
+		return false
+
+	player_party_id = context.player_party_id
+	TimeManager.restore_world_time(save.world_elapsed_seconds, save.world_base_speed)
+	_set_game_state(GameState.IN_GAME)
+	EventBus.game_session_started.emit()
+
+	var error: Error = SceneManager.change_scene(SceneManager.WORLD_MAP_SCENE)
+	if error != OK:
+		_teardown_world()
+		TimeManager.stop_session()
+		return false
+	return true
+
+
+func continue_game() -> bool:
+	var slot_name: String = SaveManager.get_latest_save_slot()
+	if slot_name.is_empty():
+		return false
+	return load_game(slot_name)
+
+
+## 由 UI 调用；只聚合与写盘，不改变当前运行状态。
+func save_game(slot_name: String) -> Error:
+	if world_context == null:
+		return ERR_UNCONFIGURED
+	if not world_context.is_valid_world():
+		push_error("当前世界数据不完整，拒绝保存")
+		return ERR_INVALID_DATA
+	return SaveManager.save_game(slot_name, world_context.to_save_data())
+
+
+func has_active_world() -> bool:
+	return world_context != null and world_context.is_valid_world()
 
 
 func enter_game_world(context: WorldContext) -> void:
 	world_context = context
+	if context != null:
+		player_party_id = context.player_party_id
 	_set_game_state(GameState.IN_GAME)
 
 
@@ -71,11 +136,21 @@ func quit_game() -> void:
 
 
 func _teardown_world() -> void:
+	var had_world := world_context != null
+	_destroy_world_context()
+	if had_world:
+		EventBus.game_session_ended.emit()
+
+
+func _destroy_world_context() -> void:
 	if is_instance_valid(world_context):
-		world_context.queue_free()
+		if world_context.get_parent() == self:
+			remove_child(world_context)
+		# 同步释放，确保旧 WorldSimulation 立刻断开 world_tick，
+		# 避免新旧世界同时接收 tick。
+		world_context.free()
 	world_context = null
 	player_party_id = ""
-	EventBus.game_session_ended.emit()
 
 
 func _set_game_state(new_state: GameState) -> void:

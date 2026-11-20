@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="UnitConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/unit_config.gd" id="1_unitconfig"]
+
+[resource]
+script = ExtResource("1_unitconfig")
+config_id = "infantry_trained"
+display_name = "职业步兵"
+description = "经过训练的正规步兵。属性仅用于数据层验证。"
+unit_class = 0
+is_mounted = false
+base_level = 1
+base_max_hp = 45
+base_attack = 8
+attack_interval = 1.0
+attack_range = 20.0
+move_speed = 55.0
+visual_scene_path = ""
+recruit_cost = 0
+default_equipment = {}
