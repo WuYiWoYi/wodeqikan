@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="AppearanceConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/appearance_config.gd" id="1_appearanceconfig"]
+
+[resource]
+script = ExtResource("1_appearanceconfig")
+tier1_helmet_texture_paths = Array[String](["res://art/正式人物美术/头盔美术/头盔_1级_样式1.png"])
+tier2_helmet_texture_paths = Array[String](["res://art/正式人物美术/头盔美术/头盔_2级_样式1.png", "res://art/正式人物美术/头盔美术/头盔_2级_样式2.png", "res://art/正式人物美术/头盔美术/头盔_2级_样式3.png", "res://art/正式人物美术/头盔美术/头盔_2级_样式4.png", "res://art/正式人物美术/头盔美术/头盔_2级_样式5.png"])
+tier3_helmet_texture_paths = Array[String](["res://art/正式人物美术/头盔美术/头盔_3级_样式1.png", "res://art/正式人物美术/头盔美术/头盔_3级_样式2.png", "res://art/正式人物美术/头盔美术/头盔_3级_样式3.png", "res://art/正式人物美术/头盔美术/头盔_3级_样式4.png", "res://art/正式人物美术/头盔美术/头盔_3级_样式5.png"])
+tier1_primary_tabard_chance = 0.2
+tier2_primary_tabard_chance = 0.5
+tier3_primary_tabard_chance = 1.0

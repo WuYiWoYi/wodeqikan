@@ -33,6 +33,8 @@ const BODY_WEAPON_ANCHOR_DESIGN := Vector2(33.0, 18.0)
 ## 设计稿身体锚点 (33,18)（左下角原点）→ 素材左上角 (33,78)
 ## → 以脚底中心为原点的画布坐标 (33-24, 78-92) = (9,-14)。
 const BODY_WEAPON_ANCHOR := Vector2(9.0, -14.0)
+## 左手武器枢轴；右侧对称位置，用于盾牌等副手装备。
+const LEFT_HAND_WEAPON_ANCHOR := Vector2(-9.0, -14.0)
 
 ## 长矛动画参数集中配置。
 const SPEAR_IDLE_ROTATION: float = 0.0
@@ -90,6 +92,7 @@ enum AnimationPhase {
 }
 
 var _weapon_pivot: Node2D = null
+var _left_hand_weapon_pivot: Node2D = null
 var _upper_body: Node2D = null
 var _mounted: bool = false
 var _plume_texture_path: String = PLUME_TEXTURE_PATH
@@ -104,10 +107,15 @@ var _weapon_sway_target: float = 0.0
 var _weapon_sway_current: float = 0.0
 
 
-func rebuild(faction_color: Color, plume_texture_path: String = PLUME_TEXTURE_PATH) -> void:
+func rebuild(
+	faction_color: Color,
+	plume_texture_path: String = PLUME_TEXTURE_PATH,
+	tabard_texture_path: String = ""
+) -> void:
 	_plume_texture_path = plume_texture_path
 	clear_parts()
 	_weapon_pivot = null
+	_left_hand_weapon_pivot = null
 	_upper_body = null
 	_attack_phase = AnimationPhase.IDLE
 	_phase_time = 0.0
@@ -132,19 +140,26 @@ func rebuild(faction_color: Color, plume_texture_path: String = PLUME_TEXTURE_PA
 	lower_part_pivot("LegRight", LEG_PIVOT_DROP_Y)
 
 	_add_sprite("Body", BODY_PATH, Layers.BODY, _upper_body)
-	_add_tabard(faction_color, _upper_body)
+	_add_tabard(faction_color, _upper_body, tabard_texture_path)
 
 	# 武器枢轴：矛身绕该点旋转，枢轴位置与人物身体固定对齐。
 	_weapon_pivot = Node2D.new()
 	_weapon_pivot.name = "WeaponPivot"
 	_weapon_pivot.position = BODY_WEAPON_ANCHOR
-	_weapon_pivot.z_index = Layers.WEAPON
+	_weapon_pivot.z_index = Layers.RIGHT_HAND_WEAPON
 	_upper_body.add_child(_weapon_pivot)
 	var spear_anchor := Vector2(
 		SPEAR_PIVOT_FROM_BOTTOM_LEFT.x,
 		SPEAR_TEXTURE_SIZE.y - SPEAR_PIVOT_FROM_BOTTOM_LEFT.y
 	)
 	_add_sprite("Weapon", WEAPON_SPEAR_PATH, 0, _weapon_pivot, spear_anchor)
+
+	# 左手武器使用独立枢轴与独立层级；默认没有贴图，等待装备配置注入。
+	_left_hand_weapon_pivot = Node2D.new()
+	_left_hand_weapon_pivot.name = "LeftHandWeaponPivot"
+	_left_hand_weapon_pivot.position = LEFT_HAND_WEAPON_ANCHOR
+	_left_hand_weapon_pivot.z_index = Layers.LEFT_HAND_WEAPON
+	_upper_body.add_child(_left_hand_weapon_pivot)
 
 	_add_sprite("Head", HEAD_PATH, Layers.HEAD, _upper_body)
 	if not _plume_texture_path.is_empty():
@@ -170,13 +185,106 @@ func is_mounted_visual() -> bool:
 ## 仅隐藏/显示武器表现；不修改 UnitData 的装备数据。
 ## 村庄场景用它在本次场景中显示“未持武器”的玩家。
 func set_weapon_visible(value: bool) -> void:
-	if _weapon_pivot == null:
-		return
-	_weapon_pivot.visible = value
+	if _weapon_pivot != null:
+		_weapon_pivot.visible = value
+	if _left_hand_weapon_pivot != null:
+		_left_hand_weapon_pivot.visible = value
 
 
 func is_weapon_visible() -> bool:
 	return _weapon_pivot != null and _weapon_pivot.visible
+
+
+## 右手武器贴图/层级覆盖；空路径恢复默认长矛。攻击动画仍使用同一枢轴。
+func set_right_hand_weapon_texture(
+	texture_path: String,
+	layer_override: int = 0,
+	anchor_pixels: Vector2 = Vector2(-1.0, -1.0)
+) -> bool:
+	if _weapon_pivot == null:
+		return false
+	remove_part("Weapon")
+	var resolved_path: String = (
+		texture_path if not texture_path.is_empty() else WEAPON_SPEAR_PATH
+	)
+	var resolved_layer: int = (
+		layer_override if layer_override != 0 else Layers.RIGHT_HAND_WEAPON
+	)
+	_weapon_pivot.z_index = resolved_layer
+	var resolved_anchor := anchor_pixels
+	if resolved_anchor.x < 0.0 or resolved_anchor.y < 0.0:
+		resolved_anchor = Vector2(
+			SPEAR_PIVOT_FROM_BOTTOM_LEFT.x,
+			SPEAR_TEXTURE_SIZE.y - SPEAR_PIVOT_FROM_BOTTOM_LEFT.y
+		)
+	var created := _add_sprite(
+		"Weapon", resolved_path, 0, _weapon_pivot, resolved_anchor
+	)
+	if created != null:
+		return true
+	# 自定义武器素材缺失时回退到默认长矛，避免单位完全失去右手武器。
+	_weapon_pivot.z_index = Layers.RIGHT_HAND_WEAPON
+	var fallback_anchor := Vector2(
+		SPEAR_PIVOT_FROM_BOTTOM_LEFT.x,
+		SPEAR_TEXTURE_SIZE.y - SPEAR_PIVOT_FROM_BOTTOM_LEFT.y
+	)
+	return _add_sprite(
+		"Weapon", WEAPON_SPEAR_PATH, 0, _weapon_pivot, fallback_anchor
+	) != null
+
+
+## 左手武器；默认层级低于马头。空路径表示不显示。
+func set_left_hand_weapon_texture(
+	texture_path: String,
+	layer_override: int = 0,
+	anchor_pixels: Vector2 = Vector2(-1.0, -1.0)
+) -> bool:
+	remove_part("LeftHandWeapon")
+	if _left_hand_weapon_pivot == null or texture_path.is_empty():
+		return false
+	_left_hand_weapon_pivot.z_index = (
+		layer_override if layer_override != 0 else Layers.LEFT_HAND_WEAPON
+	)
+	return _add_sprite(
+		"LeftHandWeapon", texture_path, 0, _left_hand_weapon_pivot, anchor_pixels
+	) != null
+
+
+func clear_left_hand_weapon() -> void:
+	remove_part("LeftHandWeapon")
+
+
+## 头盔是独立装备部件；人物头部始终保留，不会被头盔替代。
+func set_helmet_texture(
+	texture_path: String,
+	layer_override: int = 0,
+	anchor_pixels: Vector2 = Vector2(-1.0, -1.0)
+) -> bool:
+	remove_part("Helmet")
+	if texture_path.is_empty() or _upper_body == null:
+		return false
+	var layer: int = layer_override if layer_override != 0 else Layers.HELMET
+	return _add_sprite("Helmet", texture_path, layer, _upper_body, anchor_pixels) != null
+
+
+func clear_helmet() -> void:
+	remove_part("Helmet")
+
+
+func has_left_hand_weapon() -> bool:
+	return has_part("LeftHandWeapon")
+
+
+func has_helmet() -> bool:
+	return has_part("Helmet")
+
+
+func has_head() -> bool:
+	return has_part("Head")
+
+
+func get_left_hand_weapon_pivot() -> Node2D:
+	return _left_hand_weapon_pivot
 
 
 ## 由 UnitVisual 统一驱动的待机/跑动动画。
@@ -212,13 +320,17 @@ func update_locomotion(
 		+ sin(run_phase) * RUN_TILT_AMPLITUDE * b
 	)
 
-	# 头部跟随身体，同时保留极小幅度的独立摆动；待机时也不完全静止。
+	# 头部跟随身体，同时保留极小幅度的独立摆动；头盔与头部同步旋转。
+	var head_sway: float = (
+		sin(idle_phase * 0.75) * IDLE_HEAD_SWAY * (1.0 - b)
+		+ sin(run_phase * 1.4 + 0.4) * RUN_HEAD_SWAY * b
+	)
 	var head := get_part("Head")
 	if head != null:
-		head.rotation = (
-			sin(idle_phase * 0.75) * IDLE_HEAD_SWAY * (1.0 - b)
-			+ sin(run_phase * 1.4 + 0.4) * RUN_HEAD_SWAY * b
-		)
+		head.rotation = head_sway
+	var helmet := get_part("Helmet")
+	if helmet != null:
+		helmet.rotation = head_sway
 
 	# 左右腿使用同一振幅、相反相位的步态：一腿前摆时另一腿后摆。
 	# 只有向前摆动的腿轻微抬起，另一条腿保持接地，避免出现“瘸腿”或陷地。
@@ -395,7 +507,18 @@ func _ease(t: float) -> float:
 	return t * t * (3.0 - 2.0 * t)
 
 
-func _add_tabard(faction_color: Color, parent: Node) -> void:
+func _add_tabard(
+	faction_color: Color, parent: Node, tabard_texture_path: String = ""
+) -> void:
+	# 家族罩袍是完整贴图，直接叠在身体前方；没有家族贴图时继续使用
+	# 临时身体贴图 + 阵营色着色，保持原有普通士兵外观。
+	if not tabard_texture_path.is_empty():
+		var family_tabard := _add_sprite(
+			"Tabard", tabard_texture_path, Layers.TABARD, parent
+		)
+		if family_tabard != null:
+			return
+
 	var tabard := _add_sprite("Tabard", BODY_PATH, Layers.TABARD, parent)
 	if tabard == null:
 		return

@@ -34,9 +34,46 @@ enum PartyAIType {
 	GUARD,
 }
 
+## 部队控制类型：玩家输入或 NPC AI。
+## 控制类型只决定“谁下达指令”，与阵营、家族、领袖身份相互独立。
+enum ControlType {
+	PLAYER,
+	AI,
+}
+
+## 部队类型标识：只用于初始配置、表现与对话文本选择。
+## 移动、成员、遭遇、战斗、结算与存档流程必须共用同一套 Party 架构。
+enum PartyKind {
+	GENERIC,
+	PLAYER,
+	FAMILY,
+	MERCHANT,
+	BANDIT,
+	GUARD,
+}
+
 var party_id: String = ""
 var party_name: String = ""
 var faction_id: String = ""
+## 所属家族（持久化）；空字符串表示无家族。
+## 家族只影响表现，不代表阵营关系。
+var family_id: String = ""
+## 部队控制类型（持久化）。玩家部队为 PLAYER，其余默认 AI。
+## 控制类型不参与阵营敌对判断，也不决定成员归属。
+var control_type: ControlType = ControlType.AI
+## 部队类型标识（持久化）；缺失时按阵营/家族/AI 类型安全推断。
+var party_kind: PartyKind = PartyKind.GENERIC
+## 部队旗帜贴图（持久化，可为空）。为空时大地图回退到家族旗帜。
+## 旗帜属于部队表现数据，新增部队类型不需要新的标记节点。
+var banner_texture_path: String = ""
+
+## 当前领袖的 UnitData.unit_id（持久化）。
+## 玩家身份、当前控制权和部队领袖是三个独立概念：
+## - is_player_character 表示“这是玩家角色”；
+## - BattleScene 的 controlled 表示“当前控制谁”；
+## - leader_unit_id 表示“这支部队的领袖是谁”。
+var leader_unit_id: String = ""
+## 旧领主字段保留用于兼容旧存档，当前阶段不参与逻辑。
 var leader_lord_id: String = ""
 
 var world_position: Vector2 = Vector2.ZERO
@@ -55,6 +92,9 @@ var battle_state: BattleState = BattleState.AVAILABLE
 var ai_type: PartyAIType = PartyAIType.NONE
 var ai_route_index: int = 0
 var ai_route_settlement_ids: Array[String] = []
+## 该部队专属的巡逻点（持久化）。为空时 AIManager 使用全局默认巡逻路线。
+## 家族骑士与新增强盗使用独立路线，避免写死在某张地图的 AI 代码中。
+var ai_patrol_points: Array[Vector2] = []
 
 ## 运行时攻击/拦截意图，不进入存档；由 AIManager 维护，供大地图遭遇判定使用。
 var attack_intent: bool = false
@@ -72,11 +112,61 @@ func is_available_for_world() -> bool:
 	return battle_state == BattleState.AVAILABLE
 
 
+func is_player_controlled() -> bool:
+	return control_type == ControlType.PLAYER
+
+
+## 稳定的类型键，供遭遇文本配置与 UI 显示使用。
+func get_kind_key() -> String:
+	match party_kind:
+		PartyKind.PLAYER:
+			return "PLAYER"
+		PartyKind.FAMILY:
+			return "FAMILY"
+		PartyKind.MERCHANT:
+			return "MERCHANT"
+		PartyKind.BANDIT:
+			return "BANDIT"
+		PartyKind.GUARD:
+			return "GUARD"
+		_:
+			return "GENERIC"
+
+
+## 读档后补齐旧存档缺失的控制类型与部队类型。
+## 只在类型为 GENERIC 时按现有字段推断，不覆盖已经持久化的明确类型；
+## 玩家部队的控制权始终以 player_party_id 为准。
+func apply_runtime_defaults(player_party_id: String) -> void:
+	if not player_party_id.is_empty() and party_id == player_party_id:
+		control_type = ControlType.PLAYER
+		party_kind = PartyKind.PLAYER
+		return
+
+	control_type = ControlType.AI
+	if party_kind != PartyKind.GENERIC:
+		return
+	if not family_id.is_empty():
+		party_kind = PartyKind.FAMILY
+	elif faction_id == FactionManager.BANDIT_FACTION_ID:
+		party_kind = PartyKind.BANDIT
+	elif faction_id == FactionManager.GUARD_FACTION_ID \
+			or ai_type == PartyAIType.GUARD:
+		party_kind = PartyKind.GUARD
+	elif faction_id == FactionManager.MERCHANT_FACTION_ID \
+			or ai_type == PartyAIType.TRADE_ROUTE:
+		party_kind = PartyKind.MERCHANT
+
+
 func to_dict() -> Dictionary:
 	return {
 		"party_id": party_id,
 		"party_name": party_name,
 		"faction_id": faction_id,
+		"family_id": family_id,
+		"control_type": int(control_type),
+		"party_kind": int(party_kind),
+		"banner_texture_path": banner_texture_path,
+		"leader_unit_id": leader_unit_id,
 		"leader_lord_id": leader_lord_id,
 		"world_position": [world_position.x, world_position.y],
 		"target_position": [target_position.x, target_position.y],
@@ -90,6 +180,7 @@ func to_dict() -> Dictionary:
 		"ai_type": int(ai_type),
 		"ai_route_index": ai_route_index,
 		"ai_route_settlement_ids": ai_route_settlement_ids.duplicate(),
+		"ai_patrol_points": _vector2_array_to_data(ai_patrol_points),
 	}
 
 
@@ -98,6 +189,17 @@ static func from_dict(data: Dictionary) -> PartyData:
 	party.party_id = str(data.get("party_id", ""))
 	party.party_name = str(data.get("party_name", ""))
 	party.faction_id = str(data.get("faction_id", ""))
+	party.family_id = str(data.get("family_id", ""))
+	var control_value: int = int(data.get("control_type", ControlType.AI))
+	if control_value < ControlType.PLAYER or control_value > ControlType.AI:
+		control_value = ControlType.AI
+	party.control_type = control_value as ControlType
+	var kind_value: int = int(data.get("party_kind", PartyKind.GENERIC))
+	if kind_value < PartyKind.GENERIC or kind_value > PartyKind.GUARD:
+		kind_value = PartyKind.GENERIC
+	party.party_kind = kind_value as PartyKind
+	party.banner_texture_path = str(data.get("banner_texture_path", ""))
+	party.leader_unit_id = str(data.get("leader_unit_id", ""))
 	party.leader_lord_id = str(data.get("leader_lord_id", ""))
 	party.world_position = _read_vector2(data.get("world_position", []))
 	party.target_position = _read_vector2(data.get("target_position", []))
@@ -126,7 +228,19 @@ static func from_dict(data: Dictionary) -> PartyData:
 		for value: Variant in route_values:
 			party.ai_route_settlement_ids.append(str(value))
 
+	var patrol_values: Variant = data.get("ai_patrol_points", [])
+	if patrol_values is Array:
+		for value: Variant in patrol_values:
+			party.ai_patrol_points.append(_read_vector2(value))
+
 	return party
+
+
+static func _vector2_array_to_data(points: Array[Vector2]) -> Array:
+	var result: Array = []
+	for point: Vector2 in points:
+		result.append([point.x, point.y])
+	return result
 
 
 static func _read_vector2(value: Variant) -> Vector2:

@@ -2,7 +2,7 @@
 
 **核心数据：** `Scripts/Entities/Party/party_data.gd`
 **核心逻辑：** `Scripts/Core/World/party_manager.gd`
-**状态：** 数据、成员管理（含转队与读档校验）、四方阵营初始部队、大地图移动/跟随、遭遇对话、战斗锁定、AI 行为、部队管理面板（查看/上马/下马/晋升）、金币与工资统计、士兵美术预览已实现
+**状态：** 数据、统一控制类型/部队类型标识、成员管理（含转队与读档校验）、四方阵营初始部队、大地图移动/跟随、底部 NPC 遭遇对话、战斗锁定、AI 行为、部队管理面板（查看/上马/下马/晋升）、金币与工资统计、士兵美术预览已实现
 
 ---
 
@@ -22,7 +22,12 @@
 | `party_id` | String | 唯一 ID，`PARTY_000001` |
 | `party_name` | String | 显示名 |
 | `faction_id` | String | 所属阵营 |
-| `leader_lord_id` | String | 领主 ID（玩家部队可为空） |
+| `family_id` | String | 所属家族；可为空，只影响表现，不代表阵营关系 |
+| `control_type` | enum | PLAYER / AI；决定由玩家输入还是 AIManager 下达指令 |
+| `party_kind` | enum | GENERIC / PLAYER / FAMILY / MERCHANT / BANDIT / GUARD；只用于配置、表现与对话文本 |
+| `banner_texture_path` | String | 部队旗帜贴图；为空时回退家族旗帜 |
+| `leader_unit_id` | String | 部队领袖的 `UnitData.unit_id`；玩家部队、家族部队与普通 NPC 均可拥有 |
+| `leader_lord_id` | String | 旧领主字段，保留用于兼容旧存档，不参与逻辑 |
 | `world_position` | Vector2 | 大地图坐标（像素） |
 | `target_position` | Vector2 | 移动目标 |
 | `movement_speed` | float | 像素 / 游戏秒 |
@@ -35,9 +40,24 @@
 | `ai_type` | enum | NONE / TRADE_ROUTE / PATROL / BANDIT / GUARD |
 | `ai_route_index` | int | 下一步要前往的路线点索引 |
 | `ai_route_settlement_ids` | Array[String] | 商队路线 / 强盗游荡点的 stable `settlement_id` 列表 |
-| `sight_range` | float | 视野半径；AI 与跟随可见性统一由 `VisionManager` 使用 |
+| `ai_patrol_points` | Array[Vector2] | 部队专属巡逻点；为空时使用 AIManager 全局路线 |
 | `attack_intent` | bool | 运行时攻击/拦截意图，不进入存档；由 AIManager 维护 |
 | `focus_party_id` | String | 玩家主动追逐/接近的目标部队；运行时，不进入存档 |
+
+### 2.1 统一部队架构
+
+玩家部队、家族部队、盗贼部队、商队与治安队共用同一个 `PartyData` / `PartyManager`：
+ID、成员、位置、速度、阵营、家族、旗帜、状态、路线、控制类型与领袖字段全部一致。
+类型差异只通过数据表达：
+
+- `control_type = PLAYER`：玩家输入；AIManager 跳过该部队。
+- `ai_type`：商队路线、巡逻、强盗追击、治安拦截等行为差异的唯一 AI 入口。
+- `party_kind`：只供初始配置、表现与遭遇文本选择，不参与移动/战斗/结算分支。
+- `family_id` 与 `faction_id` 相互独立，可同时存在。
+
+禁止为某一类部队新增独立的数据结构、成员管理器、移动入口或地图标记节点。
+`PartyData.apply_runtime_defaults()` 在读档后补齐旧存档缺失的控制类型与部队类型；
+玩家控制权始终以 `WorldContext.player_party_id` 为准。
 
 AI 字段规则：
 
@@ -78,7 +98,7 @@ party.member_unit_ids.has(unit.unit_id)
 | 方法 | 说明 |
 |---|---|
 | `setup(unit_manager, id_generator)` | 装配 |
-| `create_party(faction_id, position, name)` | 创建部队 |
+| `create_party(faction_id, position, name, party_kind)` | 创建部队；类型默认 GENERIC |
 | `add_party(party) -> String` | 加入仓储；重复 ID 拒绝并返回空字符串 |
 | `get_party(party_id)` / `has_party(party_id)` | 查询 |
 | `remove_party(party_id) -> bool` | 解散，清空成员与悬空归属，单位保留 |
@@ -89,6 +109,7 @@ party.member_unit_ids.has(unit.unit_id)
 | `get_total_wage(party_id) -> int` | 汇总成员每日工资；只统计与展示，不自动扣除 |
 | `validate_membership_consistency() -> Array[String]` | 双向归属校验，空列表表示通过 |
 | `to_dict()` / `load_from_dict()` | 存档序列化；读档重复 ID 报错并跳过 |
+| `apply_runtime_defaults(player_party_id)` | 读档后补齐控制类型/部队类型；不修改成员、位置或路线 |
 
 ### 4.1 读档成员关系校验
 
@@ -118,8 +139,8 @@ Milestone 1 使用简单固定值：
 
 战斗场景的 `UnitController.BATTLE_MOVE_SPEED_MULTIPLIER = 0.6` 只作用于士兵战斗移动，不修改 `PartyData.movement_speed`，因此大地图部队移动速度与本次战斗降速相互独立。
 
-玩家点击移动中的部队会进入 `FOLLOW_PARTY`，每 0.5 世界秒读取目标最新位置；
-目标离开视野、进入战斗或消失时自动取消跟随。
+玩家点击有效部队（移动中或静止）会进入 `FOLLOW_PARTY`，每 0.5 世界秒读取目标最新位置；
+目标进入战斗或消失时自动取消跟随。主动点击的追击不因目标离开视野而中断（D088）。
 
 `attack_intent` 只在强盗/治安队明确追击某个敌对目标时置为 true；
 普通巡逻、普通移动、玩家跟随都不会设置该字段。大地图遭遇判定使用
@@ -141,13 +162,16 @@ Milestone 1 使用简单固定值：
 ### 6.1 遭遇对话（已实现）
 
 ```text
-玩家进入 AI 部队 40 像素范围
+玩家进入 AI 部队 40 像素范围（必须是玩家主动点击/追击的目标）
   → 停止玩家部队移动
   → push_pause(ui_panel)
-  → 打开 PartyDialoguePanel
-      ├── 部队名称
+  → 打开底部 PartyDialoguePanel
+      ├── 左侧：对方领袖头像/剪影（复用 UnitVisual）
+      ├── 部队/领袖名称
       ├── 阵营
-      └── 兵力 = member_unit_ids.size()
+      ├── 兵力 = member_unit_ids.size()
+      ├── 对话文本（EncounterTextConfig，按原因 × party_kind 取）
+      └── [发起战斗] / [离开]
   → 离开：关闭面板、pop_pause，恢复此前基础倍率
   → 发起战斗：BattleManager.start_battle() → 切换 BattleScene
 ```
@@ -156,7 +180,8 @@ Milestone 1 使用简单固定值：
 - 离开范围（64 像素）后才会再次触发，避免关闭后立即重开。
 - 对方或玩家没有士兵时，“发起战斗”按钮禁用。
 - 被击溃的空部队不再触发交互。
-- 敌对阵营（如强盗）不打开普通对话；AI 主动追击玩家时使用独立的“遭遇对话”，只有战斗选项。
+- 敌对阵营（如强盗）不打开普通对话；AI 主动追击玩家时使用独立的底部“遭遇对话”。
+- 面板位于屏幕下方，左侧头像 + 右侧对白与动态选项；不再使用右侧信息面板布局。
 - 玩家主动追逐/接近某支部队时，`focus_party_id` 非空：路过村庄和其他部队不会自动打开面板，避免打断追逐；到达目标或停止移动后清理，恢复原有交互。
 - 普通对话与遭遇对话使用不同的暂停原因（`ui_panel` / `encounter_dialogue`），互不清理。
 - 玩家接近离屏战斗时会先看到“加入/离开”面板，规则见 [World_Map_System.md](World_Map_System.md)。
@@ -263,7 +288,7 @@ Milestone 1 使用简单固定值：
 | 大地图部队遭遇对话 | 已实现 |
 | 战斗锁定 / 解锁 | 已实现 |
 | 阵亡成员结算 | 已实现（移除归属并删除 UnitData；全员阵亡→DISABLED） |
-| 初始测试兵力 | 玩家 3 民兵 + 3 骑乘职业步兵 + 1 玩家角色（7 人）；其余三方各 3 民兵 + 2 职业步兵 |
+| 初始测试兵力 | 玩家 5 民兵 + 6 职业步兵（4 名骑乘）+ 1 玩家角色（12 人）；其余三方各 3 民兵 + 2 职业步兵 |
 | 玩家角色 Unit | 已实现：属于玩家部队、普通 UnitData、可参与战斗 |
 | 骑乘成员 | 已实现：普通职业步兵装备马匹；成员关系不变，控制权转移列表显示“骑乘” |
 | AI 行为字段与序列化 | 已实现（`ai_type` / `ai_route_index` / 路线 ID） |
@@ -281,10 +306,10 @@ Milestone 1 使用简单固定值：
 | 拆分/合并 | TODO(阶段7) |
 
 新游戏会通过 `WorldInitializer.create_test_battle_forces()` 配置临时兵力：
-- 玩家部队：3 民兵 + 3 名装备马匹的职业步兵 + 1 玩家角色（`player_hero`），共 7 人；
+- 玩家部队：5 民兵 + 6 职业步兵（其中 4 名装备马匹）+ 1 玩家角色（`player_hero`），共 12 人；
 - 商队、治安队、强盗：各 3 民兵 + 2 职业步兵，共 5 人。
 
-玩家部队在初始化时向 `PlayerProfile` 加入 4 匹测试马匹：3 匹由职业步兵装备，1 匹留在背包用于验收上马/下马（阶段 6 从 3 匹调整为 4 匹）。3 名骑乘单位仍是普通 `infantry_trained` 成员，只是 `equipment["MOUNT"]` 存在；不新增骑兵兵种、不改变部队成员关系。阶段 6 同时给予 2 个晋升凭证用于验证晋升流程。单位标记 `recruit_source = "milestone2_test"`，后续由招募系统替换（KI121）。玩家角色是普通 `UnitData`，使用 `is_player_character` 标记身份并属于玩家部队。旧存档若没有士兵，读档后不会自动补兵；没有玩家角色时战斗场景退化到第一名存活友军作为控制对象。
+人数与兵种分配集中在 `WorldInitializer` 的 `PLAYER_MILITIA_COUNT`、`PLAYER_TRAINED_COUNT`、`PLAYER_MOUNTED_TRAINED_COUNT` 与 `PLAYER_TOTAL_MEMBER_COUNT`；不在多个脚本重复写人数。玩家部队在初始化时向 `PlayerProfile` 加入 5 匹测试马匹：4 匹由职业步兵装备，1 匹留在背包用于验收上马/下马（`TEST_MOUNT_STOCK = 骑乘人数 + 1`）。4 名骑乘单位仍是普通 `infantry_trained` 成员，只是 `equipment["MOUNT"]` 存在；不新增骑兵兵种、不改变部队成员关系。阶段 6 同时给予 2 个晋升凭证用于验证晋升流程。单位标记 `recruit_source = "milestone2_test"`，后续由招募系统替换（KI121）。玩家角色是普通 `UnitData`，使用 `is_player_character` 标记身份并属于玩家部队。旧存档若已有成员则不会补兵或重复生成；没有玩家角色时战斗场景退化到第一名存活友军作为控制对象。
 
 阵营关系由 `FactionManager` 统一维护（玩家-商队中立、玩家-强盗敌对、玩家-治安队中立、商队-治安队友好、商队-强盗敌对、强盗-治安队敌对）；部队实例只保存 `faction_id`，不保存关系表。
 
@@ -297,3 +322,45 @@ Milestone 1 使用简单固定值：
 - 战败后玩家部队全灭的处理（逃跑 / 被俘 / 重新开局）；当前会变为 DISABLED。
 - 击败的敌方部队当前保留为 DISABLED 空部队，是否解散或移除待定（KI126）。
 - 商队路线与巡逻点是否迁移到 `.tres` 配置资源（KI128）。
+
+## 12. 领袖、家族与专属巡逻（阶段 6 新增）
+
+### 12.1 新增持久化字段
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `family_id` | `String` | 所属家族；只影响表现，不影响阵营关系 |
+| `leader_unit_id` | `String` | 当前领袖的 `UnitData.unit_id` |
+| `ai_patrol_points` | `Array[Vector2]` | 部队专属巡逻点；为空时使用 `AIManager.PATROL_POINTS` |
+
+`PartyManager` 新增：
+
+- `get_leader_unit(party_id)`：领袖必须是当前成员，否则返回 `null`；
+- `is_party_leader(unit_id)`；
+- `remove_member()` 移除领袖时同步清空 `leader_unit_id`，避免悬空引用。
+
+### 12.2 四种身份分离
+
+- 玩家身份：`UnitData.is_player_character`，持久化。
+- 当前控制：`UnitActor.is_controlled` / `BattleScene` 运行时状态，不进入存档。
+- 部队领袖：`PartyData.leader_unit_id`，玩家与 NPC 家族骑士共用。
+- 部队归属：`UnitData.current_party_id` 与 `PartyData.member_unit_ids` 双向一致，仍由 `PartyManager` 单写。
+
+玩家部队的领袖指向 `player_hero`；NPC 家族骑士的领袖指向各自家族骑士单位。`AIManager` 通过现有部队 AI 控制 NPC 家族骑士，不需要额外的 `LeaderManager`。
+
+### 12.3 新游戏初始部队
+
+| 部队 | 阵营 | 人数 | AI |
+|---|---|---|---|
+| 玩家部队 | 玩家 | 12 | 玩家控制 |
+| 河畔商队 | 商队 | 5 | 商队往返 |
+| 北境巡逻队 | 治安队 | 5 | 守卫/巡逻 |
+| 山道强盗 | 强盗 | 5 | 强盗游荡 |
+| 巴里骑士 | 本地 | 10 | 专属巡逻 |
+| 墨西西骑士 | 本地 | 10 | 专属巡逻 |
+| 东路强盗 | 强盗 | 5 | 独立路线 |
+| 荒野强盗 | 强盗 | 5 | 独立路线 |
+
+家族骑士编制：1 领袖（三级）+ 1 骑乘侍从（三级）+ 3 骑乘军士（二级）+ 2 军士（二级）+ 3 步兵（一级）。规格表格明细合计为 8，正文与验收要求 10，按验收目标补足 1 名骑乘军士与 1 名步兵，见 D086。
+
+家族骑士使用 `FACTION_LOCAL`，家族身份由 `family_id` 区分；玩家与本地势力保持中立，不新增外交关系。

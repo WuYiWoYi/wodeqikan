@@ -10,6 +10,9 @@ const MERCHANT_FACTION_ID: String = "FACTION_MERCHANT"
 const BANDIT_FACTION_ID: String = "FACTION_BANDIT"
 const GUARD_FACTION_ID: String = "FACTION_GUARD"
 
+const FAMILY_BARI_ID: String = "FAMILY_BARI"
+const FAMILY_MOXIXI_ID: String = "FAMILY_MOXIXI"
+
 const PLAYER_START_POSITION: Vector2 = Vector2(760.0, 620.0)
 const PLAYER_MOVE_SPEED: float = 150.0
 const PLAYER_SIGHT_RANGE: float = 300.0
@@ -19,29 +22,58 @@ const PLAYER_SIGHT_RANGE: float = 300.0
 const MERCHANT_MOVE_SPEED: float = 80.0
 const GUARD_MOVE_SPEED: float = 120.0
 const BANDIT_MOVE_SPEED: float = 100.0
+const FAMILY_KNIGHT_MOVE_SPEED: float = 110.0
 const NPC_SIGHT_RANGE: float = 250.0
 const GUARD_SIGHT_RANGE: float = 300.0
 const BANDIT_SIGHT_RANGE: float = 320.0
+const FAMILY_KNIGHT_SIGHT_RANGE: float = 300.0
 
 ## 临时测试兵力。后续由招募/部队初始化系统替换。
 const TEST_FORCE_SOURCE: String = "milestone2_test"
 const MILITIA_CONFIG_PATH: String = "res://Data/Units/infantry_militia.tres"
 const TRAINED_CONFIG_PATH: String = "res://Data/Units/infantry_trained.tres"
+const VETERAN_CONFIG_PATH: String = "res://Data/Units/infantry_veteran.tres"
 const PLAYER_HERO_CONFIG_PATH: String = "res://Data/Units/player_hero.tres"
 const TEST_MILITIA_COUNT: int = 3
 const TEST_TRAINED_COUNT: int = 2
-## 玩家部队：3 民兵 + 3 职业步兵（全部装备马匹）+ 1 玩家角色。
-## 相比上一阶段新增 2 名骑乘测试士兵；不新增骑兵兵种 ID。
-const PLAYER_TRAINED_COUNT: int = 3
+## 玩家部队：5 民兵 + 6 职业步兵（其中 4 名骑乘）+ 1 玩家角色 = 12 人。
+## 只复用现有兵种配置，不新增骑兵 UnitConfig。
+const PLAYER_MILITIA_COUNT: int = 5
+const PLAYER_TRAINED_COUNT: int = 6
+const PLAYER_MOUNTED_TRAINED_COUNT: int = 4
+const PLAYER_TOTAL_MEMBER_COUNT: int = (
+	PLAYER_MILITIA_COUNT + PLAYER_TRAINED_COUNT + 1
+)
 const TEST_MOUNT_ID: String = "mount_horse_01"
-## 3 匹装备给测试骑兵，额外 1 匹留在背包，便于验证“上马/下马”。
-const TEST_MOUNT_STOCK: int = PLAYER_TRAINED_COUNT + 1
+## 4 匹装备给骑乘职业步兵，额外 1 匹留在背包，便于验证“上马/下马”。
+const TEST_MOUNT_STOCK: int = PLAYER_MOUNTED_TRAINED_COUNT + 1
 const TEST_PROMOTION_ITEM_ID: String = "promotion_rank_token"
 ## 临时测试库存，便于验证晋升流程；正式获取途径后续实现。
 const TEST_PROMOTION_ITEM_STOCK: int = 2
 const TEST_ENEMY_PARTY_NAME: String = "河畔商队"
 const GUARD_PARTY_NAME: String = "北境巡逻队"
 const BANDIT_PARTY_NAME: String = "山道强盗"
+const EAST_BANDIT_PARTY_NAME: String = "东路强盗"
+const WASTE_BANDIT_PARTY_NAME: String = "荒野强盗"
+
+const BARI_VILLAGE_NAME: String = "巴里"
+const MOXIXI_VILLAGE_NAME: String = "墨西西"
+const BARI_KNIGHT_PARTY_NAME: String = "巴里骑士"
+const MOXIXI_KNIGHT_PARTY_NAME: String = "墨西西骑士"
+const BARI_KNIGHT_LEADER_NAME: String = "巴里骑士"
+const MOXIXI_KNIGHT_LEADER_NAME: String = "墨西西骑士"
+
+## 家族骑士编制（每队）：
+## 1 领袖（三级）+ 1 骑乘侍从（三级）+ 3 骑乘军士（二级）
+## + 2 军士（二级）+ 3 步兵（一级）= 10 人。
+## 规格表格明细合计为 8 人，但正文与验收均要求 10 人；
+## 这里按验收目标补足 1 名骑乘军士和 1 名步兵。
+const FAMILY_LEADER_COUNT: int = 1
+const FAMILY_MOUNTED_SQUIRE_COUNT: int = 1
+const FAMILY_MOUNTED_SERGEANT_COUNT: int = 3
+const FAMILY_SERGEANT_COUNT: int = 2
+const FAMILY_INFANTRY_COUNT: int = 3
+const FAMILY_TOTAL_MEMBER_COUNT: int = 10
 
 ## 初期所有村庄共用同一基础模板；每个 SettlementData 单独保存 scene_path，
 ## 后续可逐村替换为不同场景。
@@ -59,10 +91,14 @@ static func create_new_world(context: WorldContext) -> bool:
 	context.world_map_manager.world_bounds = Rect2(Vector2.ZERO, context.world_size)
 
 	var player_party := context.party_manager.create_party(
-		PLAYER_FACTION_ID, PLAYER_START_POSITION, "玩家部队"
+		PLAYER_FACTION_ID,
+		PLAYER_START_POSITION,
+		"玩家部队",
+		PartyData.PartyKind.PLAYER
 	)
 	if player_party == null:
 		return false
+	player_party.control_type = PartyData.ControlType.PLAYER
 	player_party.movement_speed = PLAYER_MOVE_SPEED
 	player_party.sight_range = PLAYER_SIGHT_RANGE
 	context.player_party_id = player_party.party_id
@@ -70,31 +106,85 @@ static func create_new_world(context: WorldContext) -> bool:
 	context.battle_manager.player_party_id = player_party.party_id
 
 	var merchant_party := context.party_manager.create_party(
-		MERCHANT_FACTION_ID, Vector2(900.0, 1500.0), TEST_ENEMY_PARTY_NAME
+		MERCHANT_FACTION_ID,
+		Vector2(900.0, 1500.0),
+		TEST_ENEMY_PARTY_NAME,
+		PartyData.PartyKind.MERCHANT
 	)
 	if merchant_party != null:
 		merchant_party.movement_speed = MERCHANT_MOVE_SPEED
 		merchant_party.sight_range = NPC_SIGHT_RANGE
 
 	var guard_party := context.party_manager.create_party(
-		GUARD_FACTION_ID, Vector2(2350.0, 1100.0), GUARD_PARTY_NAME
+		GUARD_FACTION_ID,
+		Vector2(2350.0, 1100.0),
+		GUARD_PARTY_NAME,
+		PartyData.PartyKind.GUARD
 	)
 	if guard_party != null:
 		guard_party.movement_speed = GUARD_MOVE_SPEED
 		guard_party.sight_range = GUARD_SIGHT_RANGE
 
 	var bandit_party := context.party_manager.create_party(
-		BANDIT_FACTION_ID, Vector2(1650.0, 900.0), BANDIT_PARTY_NAME
+		BANDIT_FACTION_ID,
+		Vector2(1650.0, 900.0),
+		BANDIT_PARTY_NAME,
+		PartyData.PartyKind.BANDIT
 	)
 	if bandit_party != null:
 		bandit_party.movement_speed = BANDIT_MOVE_SPEED
 		bandit_party.sight_range = BANDIT_SIGHT_RANGE
 
-	var oak_village := _create_settlement(
-		context, "橡木村", SettlementData.SettlementType.VILLAGE, Vector2(500.0, 500.0), 120, 40
+	# 两支 NPC 家族骑士部队：使用现有阵营/部队/AI 架构，
+	# 通过 PartyData.family_id 与专属巡逻点区分，不新增特殊地图逻辑。
+	var bari_knights := context.party_manager.create_party(
+		LOCAL_FACTION_ID,
+		Vector2(620.0, 460.0),
+		BARI_KNIGHT_PARTY_NAME,
+		PartyData.PartyKind.FAMILY
 	)
-	var riverside_village := _create_settlement(
-		context, "河畔村", SettlementData.SettlementType.VILLAGE, Vector2(1200.0, 900.0), 96, 35
+	if bari_knights != null:
+		bari_knights.family_id = FAMILY_BARI_ID
+		bari_knights.movement_speed = FAMILY_KNIGHT_MOVE_SPEED
+		bari_knights.sight_range = FAMILY_KNIGHT_SIGHT_RANGE
+
+	var moxixi_knights := context.party_manager.create_party(
+		LOCAL_FACTION_ID,
+		Vector2(1320.0, 860.0),
+		MOXIXI_KNIGHT_PARTY_NAME,
+		PartyData.PartyKind.FAMILY
+	)
+	if moxixi_knights != null:
+		moxixi_knights.family_id = FAMILY_MOXIXI_ID
+		moxixi_knights.movement_speed = FAMILY_KNIGHT_MOVE_SPEED
+		moxixi_knights.sight_range = FAMILY_KNIGHT_SIGHT_RANGE
+
+	# 两支新强盗部队：沿用现有 BANDIT 阵营与 AI，只是拥有独立 ID、出生点和路线。
+	var east_bandits := context.party_manager.create_party(
+		BANDIT_FACTION_ID,
+		Vector2(950.0, 1250.0),
+		EAST_BANDIT_PARTY_NAME,
+		PartyData.PartyKind.BANDIT
+	)
+	if east_bandits != null:
+		east_bandits.movement_speed = BANDIT_MOVE_SPEED
+		east_bandits.sight_range = BANDIT_SIGHT_RANGE
+
+	var waste_bandits := context.party_manager.create_party(
+		BANDIT_FACTION_ID,
+		Vector2(2500.0, 1500.0),
+		WASTE_BANDIT_PARTY_NAME,
+		PartyData.PartyKind.BANDIT
+	)
+	if waste_bandits != null:
+		waste_bandits.movement_speed = BANDIT_MOVE_SPEED
+		waste_bandits.sight_range = BANDIT_SIGHT_RANGE
+
+	var bari_village := _create_settlement(
+		context, BARI_VILLAGE_NAME, SettlementData.SettlementType.VILLAGE, Vector2(500.0, 500.0), 120, 40
+	)
+	var moxixi_village := _create_settlement(
+		context, MOXIXI_VILLAGE_NAME, SettlementData.SettlementType.VILLAGE, Vector2(1200.0, 900.0), 96, 35
 	)
 	var north_village := _create_settlement(
 		context, "北境村", SettlementData.SettlementType.VILLAGE, Vector2(2200.0, 500.0), 80, 30
@@ -102,20 +192,24 @@ static func create_new_world(context: WorldContext) -> bool:
 	var grey_castle := _create_settlement(
 		context, "灰石城堡", SettlementData.SettlementType.CASTLE, Vector2(1800.0, 1300.0), 0, 60
 	)
-	for village: SettlementData in [oak_village, riverside_village, north_village]:
+	for village: SettlementData in [bari_village, moxixi_village, north_village]:
 		if village != null:
 			village.scene_path = DEFAULT_VILLAGE_SCENE_PATH
+	if bari_village != null:
+		bari_village.family_id = FAMILY_BARI_ID
+	if moxixi_village != null:
+		moxixi_village.family_id = FAMILY_MOXIXI_ID
 
-	if merchant_party != null and oak_village != null and riverside_village != null:
-		# 商队从橡木村路线起点出发，首次决策后前往河畔村。
-		merchant_party.world_position = oak_village.world_position
+	if merchant_party != null and bari_village != null and moxixi_village != null:
+		# 商队从巴里路线起点出发，首次决策后前往墨西西。
+		merchant_party.world_position = bari_village.world_position
 		merchant_party.target_position = merchant_party.world_position
 		merchant_party.movement_state = PartyData.MovementState.IDLE
 		merchant_party.ai_type = PartyData.PartyAIType.TRADE_ROUTE
 		merchant_party.ai_route_index = 0
 		merchant_party.ai_route_settlement_ids = [
-			oak_village.settlement_id,
-			riverside_village.settlement_id,
+			bari_village.settlement_id,
+			moxixi_village.settlement_id,
 		]
 	if guard_party != null:
 		guard_party.ai_type = PartyData.PartyAIType.GUARD
@@ -131,6 +225,46 @@ static func create_new_world(context: WorldContext) -> bool:
 				north_village.settlement_id,
 			]
 
+	if bari_knights != null:
+		bari_knights.ai_type = PartyData.PartyAIType.PATROL
+		bari_knights.ai_route_index = 0
+		bari_knights.ai_patrol_points = [
+			Vector2(620.0, 460.0),
+			Vector2(680.0, 340.0),
+			Vector2(520.0, 300.0),
+			Vector2(360.0, 500.0),
+		]
+	if moxixi_knights != null:
+		moxixi_knights.ai_type = PartyData.PartyAIType.PATROL
+		moxixi_knights.ai_route_index = 0
+		moxixi_knights.ai_patrol_points = [
+			Vector2(1320.0, 860.0),
+			Vector2(1460.0, 1020.0),
+			Vector2(1260.0, 1160.0),
+			Vector2(1060.0, 1020.0),
+		]
+
+	if east_bandits != null:
+		east_bandits.ai_type = PartyData.PartyAIType.BANDIT
+		east_bandits.ai_route_index = 0
+		east_bandits.target_position = east_bandits.world_position
+		east_bandits.movement_state = PartyData.MovementState.IDLE
+		if bari_village != null and grey_castle != null:
+			east_bandits.ai_route_settlement_ids = [
+				bari_village.settlement_id,
+				grey_castle.settlement_id,
+			]
+	if waste_bandits != null:
+		waste_bandits.ai_type = PartyData.PartyAIType.BANDIT
+		waste_bandits.ai_route_index = 0
+		waste_bandits.target_position = waste_bandits.world_position
+		waste_bandits.movement_state = PartyData.MovementState.IDLE
+		if north_village != null and grey_castle != null:
+			waste_bandits.ai_route_settlement_ids = [
+				north_village.settlement_id,
+				grey_castle.settlement_id,
+			]
+
 	if not create_test_battle_forces(context):
 		push_error("初始测试兵力生成失败")
 		return false
@@ -138,14 +272,15 @@ static func create_new_world(context: WorldContext) -> bool:
 	return context.is_valid_world()
 
 
-## 调试用测试兵力：玩家 3 民兵 + 3 骑乘职业步兵 + 玩家角色；其余三方各 3 民兵 + 2 职业步兵。
+## 调试用测试兵力：玩家 5 民兵 + 6 职业步兵（4 名骑乘）+ 玩家角色；其余三方各 3 民兵 + 2 职业步兵。
 ## 复用已有 AI 部队，不额外创建部队；单位标记 recruit_source 便于识别和清理。
 static func create_test_battle_forces(context: WorldContext) -> bool:
 	if context == null:
 		return false
 	var militia: UnitConfig = load(MILITIA_CONFIG_PATH) as UnitConfig
 	var trained: UnitConfig = load(TRAINED_CONFIG_PATH) as UnitConfig
-	if militia == null or trained == null:
+	var veteran: UnitConfig = load(VETERAN_CONFIG_PATH) as UnitConfig
+	if militia == null or trained == null or veteran == null:
 		push_error("测试兵力配置加载失败")
 		return false
 
@@ -160,16 +295,42 @@ static func create_test_battle_forces(context: WorldContext) -> bool:
 		TEST_ENEMY_PARTY_NAME,
 		GUARD_PARTY_NAME,
 		BANDIT_PARTY_NAME,
+		EAST_BANDIT_PARTY_NAME,
+		WASTE_BANDIT_PARTY_NAME,
 	]
 	for party_name: String in required_names:
 		var party := _find_party_by_name(context, party_name)
 		if party == null:
 			push_error("测试兵力找不到部队: %s" % party_name)
 			return false
-		if not _populate_test_party(
-			context, party, party.faction_id, militia, trained
-		):
+		if not _populate_test_party(context, party, militia, trained):
 			return false
+
+	var bari_knights := _find_party_by_name(context, BARI_KNIGHT_PARTY_NAME)
+	var moxixi_knights := _find_party_by_name(context, MOXIXI_KNIGHT_PARTY_NAME)
+	if bari_knights == null or moxixi_knights == null:
+		push_error("测试兵力缺少家族骑士部队")
+		return false
+	if not _populate_family_party(
+		context,
+		bari_knights,
+		context.family_registry.get_config(FAMILY_BARI_ID),
+		BARI_KNIGHT_LEADER_NAME,
+		militia,
+		trained,
+		veteran
+	):
+		return false
+	if not _populate_family_party(
+		context,
+		moxixi_knights,
+		context.family_registry.get_config(FAMILY_MOXIXI_ID),
+		MOXIXI_KNIGHT_LEADER_NAME,
+		militia,
+		trained,
+		veteran
+	):
+		return false
 	return true
 
 
@@ -180,7 +341,7 @@ static func _find_party_by_name(context: WorldContext, party_name: String) -> Pa
 	return null
 
 
-## 玩家部队：3 民兵 + 3 职业步兵（全部骑乘）+ 玩家角色（最后加入，保持 UI 默认选中民兵）。
+## 玩家部队：5 民兵 + 6 职业步兵（前 4 名骑乘）+ 玩家角色（最后加入，保持 UI 默认选中民兵）。
 static func _populate_player_party(
 	context: WorldContext, party: PartyData, militia: UnitConfig, trained: UnitConfig
 ) -> bool:
@@ -192,7 +353,7 @@ static func _populate_player_party(
 		return false
 
 	var configs: Array[UnitConfig] = []
-	for i: int in range(TEST_MILITIA_COUNT):
+	for i: int in range(PLAYER_MILITIA_COUNT):
 		configs.append(militia)
 	for i: int in range(PLAYER_TRAINED_COUNT):
 		configs.append(trained)
@@ -210,17 +371,20 @@ static func _populate_player_party(
 
 	var mounted_count: int = 0
 	for config: UnitConfig in configs:
-		var unit := context.unit_manager.create_unit(config, PLAYER_FACTION_ID)
+		var unit := _create_world_unit(
+			context, party, config, null, "", 0, false
+		)
 		if unit == null:
 			return false
-		unit.recruit_source = TEST_FORCE_SOURCE
-		unit.origin_faction_id = PLAYER_FACTION_ID
-		if not context.party_manager.add_member(party.party_id, unit.unit_id):
-			push_error("玩家单位无法加入部队: %s" % party.party_id)
-			return false
 
-		# 所有玩家职业步兵都装备马匹：形成 3 名骑乘测试士兵，不新增骑兵兵种。
-		if config.config_id == trained.config_id:
+		# 玩家角色是“身份”，由 is_player_character 表示；当前控制权仍由
+		# BattleScene 在运行时决定。玩家部队的领袖也通过统一字段记录。
+		if unit.is_player_character:
+			party.leader_unit_id = unit.unit_id
+
+		# 前 4 名职业步兵装备马匹；其余职业步兵保持步战，不新增骑兵兵种。
+		if config.config_id == trained.config_id \
+				and mounted_count < PLAYER_MOUNTED_TRAINED_COUNT:
 			if not context.unit_manager.equip_mount(
 				unit.unit_id, TEST_MOUNT_ID, context.player_profile
 			):
@@ -228,10 +392,16 @@ static func _populate_player_party(
 				return false
 			mounted_count += 1
 
-	if mounted_count < PLAYER_TRAINED_COUNT:
+	if mounted_count < PLAYER_MOUNTED_TRAINED_COUNT:
 		push_error(
 			"玩家部队骑乘测试单位不足: %d/%d"
-			% [mounted_count, PLAYER_TRAINED_COUNT]
+			% [mounted_count, PLAYER_MOUNTED_TRAINED_COUNT]
+		)
+		return false
+	if party.member_unit_ids.size() != PLAYER_TOTAL_MEMBER_COUNT:
+		push_error(
+			"玩家部队人数异常: %d/%d"
+			% [party.member_unit_ids.size(), PLAYER_TOTAL_MEMBER_COUNT]
 		)
 		return false
 	return true
@@ -240,7 +410,6 @@ static func _populate_player_party(
 static func _populate_test_party(
 	context: WorldContext,
 	party: PartyData,
-	faction_id: String,
 	militia: UnitConfig,
 	trained: UnitConfig
 ) -> bool:
@@ -253,16 +422,117 @@ static func _populate_test_party(
 	for i: int in range(TEST_TRAINED_COUNT):
 		configs.append(trained)
 
-	for config: UnitConfig in configs:
-		var unit := context.unit_manager.create_unit(config, faction_id)
+	# 普通 NPC 部队同样通过 leader_unit_id 拥有领袖；
+	# 领袖名称沿用部队名，供遭遇对话显示。旧存档没有该字段时 UI 使用默认剪影。
+	var leader: UnitData = null
+	for index: int in range(configs.size()):
+		var is_leader: bool = index == 0
+		var unit := _create_world_unit(
+			context,
+			party,
+			configs[index],
+			null,
+			party.party_name if is_leader else "",
+			0,
+			is_leader
+		)
 		if unit == null:
 			return false
-		unit.recruit_source = TEST_FORCE_SOURCE
-		unit.origin_faction_id = faction_id
-		if not context.party_manager.add_member(party.party_id, unit.unit_id):
-			push_error("测试单位无法加入部队: %s" % party.party_id)
-			return false
+		if is_leader:
+			leader = unit
+	if leader != null and party.leader_unit_id.is_empty():
+		party.leader_unit_id = leader.unit_id
 	return true
+
+
+## 家族骑士编制：领袖 + 骑乘侍从 + 骑乘军士 + 步战军士 + 步兵。
+static func _populate_family_party(
+	context: WorldContext,
+	party: PartyData,
+	family: FamilyConfig,
+	leader_name: String,
+	militia: UnitConfig,
+	trained: UnitConfig,
+	veteran: UnitConfig
+) -> bool:
+	if not party.member_unit_ids.is_empty():
+		return true
+
+	# 领袖：三级兵种，初始等级 3；家族领袖是部队 leader_unit_id，
+	# 但玩家身份/当前控制权不由此字段推导。
+	var leader := _create_world_unit(
+		context, party, veteran, family, leader_name, 3, true, true
+	)
+	if leader == null:
+		return false
+	party.leader_unit_id = leader.unit_id
+
+	# 1 名骑乘侍从（三级）。
+	for i: int in range(FAMILY_MOUNTED_SQUIRE_COUNT):
+		if _create_world_unit(
+			context, party, veteran, family, "", 0, false, true
+		) == null:
+			return false
+
+	# 3 名骑乘军士（二级）。
+	for i: int in range(FAMILY_MOUNTED_SERGEANT_COUNT):
+		if _create_world_unit(
+			context, party, trained, family, "", 0, false, true
+		) == null:
+			return false
+
+	# 2 名步战军士（二级）。
+	for i: int in range(FAMILY_SERGEANT_COUNT):
+		if _create_world_unit(
+			context, party, trained, family, "", 0, false, false
+		) == null:
+			return false
+
+	# 3 名步兵（一级）。
+	for i: int in range(FAMILY_INFANTRY_COUNT):
+		if _create_world_unit(
+			context, party, militia, family, "", 0, false, false
+		) == null:
+			return false
+
+	if party.member_unit_ids.size() != FAMILY_TOTAL_MEMBER_COUNT:
+		push_error(
+			"家族部队 %s 人数异常: %d/%d"
+			% [party.party_name, party.member_unit_ids.size(), FAMILY_TOTAL_MEMBER_COUNT]
+		)
+		return false
+	return true
+
+
+## 创建单位、生成一次性外观、加入部队；可选骑乘。
+## 所有世界初始单位都经过本入口，确保外观选择与人口/归属一致。
+static func _create_world_unit(
+	context: WorldContext,
+	party: PartyData,
+	config: UnitConfig,
+	family: FamilyConfig,
+	display_name: String,
+	level: int,
+	is_leader: bool,
+	mounted: bool = false
+) -> UnitData:
+	var unit := context.unit_manager.create_unit(
+		config, party.faction_id, display_name, level
+	)
+	if unit == null:
+		return null
+	unit.recruit_source = TEST_FORCE_SOURCE
+	unit.origin_faction_id = party.faction_id
+	UnitAppearance.ensure_random(
+		unit, config, family, context.appearance_config, is_leader
+	)
+	if not context.party_manager.add_member(party.party_id, unit.unit_id):
+		push_error("测试单位无法加入部队: %s" % party.party_id)
+		return null
+	if mounted and not context.unit_manager.equip_item(unit.unit_id, TEST_MOUNT_ID):
+		push_error("测试骑兵装备马匹失败: %s" % unit.unit_id)
+		return null
+	return unit
 
 
 static func _create_settlement(

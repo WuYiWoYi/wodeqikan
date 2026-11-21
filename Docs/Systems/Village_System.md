@@ -45,6 +45,7 @@
 - 进入前先压入 `small_scene`，再释放地点面板的 `ui_panel`，避免切换期间世界恢复推进。
 - 场景加载失败时回滚暂停状态并重新显示地点面板。
 - 进入村庄不复制、不重建玩家部队数据。
+- 场景切换成功后广播 `EventBus.settlement_entered`，供世界日志记录。
 
 ### 3.2 返回
 
@@ -58,8 +59,9 @@
       └── SceneManager.change_scene(WorldMap)
 ```
 
-- 返回后玩家部队仍站在村口。大地图读取并消费 `pending_settlement_latch_id`，在玩家离开 64 像素范围前不会立刻重开地点面板。
+- 返回后玩家部队仍站在村口。大地图读取并消费 `pending_settlement_latch_id`，记录当前村口村庄供地点面板使用；不会自动重开地点面板，需玩家主动点击地点。
 - 返回后不自动恢复移动指令；玩家需要重新点击地图或选择时间倍率。
+- 场景切换成功后广播 `EventBus.settlement_exited`，供世界日志记录。
 
 ### 3.3 运行时字段
 
@@ -68,7 +70,7 @@
 | 字段 | 说明 |
 |---|---|
 | `current_settlement_id` | 当前进入的村庄 ID |
-| `pending_settlement_latch_id` | 返回大地图后锁住一次地点自动交互 |
+| `pending_settlement_latch_id` | 返回大地图后记录当前村口村庄，大地图不再自动打开地点面板 |
 | `small_scene_return_base_speed` | 进入前的大地图基础倍率 |
 
 ## 4. 玩家角色表现
@@ -175,3 +177,9 @@
 | 村庄商店、招募、任务、好感度 | 未实现 |
 | 城镇/城堡独立小场景 | 未实现 |
 | 村庄碰撞、城门、出口通道 | 未实现 |
+
+## 11. 家族与地点名称的表现边界（阶段 6 新增）
+
+- 村庄小场景不读取 `SettlementData.family_id`，也不显示家族旗帜；家族旗帜只用于大地图固定屏幕名称标签。
+- 村庄名称、对话与场景加载仍以 `SettlementData.settlement_id` / `display_name` 为数据来源。
+- 巴里、墨西西只改变地点显示名与家族归属，不改变村庄场景路径、进入/返回流程或村庄头人。

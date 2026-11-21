@@ -60,6 +60,18 @@ func get_part(part_name: String) -> Sprite2D:
 	return sprite if is_instance_valid(sprite) else null
 
 
+## 移除单个部件 Sprite；不影响旋转枢轴或其他部件。
+func remove_part(part_name: String) -> void:
+	var sprite := get_part(part_name)
+	_sprites.erase(part_name)
+	if sprite == null:
+		return
+	var parent := sprite.get_parent()
+	if parent != null:
+		parent.remove_child(sprite)
+	sprite.queue_free()
+
+
 ## 将部件旋转中心相对当前锚点向下移动 drop_y 像素。
 ## 同时把节点位置补回 drop_y，使精灵在画面中的可见位置保持不变；
 ## 只是旋转轴心在素材坐标中下移，动画代码必须把 drop_y 作为基础位置叠加。

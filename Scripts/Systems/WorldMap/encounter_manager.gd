@@ -10,6 +10,14 @@ extends RefCounted
 ##
 ## 具体 AI 只设置 attack_intent 与 current_target_id，不自行判断遭遇距离或创建战斗。
 
+## 本次玩家遭遇的实际原因。用于决定对话文本与可用选项，而不是仅凭敌对关系推断。
+enum EncounterReason {
+	PASSIVE_ENCOUNTER,
+	PLAYER_INITIATED,
+	ENEMY_PURSUIT,
+	OTHER,
+}
+
 const AI_ENCOUNTER_RADIUS: float = 50.0
 ## 玩家接近离屏战斗的交互距离；略小于 BattleManager.JOIN_RADIUS，确保选择“加入”时一定满足距离校验。
 const BATTLE_INTERACTION_RADIUS: float = 55.0
@@ -25,7 +33,7 @@ var _world_map_manager: WorldMapManager = null
 
 var _encounter_serial: int = 0
 var _interaction_serial: int = 0
-## { encounter_id, attacker_party_id, target_party_id }
+## { encounter_id, attacker_party_id, target_party_id, reason }
 var _pending_player_encounter: Dictionary = {}
 ## { interaction_id, battle_id, player_party_id }
 var _pending_battle_interaction: Dictionary = {}
@@ -58,6 +66,30 @@ func has_pending_player_encounter() -> bool:
 
 func get_pending_player_encounter() -> Dictionary:
 	return _pending_player_encounter.duplicate(true)
+
+
+func get_pending_encounter_reason() -> EncounterReason:
+	return int(_pending_player_encounter.get(
+		"reason", EncounterReason.OTHER
+	)) as EncounterReason
+
+
+## 只有敌对部队主动追击并成功拦截（ENEMY_PURSUIT）时禁止直接离开。
+## 玩家主动接近、普通相遇等仍保留原有离开规则。
+static func can_leave_encounter(reason: EncounterReason) -> bool:
+	return reason != EncounterReason.ENEMY_PURSUIT
+
+
+static func reason_key(reason: EncounterReason) -> String:
+	match reason:
+		EncounterReason.PASSIVE_ENCOUNTER:
+			return "PASSIVE_ENCOUNTER"
+		EncounterReason.PLAYER_INITIATED:
+			return "PLAYER_INITIATED"
+		EncounterReason.ENEMY_PURSUIT:
+			return "ENEMY_PURSUIT"
+		_:
+			return "OTHER"
 
 
 func clear_pending_player_encounter() -> void:
@@ -119,7 +151,12 @@ func update_encounters() -> bool:
 				)
 				if not ai_initiated and not player_pursuit:
 					continue
-				_begin_pending_player_encounter(attacker, target)
+				# 敌对部队主动追击优先于玩家追击：双方都在追对方时按拦截处理。
+				var reason := (
+					EncounterReason.ENEMY_PURSUIT
+					if ai_initiated else EncounterReason.PLAYER_INITIATED
+				)
+				_begin_pending_player_encounter(attacker, target, reason)
 				return true
 
 			# NPC 对 NPC：已有离屏战斗时只处理“其中一方可加入”的情况。
@@ -160,13 +197,16 @@ func update_encounters() -> bool:
 	return false
 
 
-func _begin_pending_player_encounter(attacker: PartyData, target: PartyData) -> void:
+func _begin_pending_player_encounter(
+	attacker: PartyData, target: PartyData, reason: EncounterReason
+) -> void:
 	_encounter_serial += 1
 	_declined_encounter_attacker_id = ""
 	_pending_player_encounter = {
 		"encounter_id": "ENCOUNTER_%04d" % _encounter_serial,
 		"attacker_party_id": attacker.party_id,
 		"target_party_id": target.party_id,
+		"reason": int(reason),
 	}
 	# 立即停止双方并清除追击/焦点，避免接触后继续推挤或旧指令覆盖战斗状态。
 	_stop_party(attacker.party_id)
@@ -183,7 +223,10 @@ func _begin_pending_player_encounter(attacker: PartyData, target: PartyData) -> 
 
 
 ## 玩家在遭遇面板选择撤退/离开：清理待处理遭遇，并在离开范围前不再重复提示。
+## 敌对追击拦截不允许直接离开，因此该入口会拒绝处理这类遭遇。
 func decline_player_encounter(attacker_party_id: String) -> void:
+	if not can_leave_encounter(get_pending_encounter_reason()):
+		return
 	_pending_player_encounter.clear()
 	_declined_encounter_attacker_id = attacker_party_id
 	var player_party_id: String = _battle_manager.player_party_id \

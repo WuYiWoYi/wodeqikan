@@ -44,8 +44,13 @@ func _run() -> void:
 	_check(player != null and enemy != null, "玩家与敌方部队存在")
 	if player == null or enemy == null:
 		return
-	_check(player.member_unit_ids.size() == 7, "玩家拥有 7 名测试士兵")
+	_check(
+		player.member_unit_ids.size() == WorldInitializer.PLAYER_TOTAL_MEMBER_COUNT,
+		"玩家拥有完整初始部队"
+	)
 	_check(enemy.member_unit_ids.size() == 5, "敌方拥有 5 名测试士兵")
+	var total_units_initial: int = context.unit_manager.get_all_units().size()
+	var expected_units_after: int = total_units_initial - enemy.member_unit_ids.size()
 
 	# 商队初始位于橡木村；移到远离地点的空地，避免地点面板抢占部队对话。
 	enemy.world_position = Vector2(900.0, 1500.0)
@@ -56,6 +61,8 @@ func _run() -> void:
 	player.world_position = enemy.world_position + Vector2(-20.0, 0.0)
 	player.target_position = player.world_position
 	player.movement_state = PartyData.MovementState.IDLE
+	# 新规则：普通寻路不再自动弹窗，模拟玩家主动点击目标部队。
+	player.focus_party_id = enemy.party_id
 
 	await get_tree().process_frame
 	await get_tree().process_frame
@@ -89,10 +96,16 @@ func _run() -> void:
 	_check(session != null, "战斗会话存在")
 	if session == null:
 		return
-	_check(session.attacker_unit_ids.size() == 7, "玩家 7 名士兵参战")
+	_check(
+		session.attacker_unit_ids.size() == player.member_unit_ids.size(),
+		"玩家全部士兵参战"
+	)
 	_check(session.defender_unit_ids.size() == 5, "敌方 5 名士兵参战")
 	var actor_count: int = battle_scene.get_actor_count()
-	_check(actor_count == 12, "战斗场景生成 12 名士兵")
+	_check(
+		actor_count == player.member_unit_ids.size() + enemy.member_unit_ids.size(),
+		"战斗场景生成全部参战士兵"
+	)
 
 	# 让一个敌人进入己方攻击范围，验证实时伤害只写 BattleUnitState。
 	var first_attacker: UnitController = battle_scene.get_controller(session.attacker_unit_ids[0])
@@ -153,9 +166,15 @@ func _run() -> void:
 	_check(context.battle_manager.current_battle == null, "BattleSession 已清理")
 	_check(player.battle_state == PartyData.BattleState.AVAILABLE, "玩家部队已解锁")
 	_check(enemy.battle_state == PartyData.BattleState.DISABLED, "敌方全员阵亡后失效")
-	_check(player.member_unit_ids.size() == 7, "玩家 7 名士兵存活并保留成员关系")
+	_check(
+		player.member_unit_ids.size() == WorldInitializer.PLAYER_TOTAL_MEMBER_COUNT,
+		"玩家士兵存活并保留成员关系"
+	)
 	_check(enemy.member_unit_ids.is_empty(), "敌方死亡士兵移出部队")
-	_check(context.unit_manager.get_all_units().size() == 17, "UnitManager 只剩 17 名存活士兵")
+	_check(
+		context.unit_manager.get_all_units().size() == expected_units_after,
+		"UnitManager 只保留存活士兵"
+	)
 	var surviving_unit := context.unit_manager.get_unit(surviving_id)
 	_check(
 		surviving_unit != null and surviving_unit.current_hp == 12,
@@ -175,11 +194,15 @@ func _run() -> void:
 	restored.name = "Milestone2RestoredContext"
 	add_child(restored)
 	_check(restored.load_from_save_data(loaded), "战后存档恢复并通过关系校验")
-	_check(restored.unit_manager.get_all_units().size() == 17, "读档后只有 17 名存活士兵")
+	_check(
+		restored.unit_manager.get_all_units().size() == expected_units_after,
+		"读档后只恢复存活士兵"
+	)
 	var restored_player := restored.party_manager.get_party(player.party_id)
 	var restored_enemy := restored.party_manager.get_party(enemy.party_id)
 	_check(
-		restored_player != null and restored_player.member_unit_ids.size() == 7,
+		restored_player != null and restored_player.member_unit_ids.size()
+			== WorldInitializer.PLAYER_TOTAL_MEMBER_COUNT,
 		"读档后玩家成员关系正确"
 	)
 	_check(

@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="PartyMarkerStyle" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Systems/WorldMap/party_marker_style.gd" id="1_partymarkerstyle"]
+
+[resource]
+script = ExtResource("1_partymarkerstyle")
+marker_radius = 18.0
+border_width = 2.0
+shadow_offset_y = 10.0
+shadow_radius = 12.0
+marker_fill_color = Color(0.11, 0.13, 0.16, 0.92)
+marker_border_color = Color(0.86, 0.82, 0.7, 0.95)
+player_ring_color = Color(0.306, 0.631, 1, 1)
+faction_colors = {
+"FACTION_BANDIT": Color(0.72549, 0.294118, 0.258824, 1),
+"FACTION_GUARD": Color(0.2, 0.54902, 0.560784, 1),
+"FACTION_LOCAL": Color(0.301961, 0.54902, 0.341176, 1),
+"FACTION_MERCHANT": Color(0.780392, 0.6, 0.180392, 1),
+"FACTION_PLAYER": Color(0.184314, 0.498039, 0.866667, 1)
+}
+flag_max_size = 30.0
+flag_vertical_offset = 0.0
+count_offset = Vector2(0, 24)
+count_font_size = 16

@@ -6,15 +6,22 @@ extends RefCounted
 ## 的直接子组（z_index = 0），因此这里的相对 z 值可以跨组统一排序。
 ## 实际 canvas z = UnitActor.z_index + UnitVisual.z_index + 部件 z。
 ##
-## 基础顺序：武器 → 马头 → 缨饰 → 人头 → 人身体 → 人右腿
-## → 马鞍 → 四条马腿 → 马身体 → 人左腿 → 影子。
-## 本阶段按需求把四条马腿移到马身体之前；马鞍、人体等其余关系保持原设计。
-## 马鞍与罩袍未在设计表单列：马鞍在马身体/马腿之前，罩袍紧贴人身体前方。
+## 基础顺序：右手武器 → 马头 → 缨饰 → 头盔 → 人头 → 左手武器
+## → 人身体 → 人右腿 → 马鞍 → 四条马腿 → 马身体 → 人左腿 → 影子。
+## 左右手武器使用独立层级：左手武器必须位于马头之后，避免遮挡马头。
+## 头盔位于人头之前；未装备头盔时只显示人头。
 
-const WEAPON: int = -10
+## 右手武器保持原有层级（长矛）。
+const RIGHT_HAND_WEAPON: int = -10
+## 兼容旧名称：现有长矛与测试继续引用 WEAPON。
+const WEAPON: int = RIGHT_HAND_WEAPON
 const MOUNT_HEAD: int = -20
 const PLUME: int = -30
+## 头盔位于人头之前、缨饰之后。
+const HELMET: int = -35
 const HEAD: int = -40
+## 左手武器位于马头之后，同时位于人头/身体之前，避免骑兵遮住马头。
+const LEFT_HAND_WEAPON: int = -45
 const TABARD: int = -49
 const BODY: int = -50
 const LEG_RIGHT: int = -60

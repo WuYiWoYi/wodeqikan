@@ -111,7 +111,7 @@ func _run() -> void:
 
 	var save := context.to_save_data()
 	_check(save.units.size() == 5, "存档包含 5 名士兵")
-	_check(save.parties.size() == 5, "存档包含 5 支部队")
+	_check(save.parties.size() == 9, "存档包含 9 支部队")
 	_check(SaveManager.save_game(TEST_SLOT, save) == OK, "第一次保存成功")
 
 	var loaded := SaveManager.load_game(TEST_SLOT)

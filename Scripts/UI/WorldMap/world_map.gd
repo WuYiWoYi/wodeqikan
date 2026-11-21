@@ -4,24 +4,37 @@ extends Node2D
 ## 只读取 WorldContext 的权威数据并生成表现节点；
 ## 移动、时间、存档操作全部通过管理器/GameManager 接口完成。
 
-const INTERACTION_RADIUS: float = 40.0
-const INTERACTION_EXIT_RADIUS: float = 64.0
 const PARTY_INTERACTION_RADIUS: float = 40.0
 const PARTY_INTERACTION_EXIT_RADIUS: float = 64.0
 ## 点击部队图标的判定半径（世界像素）。
 const PARTY_CLICK_RADIUS: float = 26.0
+## 点击地点的判定半径（世界像素）；地点面板只由主动点击打开。
+const SETTLEMENT_CLICK_RADIUS: float = 45.0
 ## 鼠标悬浮部队图标的判定半径；略大于点击半径便于触发。
 const PARTY_HOVER_RADIUS: float = 30.0
 const HOVER_PANEL_WIDTH: float = 320.0
 const HOVER_PANEL_LINE_HEIGHT: float = 22.0
 const BATTLE_SUMMARY_WIDTH: float = 360.0
 const BATTLE_SUMMARY_SEPARATOR: String = "────────────"
+const WORLD_LOG_WIDTH: float = 460.0
+const WORLD_LOG_HEIGHT: float = 220.0
 const CAMERA_FOLLOW_SPEED: float = 8.0
 const CAMERA_PAN_SPEED: float = 650.0
 const CAMERA_ZOOM_MIN: float = 0.5
 const CAMERA_ZOOM_MAX: float = 2.0
 ## 1920×1080 下保持与旧 1152×648 接近的大地图视野/图标比例。
 const CAMERA_DEFAULT_ZOOM: float = 1.5
+## 圆形部队标记样式集中配置。
+const PARTY_MARKER_STYLE_PATH: String = "res://Data/WorldMap/party_marker_style.tres"
+## 遭遇对话文本配置；缺失时使用脚本默认文本，不把对白写死在 UI 中。
+const ENCOUNTER_TEXT_CONFIG_PATH: String = "res://Data/Encounters/encounter_text_config.tres"
+## 底部 NPC 对话面板尺寸与边距（1920×1080 设计分辨率）。
+const NPC_DIALOGUE_PANEL_WIDTH: float = 960.0
+const NPC_DIALOGUE_PANEL_HEIGHT: float = 290.0
+const NPC_DIALOGUE_BOTTOM_MARGIN: float = 48.0
+const NPC_DIALOGUE_PORTRAIT_SIZE := Vector2(180.0, 220.0)
+## 固定屏幕地点名称与圆形标记顶部之间的屏幕间距（像素）。
+const SETTLEMENT_NAME_GAP_ABOVE_MARKER: float = 10.0
 
 @onready var map_background: MapBackground = $MapBackground
 @onready var world_entities: Node2D = $WorldEntities
@@ -63,6 +76,7 @@ var _party_manage_panel: PartyPanel = null
 var _party_manage_pause_active: bool = false
 
 var _encounter_panel: PanelContainer = null
+var _encounter_portrait: EncounterPortrait = null
 var _encounter_name_label: Label = null
 var _encounter_faction_label: Label = null
 var _encounter_troop_label: Label = null
@@ -72,6 +86,13 @@ var _encounter_fight_button: Button = null
 var _encounter_leave_button: Button = null
 var _encounter_pause_active: bool = false
 var _encounter_id: String = ""
+## 本次遭遇是否允许离开；ENEMY_PURSUIT 时为 false。
+var _encounter_leave_allowed: bool = true
+var _encounter_text_config: EncounterTextConfig = null
+
+## 普通部队对话（玩家主动接近）同样使用底部 NPC 对话布局。
+var _party_portrait: EncounterPortrait = null
+var _party_dialogue_label: Label = null
 
 var _battle_interaction_panel: PanelContainer = null
 var _battle_interaction_summary_label: Label = null
@@ -89,6 +110,11 @@ var _hover_signature: String = ""
 
 ## 同一场战斗只显示一个标记；参战部队图标暂时隐藏。
 var _party_icons: Dictionary = {}
+## 部队圆形标记样式；缺失资源时使用脚本默认值。
+var _party_marker_style: PartyMarkerStyle = null
+## 固定屏幕层的地点名称标签：{ settlement_id: SettlementNameTag }。
+var _settlement_name_layer: Control = null
+var _settlement_name_tags: Dictionary = {}
 var _battle_marker: BattleMarker = null
 var _battle_marker_id: String = ""
 var _battle_summary_panel: PanelContainer = null
@@ -96,6 +122,11 @@ var _battle_summary_title: Label = null
 var _battle_summary_content: VBoxContainer = null
 var _battle_summary_text: String = ""
 var _battle_summary_signature: String = ""
+
+## 固定在大地图左下角的世界日志面板。
+var _world_log_panel: PanelContainer = null
+var _world_log_scroll: ScrollContainer = null
+var _world_log_content: VBoxContainer = null
 
 var _save_dim: ColorRect = null
 var _save_panel: PanelContainer = null
@@ -121,13 +152,14 @@ func _ready() -> void:
 	map_background.set_world_size(_context.world_size)
 	_context.world_map_manager.world_bounds = Rect2(Vector2.ZERO, _context.world_size)
 
-	# 从小场景返回时，玩家仍站在村口；先锁住一次地点交互，
-	# 直到离开地点范围后才允许重新自动打开面板。
+	# 从小场景返回时记录当前站在村口的村庄，供地点面板的进入按钮使用；
+	# 地点面板不再因为玩家靠近而自动打开，只有主动点击才会显示。
 	_settlement_latch_id = GameManager.pending_settlement_latch_id
 	GameManager.pending_settlement_latch_id = ""
 
 	_build_ui()
 	_build_world_entities()
+	_build_settlement_name_tags()
 	_connect_time_signals()
 	if not EventBus.battle_started.is_connected(_on_battle_started):
 		EventBus.battle_started.connect(_on_battle_started)
@@ -143,12 +175,18 @@ func _ready() -> void:
 		_on_battle_participants_updated
 	):
 		EventBus.battle_participants_updated.connect(_on_battle_participants_updated)
+	if _context.world_log_manager != null \
+			and not _context.world_log_manager.entry_added.is_connected(
+				_on_world_log_entry_added
+			):
+		_context.world_log_manager.entry_added.connect(_on_world_log_entry_added)
 
 	camera.position = _player_party.world_position
 	_set_camera_zoom(CAMERA_DEFAULT_ZOOM)
 	_last_player_position = _player_party.world_position
 	_update_time_ui()
 	_update_player_info()
+	_rebuild_world_log()
 
 	# 若世界 tick 在大地图加载前已产生待处理遭遇，补一次 UI 呈现。
 	var pending: Dictionary = _context.encounter_manager.get_pending_player_encounter()
@@ -189,11 +227,11 @@ func _process(delta: float) -> void:
 		return
 
 	_update_camera(delta)
+	_update_settlement_name_tags()
 	_update_player_info()
 	_update_battle_display()
 	_update_focus_state()
 	_validate_battle_interaction()
-	_check_settlement_interaction()
 	_check_party_interaction()
 	_update_party_hover()
 	_last_player_position = _player_party.world_position
@@ -226,13 +264,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mouse_event := event as InputEventMouseButton
 		if mouse_event.pressed and mouse_event.button_index == MOUSE_BUTTON_LEFT:
-			var clicked_party := _find_party_at(get_global_mouse_position())
-			if clicked_party != null \
-					and clicked_party.party_id != _context.player_party_id \
-					and request_party_command(clicked_party.party_id):
-				get_viewport().set_input_as_handled()
-				return
-			request_player_move(get_global_mouse_position())
+			handle_left_click(get_global_mouse_position())
 			get_viewport().set_input_as_handled()
 			return
 
@@ -247,6 +279,36 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 
 
+## 鼠标左键统一入口：地点点击优先打开交互面板，其次才是部队指令与移动。
+## 地点面板不会由玩家移动或路径接近自动打开。
+func handle_left_click(world_position: Vector2) -> bool:
+	if _context == null or _player_party == null \
+			or _battle_transition_started or _is_input_blocked():
+		return false
+
+	var clicked_party := _find_party_at(world_position)
+	var clicked_settlement := _find_settlement_at(world_position)
+	if clicked_settlement != null:
+		# 地点与部队重叠时，以点击位置更近的对象为准。
+		var settlement_distance := world_position.distance_to(
+			clicked_settlement.world_position
+		)
+		# 玩家自己的图标不参与地点优先级比较，避免站在地点上时无法点击地点。
+		var party_distance: float = INF
+		if clicked_party != null \
+				and clicked_party.party_id != _context.player_party_id:
+			party_distance = world_position.distance_to(clicked_party.world_position)
+		if party_distance >= settlement_distance:
+			_open_settlement(clicked_settlement)
+			return true
+
+	if clicked_party != null \
+			and clicked_party.party_id != _context.player_party_id \
+			and request_party_command(clicked_party.party_id):
+		return true
+	return request_player_move(world_position)
+
+
 ## 设置玩家移动目标；成功时把基础倍率切回 1x。
 ## 只改基础倍率，不清除任何暂停原因；失败时完全不改变时间状态。
 func request_player_move(target: Vector2) -> bool:
@@ -258,7 +320,7 @@ func request_player_move(target: Vector2) -> bool:
 	if not _context.world_map_manager.set_party_target(_context.player_party_id, target):
 		return false
 
-	# 普通地图移动取消“主动追逐”语义；村庄/部队自动交互恢复。
+	# 普通地图移动取消“主动追逐”语义。
 	_player_party.focus_party_id = ""
 	_camera_offset = Vector2.ZERO
 	_set_world_speed(TimeManager.SPEED_NORMAL)
@@ -281,7 +343,9 @@ func request_player_follow(target_party_id: String) -> bool:
 	return true
 
 
-## 点击部队时：移动中的有效部队进入跟随，静止部队只前往当前位置。
+## 点击部队时：有效部队一律进入主动跟随。
+## 静止部队也可能在玩家接近途中开始巡逻，只记录当前位置会让追击丢失目标；
+## 跟随同时覆盖远距离点击（目标不在视野内）的情况。
 func request_party_command(target_party_id: String) -> bool:
 	if _context == null or _player_party == null or target_party_id.is_empty():
 		return false
@@ -292,21 +356,20 @@ func request_party_command(target_party_id: String) -> bool:
 		return false
 
 	var can_follow: bool = (
-		target.movement_state == PartyData.MovementState.MOVING
-		and target.is_available_for_world()
+		target.is_available_for_world()
 		and not target.member_unit_ids.is_empty()
 	)
 	if can_follow and request_player_follow(target_party_id):
 		return true
 	if request_player_move(target.world_position):
-		# 接近静止部队同样属于主动追逐目标，暂停无关自动交互。
+		# 战斗中/失效部队无法跟随，只前往其当前位置。
 		_player_party.focus_party_id = target_party_id
 		return true
 	return false
 
 
-## 清理已失效或已到达的追逐焦点。
-## 焦点存在时，村庄与其他部队的自动交互不会打断玩家当前行动。
+## 清理失效或已经远离的追逐焦点。
+## 到达主动点击的部队附近时保留焦点，用于只对该目标打开对话。
 func _update_focus_state() -> void:
 	if _player_party.focus_party_id.is_empty():
 		return
@@ -317,10 +380,14 @@ func _update_focus_state() -> void:
 			or not focus.is_available_for_world():
 		_player_party.focus_party_id = ""
 		return
-	# 到达目标、被遭遇/界面停止或追击失效后，结束追逐语义；
-	# 下一帧允许正常部队对话/村庄交互。
-	if _battle_transition_started \
-			or _player_party.movement_state != PartyData.MovementState.MOVING:
+	if _battle_transition_started:
+		_player_party.focus_party_id = ""
+		return
+	# 移动停止后不要立刻清除焦点：主动点击部队后会在到达/靠近时据此打开对话。
+	# 只有目标已经不在有效交互距离内时才结束追逐语义。
+	if _player_party.movement_state != PartyData.MovementState.MOVING \
+			and _player_party.world_position.distance_to(focus.world_position) \
+			> PARTY_INTERACTION_RADIUS:
 		_player_party.focus_party_id = ""
 
 
@@ -330,6 +397,22 @@ func _is_focusing_party() -> bool:
 
 func _find_party_at(world_position: Vector2) -> PartyData:
 	return _find_party_within(world_position, PARTY_CLICK_RADIUS)
+
+
+## 返回点击位置附近最近的地点；只用于主动点击判定，不做逐帧自动检测。
+func _find_settlement_at(world_position: Vector2) -> SettlementData:
+	if _context == null:
+		return null
+	var nearest: SettlementData = null
+	var nearest_distance: float = SETTLEMENT_CLICK_RADIUS
+	for settlement: SettlementData in _context.settlement_manager.get_all_settlements():
+		if settlement == null:
+			continue
+		var distance := settlement.world_position.distance_to(world_position)
+		if distance <= nearest_distance:
+			nearest_distance = distance
+			nearest = settlement
+	return nearest
 
 
 func _find_party_within(world_position: Vector2, radius: float) -> PartyData:
@@ -357,7 +440,18 @@ func _build_world_entities() -> void:
 		var party_icon: PartyIcon = PartyIcon.new()
 		party_icon.name = "PartyIcon_%s" % party.party_id
 		world_entities.add_child(party_icon)
-		party_icon.setup(party, party.party_id == _context.player_party_id)
+		var family := _get_family_config(party.family_id)
+		# 旗帜优先使用部队自身数据，其次家族旗帜；颜色同理。
+		var banner_path: String = party.banner_texture_path
+		if banner_path.is_empty() and family != null:
+			banner_path = family.banner_texture_path
+		party_icon.setup(
+			party,
+			party.party_id == _context.player_party_id,
+			_load_texture(banner_path),
+			family.primary_color if family != null else Color(0.0, 0.0, 0.0, 0.0),
+			_get_party_marker_style()
+		)
 		_party_icons[party.party_id] = party_icon
 		if party.party_id == _context.player_party_id:
 			_player_icon = party_icon
@@ -366,9 +460,90 @@ func _build_world_entities() -> void:
 		var settlement_icon: SettlementIcon = SettlementIcon.new()
 		settlement_icon.name = "SettlementIcon_%s" % settlement.settlement_id
 		world_entities.add_child(settlement_icon)
-		settlement_icon.setup(settlement)
+		var family := _get_family_config(settlement.family_id)
+		settlement_icon.setup(
+			settlement,
+			family,
+			_load_texture(family.banner_texture_path if family != null else "")
+		)
 
 	world_entities.y_sort_enabled = true
+
+
+func _get_family_config(family_id: String) -> FamilyConfig:
+	if _context == null or family_id.is_empty():
+		return null
+	return _context.family_registry.get_config(family_id)
+
+
+func _load_texture(path: String) -> Texture2D:
+	if path.is_empty() or not ResourceLoader.exists(path):
+		return null
+	return load(path) as Texture2D
+
+
+func _get_party_marker_style() -> PartyMarkerStyle:
+	if _party_marker_style == null:
+		if ResourceLoader.exists(PARTY_MARKER_STYLE_PATH):
+			_party_marker_style = load(PARTY_MARKER_STYLE_PATH) as PartyMarkerStyle
+		if _party_marker_style == null:
+			_party_marker_style = PartyMarkerStyle.create_default()
+	return _party_marker_style
+
+
+## 地点名称位于固定屏幕 UI 层；世界坐标每帧转换为屏幕坐标，
+## 因而文字大小不受相机缩放影响，但位置仍跟随建筑。
+func _build_settlement_name_tags() -> void:
+	if _ui_root == null or _context == null:
+		return
+	_settlement_name_layer = Control.new()
+	_settlement_name_layer.name = "SettlementNameLayer"
+	_settlement_name_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_set_full_rect(_settlement_name_layer)
+	_ui_root.add_child(_settlement_name_layer)
+	_settlement_name_tags.clear()
+
+	for settlement: SettlementData in _context.settlement_manager.get_all_settlements():
+		var tag := SettlementNameTag.new()
+		tag.name = "SettlementNameTag_%s" % settlement.settlement_id
+		_settlement_name_layer.add_child(tag)
+		tag.setup(settlement)
+		_settlement_name_tags[settlement.settlement_id] = tag
+	# 名称层放在 UI 最底层，避免覆盖地点/部队/日志面板。
+	_ui_root.move_child(_settlement_name_layer, 0)
+	_update_settlement_name_tags()
+
+
+func _update_settlement_name_tags() -> void:
+	if _settlement_name_layer == null or camera == null \
+			or _context == null:
+		return
+	var canvas_transform := get_viewport().get_canvas_transform()
+	var visible_rect := get_viewport_rect().grow(80.0)
+	for settlement: SettlementData in _context.settlement_manager.get_all_settlements():
+		var tag := _settlement_name_tags.get(
+			settlement.settlement_id
+		) as SettlementNameTag
+		if tag == null:
+			continue
+		var screen_position: Vector2 = (
+			canvas_transform * settlement.world_position
+		)
+		# 名称始终位于圆形标记正上方；半径按相机缩放换算，
+		# 文字本身保持固定屏幕尺寸。
+		var marker_radius: float = SettlementIcon.get_name_anchor_radius(
+			settlement.settlement_type
+		)
+		var anchor := screen_position - Vector2(
+			0.0,
+			marker_radius * camera.zoom.y + SETTLEMENT_NAME_GAP_ABOVE_MARKER
+		)
+		tag.visible = visible_rect.has_point(screen_position)
+		tag.set_screen_position(anchor)
+
+
+func get_settlement_name_tag(settlement_id: String) -> SettlementNameTag:
+	return _settlement_name_tags.get(settlement_id) as SettlementNameTag
 
 
 func _build_ui() -> void:
@@ -392,6 +567,7 @@ func _build_ui() -> void:
 	_build_party_manage_panel()
 	_build_party_hover_panel()
 	_build_battle_summary_panel()
+	_build_world_log_panel()
 	_build_save_panel()
 
 
@@ -527,47 +703,54 @@ func _build_party_dialogue_panel() -> void:
 	_party_panel = PanelContainer.new()
 	_party_panel.name = "PartyDialoguePanel"
 	_party_panel.visible = false
-	_party_panel.anchor_left = 1.0
-	_party_panel.anchor_top = 0.5
-	_party_panel.anchor_right = 1.0
-	_party_panel.anchor_bottom = 0.5
-	_party_panel.offset_left = -370.0
-	_party_panel.offset_top = -150.0
-	_party_panel.offset_right = -20.0
-	_party_panel.offset_bottom = 150.0
+	_apply_bottom_dialogue_layout(_party_panel)
 	_ui_root.add_child(_party_panel)
 
 	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 20)
-	margin.add_theme_constant_override("margin_right", 20)
+	margin.add_theme_constant_override("margin_left", 18)
+	margin.add_theme_constant_override("margin_right", 18)
 	margin.add_theme_constant_override("margin_top", 18)
 	margin.add_theme_constant_override("margin_bottom", 18)
 	_party_panel.add_child(margin)
 
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 20)
+	margin.add_child(row)
+
+	_party_portrait = EncounterPortrait.new()
+	_party_portrait.name = "PartyPortrait"
+	_party_portrait.custom_minimum_size = NPC_DIALOGUE_PORTRAIT_SIZE
+	_party_portrait.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_party_portrait.setup(_context.unit_manager)
+	row.add_child(_party_portrait)
+
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 10)
-	margin.add_child(column)
+	column.add_theme_constant_override("separation", 8)
+	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(column)
 
 	_party_name_label = _make_label("", 24)
 	_party_name_label.name = "PartyNameLabel"
-	_party_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(_party_name_label)
 
 	_party_faction_label = _make_label("", 15)
 	_party_faction_label.name = "PartyFactionLabel"
-	_party_faction_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(_party_faction_label)
 
 	_party_troop_label = _make_label("", 15)
 	_party_troop_label.name = "PartyTroopLabel"
-	_party_troop_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(_party_troop_label)
+
+	_party_dialogue_label = _make_label("", 16)
+	_party_dialogue_label.name = "PartyDialogueTextLabel"
+	_party_dialogue_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_party_dialogue_label.custom_minimum_size = Vector2(0.0, 52.0)
+	column.add_child(_party_dialogue_label)
 
 	_party_status_label = _make_label("", 13)
 	_party_status_label.name = "PartyDialogueStatus"
 	_party_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_party_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_party_status_label.custom_minimum_size = Vector2(0.0, 34.0)
+	_party_status_label.custom_minimum_size = Vector2(0.0, 30.0)
 	column.add_child(_party_status_label)
 
 	var spacer := Control.new()
@@ -654,62 +837,59 @@ func _build_battle_interaction_panel() -> void:
 	buttons.add_child(_battle_leave_button)
 
 
+## 屏幕下方的 NPC 遭遇对话：左侧领袖头像/剪影，右侧姓名、对白与动态选项。
 func _build_player_encounter_panel() -> void:
 	_encounter_panel = PanelContainer.new()
 	_encounter_panel.name = "PlayerEncounterPanel"
 	_encounter_panel.visible = false
-	_encounter_panel.anchor_left = 1.0
-	_encounter_panel.anchor_top = 0.5
-	_encounter_panel.anchor_right = 1.0
-	_encounter_panel.anchor_bottom = 0.5
-	_encounter_panel.offset_left = -390.0
-	_encounter_panel.offset_top = -190.0
-	_encounter_panel.offset_right = -20.0
-	_encounter_panel.offset_bottom = 190.0
+	_apply_bottom_dialogue_layout(_encounter_panel)
 	_ui_root.add_child(_encounter_panel)
 
 	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 20)
-	margin.add_theme_constant_override("margin_right", 20)
+	margin.add_theme_constant_override("margin_left", 18)
+	margin.add_theme_constant_override("margin_right", 18)
 	margin.add_theme_constant_override("margin_top", 18)
 	margin.add_theme_constant_override("margin_bottom", 18)
 	_encounter_panel.add_child(margin)
 
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 20)
+	margin.add_child(row)
+
+	_encounter_portrait = EncounterPortrait.new()
+	_encounter_portrait.name = "EncounterPortrait"
+	_encounter_portrait.custom_minimum_size = NPC_DIALOGUE_PORTRAIT_SIZE
+	_encounter_portrait.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_encounter_portrait.setup(_context.unit_manager)
+	row.add_child(_encounter_portrait)
+
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 10)
-	margin.add_child(column)
+	column.add_theme_constant_override("separation", 8)
+	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(column)
 
-	var title := _make_label("遭遇", 22)
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	column.add_child(title)
-
-	_encounter_name_label = _make_label("", 22)
+	_encounter_name_label = _make_label("", 24)
 	_encounter_name_label.name = "EncounterPartyNameLabel"
-	_encounter_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(_encounter_name_label)
 
 	_encounter_faction_label = _make_label("", 15)
 	_encounter_faction_label.name = "EncounterFactionLabel"
-	_encounter_faction_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(_encounter_faction_label)
 
 	_encounter_troop_label = _make_label("", 15)
 	_encounter_troop_label.name = "EncounterTroopLabel"
-	_encounter_troop_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(_encounter_troop_label)
 
-	_encounter_description_label = _make_label("", 16)
+	_encounter_description_label = _make_label("", 17)
 	_encounter_description_label.name = "EncounterDescriptionLabel"
 	_encounter_description_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_encounter_description_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_encounter_description_label.custom_minimum_size = Vector2(0.0, 54.0)
+	_encounter_description_label.custom_minimum_size = Vector2(0.0, 58.0)
 	column.add_child(_encounter_description_label)
 
 	_encounter_status_label = _make_label("", 13)
 	_encounter_status_label.name = "EncounterStatusLabel"
 	_encounter_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_encounter_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_encounter_status_label.custom_minimum_size = Vector2(0.0, 30.0)
+	_encounter_status_label.custom_minimum_size = Vector2(0.0, 28.0)
 	column.add_child(_encounter_status_label)
 
 	var spacer := Control.new()
@@ -717,6 +897,7 @@ func _build_player_encounter_panel() -> void:
 	column.add_child(spacer)
 
 	var buttons := HBoxContainer.new()
+	buttons.name = "EncounterOptions"
 	buttons.add_theme_constant_override("separation", 10)
 	column.add_child(buttons)
 
@@ -731,6 +912,18 @@ func _build_player_encounter_panel() -> void:
 	_encounter_leave_button.custom_minimum_size = Vector2(0.0, 44.0)
 	_encounter_leave_button.pressed.connect(_on_encounter_leave_pressed)
 	buttons.add_child(_encounter_leave_button)
+
+
+## 将所有遭遇/部队对话面板统一锚定在屏幕下方。
+func _apply_bottom_dialogue_layout(panel: PanelContainer) -> void:
+	panel.anchor_left = 0.5
+	panel.anchor_top = 1.0
+	panel.anchor_right = 0.5
+	panel.anchor_bottom = 1.0
+	panel.offset_left = -NPC_DIALOGUE_PANEL_WIDTH * 0.5
+	panel.offset_right = NPC_DIALOGUE_PANEL_WIDTH * 0.5
+	panel.offset_top = -NPC_DIALOGUE_BOTTOM_MARGIN - NPC_DIALOGUE_PANEL_HEIGHT
+	panel.offset_bottom = -NPC_DIALOGUE_BOTTOM_MARGIN
 
 
 func _on_player_encounter_requested(
@@ -767,15 +960,29 @@ func _on_player_encounter_requested(
 
 	_encounter_id = encounter_id
 	# 双方在 WorldMapManager 中已停止；这里再确保一次，并清除攻击意图。
+	# 待处理遭遇存在期间 WorldSimulation 不执行 AI，旧追击指令不会覆盖当前状态。
 	_context.world_map_manager.stop_party(_context.player_party_id)
 	_context.world_map_manager.stop_party(attacker_party_id)
 	attacker.attack_intent = false
 
-	_encounter_name_label.text = attacker.party_name
+	var reason := int(pending_encounter.get(
+		"reason", EncounterManager.EncounterReason.OTHER
+	)) as EncounterManager.EncounterReason
+	_encounter_leave_allowed = EncounterManager.can_leave_encounter(reason)
+	var leader := _context.party_manager.get_leader_unit(attacker_party_id)
+	_encounter_name_label.text = _party_leader_name(attacker, leader)
 	_encounter_faction_label.text = "阵营：%s" % _faction_display_name(attacker.faction_id)
 	_encounter_troop_label.text = "兵力：%d" % attacker.member_unit_ids.size()
-	_encounter_description_label.text = _encounter_description(attacker)
+	_encounter_description_label.text = _encounter_dialogue_text(reason, attacker)
 	_encounter_status_label.text = ""
+	if _encounter_portrait != null:
+		_encounter_portrait.show_leader(leader)
+	# 敌对部队主动追击并成功拦截时，只保留战斗等敌对处理选项。
+	# 隐藏并禁用离开按钮，避免通过等价按钮绕过拦截规则。
+	_encounter_leave_button.visible = _encounter_leave_allowed
+	_encounter_leave_button.disabled = not _encounter_leave_allowed
+	_encounter_fight_button.disabled = attacker.member_unit_ids.is_empty() \
+		or _player_party.member_unit_ids.is_empty()
 	_encounter_panel.visible = true
 
 	if not _encounter_pause_active:
@@ -789,12 +996,15 @@ func _on_player_encounter_requested(
 func cancel_player_encounter() -> void:
 	if _encounter_panel != null:
 		_encounter_panel.visible = false
+	if _encounter_portrait != null:
+		_encounter_portrait.clear()
 	if _encounter_pause_active:
 		TimeManager.pop_pause(GameManager.PAUSE_REASON_ENCOUNTER_DIALOGUE)
 		_encounter_pause_active = false
 	if _context != null:
 		_context.encounter_manager.clear_pending_player_encounter()
 	_encounter_id = ""
+	_encounter_leave_allowed = true
 	_set_time_buttons_enabled(true)
 	_update_time_ui()
 
@@ -851,8 +1061,11 @@ func _on_encounter_fight_pressed() -> void:
 
 ## 玩家选择撤退：清理待处理遭遇与暂停，记录拒绝触发范围；
 ## 双方保持当前停止位置，世界恢复原基础倍率，AI 可在下一次决策继续行动。
+## 敌对追击拦截（ENEMY_PURSUIT）不允许直接离开，即使按钮被程序化触发也会被拒绝。
 func _on_encounter_leave_pressed() -> void:
 	if _context == null or _encounter_panel == null or not _encounter_panel.visible:
+		return
+	if not _encounter_leave_allowed:
 		return
 	var pending: Dictionary = _context.encounter_manager.get_pending_player_encounter()
 	var attacker_id: String = str(pending.get("attacker_party_id", ""))
@@ -866,10 +1079,38 @@ func _on_encounter_leave_pressed() -> void:
 	_update_time_ui()
 
 
-func _encounter_description(attacker: PartyData) -> String:
-	if attacker != null and attacker.faction_id == FactionManager.BANDIT_FACTION_ID:
-		return "前面的家伙，留下你的财物！"
-	return "敌军拦住了你的去路！"
+func _encounter_text() -> EncounterTextConfig:
+	if _encounter_text_config == null:
+		if ResourceLoader.exists(ENCOUNTER_TEXT_CONFIG_PATH):
+			_encounter_text_config = load(
+				ENCOUNTER_TEXT_CONFIG_PATH
+			) as EncounterTextConfig
+		if _encounter_text_config == null:
+			_encounter_text_config = EncounterTextConfig.create_default()
+	return _encounter_text_config
+
+
+## 对白只来自配置：reason（为何遭遇）× 部队类型（谁在说话）。
+func _encounter_dialogue_text(
+	reason: EncounterManager.EncounterReason, party: PartyData
+) -> String:
+	var kind_key: String = party.get_kind_key() if party != null else "GENERIC"
+	return _encounter_text().get_text(
+		EncounterManager.reason_key(reason), kind_key
+	)
+
+
+func _party_leader(party: PartyData) -> UnitData:
+	if party == null or _context == null:
+		return null
+	return _context.party_manager.get_leader_unit(party.party_id)
+
+
+## 显示领袖名称；没有领袖数据时回退到部队名，避免空标题。
+func _party_leader_name(party: PartyData, leader: UnitData = null) -> String:
+	if leader != null and not leader.display_name.strip_edges().is_empty():
+		return leader.display_name
+	return party.party_name if party != null else "未知部队"
 
 
 func _build_party_manage_panel() -> void:
@@ -985,6 +1226,120 @@ func _build_battle_summary_panel() -> void:
 	_battle_summary_content.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_battle_summary_content.add_theme_constant_override("separation", 1)
 	column.add_child(_battle_summary_content)
+
+
+## 固定在大地图屏幕左下角的世界日志；内容只读 WorldLogManager。
+func _build_world_log_panel() -> void:
+	_world_log_panel = PanelContainer.new()
+	_world_log_panel.name = "WorldLogPanel"
+	_world_log_panel.anchor_left = 0.0
+	_world_log_panel.anchor_top = 1.0
+	_world_log_panel.anchor_right = 0.0
+	_world_log_panel.anchor_bottom = 1.0
+	_world_log_panel.offset_left = 12.0
+	_world_log_panel.offset_right = 12.0 + WORLD_LOG_WIDTH
+	_world_log_panel.offset_top = -54.0 - WORLD_LOG_HEIGHT
+	_world_log_panel.offset_bottom = -54.0
+	# PASS：滚动区域仍可滚轮查看历史，未处理的鼠标点击不会被面板永久吞掉。
+	_world_log_panel.mouse_filter = Control.MOUSE_FILTER_PASS
+	_ui_root.add_child(_world_log_panel)
+
+	var margin := MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_PASS
+	margin.add_theme_constant_override("margin_left", 12)
+	margin.add_theme_constant_override("margin_right", 12)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	_world_log_panel.add_child(margin)
+
+	var column := VBoxContainer.new()
+	column.mouse_filter = Control.MOUSE_FILTER_PASS
+	column.add_theme_constant_override("separation", 4)
+	margin.add_child(column)
+
+	var title := _make_label("世界日志", 16)
+	title.name = "WorldLogTitle"
+	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_child(title)
+
+	var separator := HSeparator.new()
+	separator.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_child(separator)
+
+	_world_log_scroll = ScrollContainer.new()
+	_world_log_scroll.name = "WorldLogScroll"
+	_world_log_scroll.mouse_filter = Control.MOUSE_FILTER_PASS
+	_world_log_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_world_log_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_world_log_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	column.add_child(_world_log_scroll)
+
+	_world_log_content = VBoxContainer.new()
+	_world_log_content.name = "WorldLogContent"
+	_world_log_content.mouse_filter = Control.MOUSE_FILTER_PASS
+	_world_log_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_world_log_content.add_theme_constant_override("separation", 3)
+	_world_log_scroll.add_child(_world_log_content)
+
+
+func _rebuild_world_log() -> void:
+	if _world_log_content == null or _context == null:
+		return
+	for child: Node in _world_log_content.get_children():
+		_world_log_content.remove_child(child)
+		child.queue_free()
+
+	var entries := _context.world_log_manager.get_entries()
+	if entries.is_empty():
+		var empty := _make_label("暂无世界事件", 12)
+		empty.name = "WorldLogEmpty"
+		empty.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		empty.modulate = Color(0.82, 0.82, 0.78)
+		_world_log_content.add_child(empty)
+		return
+
+	for index: int in range(entries.size()):
+		var entry: WorldLogEntry = entries[index]
+		var line: String = entry.text
+		if not entry.time_text.is_empty():
+			line = "%s  %s" % [entry.time_text, entry.text]
+		var label := _make_label(line, 12)
+		label.name = "WorldLogEntry_%d" % index
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		label.custom_minimum_size = Vector2(WORLD_LOG_WIDTH - 56.0, 0.0)
+		_world_log_content.add_child(label)
+
+	call_deferred("_scroll_world_log_to_bottom")
+
+
+func _scroll_world_log_to_bottom() -> void:
+	if _world_log_scroll == null:
+		return
+	var scroll_bar := _world_log_scroll.get_v_scroll_bar()
+	if scroll_bar != null:
+		_world_log_scroll.scroll_vertical = int(scroll_bar.max_value)
+
+
+func _on_world_log_entry_added(_entry: WorldLogEntry) -> void:
+	_rebuild_world_log()
+
+
+func get_world_log_text() -> String:
+	var lines: Array[String] = []
+	if _context != null:
+		for entry: WorldLogEntry in _context.world_log_manager.get_entries():
+			lines.append(entry.text)
+	return "\n".join(lines)
+
+
+func get_world_log_entry_count() -> int:
+	return _context.world_log_manager.get_entry_count() if _context != null else 0
+
+
+func is_world_log_visible() -> bool:
+	return _world_log_panel != null and _world_log_panel.visible
 
 
 func _update_party_hover() -> void:
@@ -1452,32 +1807,7 @@ func _set_camera_zoom(value: float) -> void:
 	camera.zoom = Vector2(zoom_value, zoom_value)
 
 
-func _check_settlement_interaction() -> void:
-	if _battle_transition_started:
-		return
-	if _save_panel.visible or _settlement_panel.visible or _party_panel.visible \
-			or _party_manage_panel.visible or _encounter_panel.visible \
-			or _battle_interaction_panel.visible:
-		return
-
-	if _settlement_latch_id.is_empty():
-		# 玩家正在主动追逐/接近部队时，路过村庄不打断当前行动。
-		if _is_focusing_party():
-			return
-		for settlement: SettlementData in _context.settlement_manager.get_all_settlements():
-			var closest := Geometry2D.get_closest_point_to_segment(
-				settlement.world_position, _last_player_position, _player_party.world_position
-			)
-			if closest.distance_to(settlement.world_position) <= INTERACTION_RADIUS:
-				_open_settlement(settlement)
-				return
-	else:
-		var active: SettlementData = _context.settlement_manager.get_settlement(_settlement_latch_id)
-		if active == null \
-				or _player_party.world_position.distance_to(active.world_position) > INTERACTION_EXIT_RADIUS:
-			_settlement_latch_id = ""
-
-
+## 只由玩家主动点击地点调用；设置当前地点并打开面板。
 func _open_settlement(settlement: SettlementData) -> void:
 	_settlement_latch_id = settlement.settlement_id
 	_player_party.focus_party_id = ""
@@ -1552,6 +1882,7 @@ func enter_village(settlement_id: String) -> bool:
 		return false
 
 	_settlement_entry_pending = false
+	EventBus.settlement_entered.emit(settlement_id, _context.player_party_id)
 	return true
 
 
@@ -1564,28 +1895,27 @@ func _check_party_interaction() -> void:
 		return
 
 	if _party_latch_id.is_empty():
-		# 玩家追逐/接近目标期间，路过其他部队不打开对话、不打断追逐。
-		if _is_focusing_party():
+		# 只有玩家主动点击过的目标才允许自动打开普通部队对话。
+		# 普通寻路或追击途中路过的中立/无关部队不再按距离强制弹窗。
+		if not _is_focusing_party():
 			return
-		for party: PartyData in _context.party_manager.get_all_parties():
-			if party.party_id == _context.player_party_id:
-				continue
-			# 已被击溃的空部队不再触发交互。
-			if party.member_unit_ids.is_empty():
-				continue
-			# 战斗中的部队不弹对话；敌对部队由 AI 直接发起战斗。
-			if not party.is_available_for_world():
-				continue
-			if _context.faction_manager.is_hostile(
-				_player_party.faction_id, party.faction_id
-			):
-				continue
-			var closest := Geometry2D.get_closest_point_to_segment(
-				party.world_position, _last_player_position, _player_party.world_position
-			)
-			if closest.distance_to(party.world_position) <= PARTY_INTERACTION_RADIUS:
-				_open_party_dialogue(party)
-				return
+		var focus := _context.party_manager.get_party(_player_party.focus_party_id)
+		if focus == null or focus.party_id == _context.player_party_id:
+			_player_party.focus_party_id = ""
+			return
+		if focus.member_unit_ids.is_empty() or not focus.is_available_for_world():
+			_player_party.focus_party_id = ""
+			return
+		# 敌对目标由 EncounterManager 的主动遭遇流程处理，不在普通对话入口开战。
+		if _context.faction_manager.is_hostile(
+			_player_party.faction_id, focus.faction_id
+		):
+			return
+		var closest := Geometry2D.get_closest_point_to_segment(
+			focus.world_position, _last_player_position, _player_party.world_position
+		)
+		if closest.distance_to(focus.world_position) <= PARTY_INTERACTION_RADIUS:
+			_open_party_dialogue(focus)
 	else:
 		var active := _context.party_manager.get_party(_party_latch_id)
 		if active == null \
@@ -1807,18 +2137,48 @@ func _open_party_dialogue(party: PartyData) -> void:
 		TimeManager.push_pause(GameManager.PAUSE_REASON_UI_PANEL)
 		_party_pause_active = true
 
-	_party_name_label.text = party.party_name
+	var leader := _party_leader(party)
+	_party_name_label.text = _party_leader_name(party, leader)
 	_party_faction_label.text = "阵营：%s" % _faction_display_name(party.faction_id)
 	_party_troop_label.text = "兵力：%d" % party.member_unit_ids.size()
+	_party_dialogue_label.text = _encounter_dialogue_text(
+		EncounterManager.EncounterReason.PLAYER_INITIATED, party
+	)
+	if _party_portrait != null:
+		_party_portrait.show_leader(leader)
 	_party_status_label.text = ""
-	var same_faction: bool = party.faction_id == _player_party.faction_id
+	var active_battle := _context.battle_manager.current_battle
+	# 已有战斗时：点击参战方且玩家可加入 → 改为“加入战斗”；
+	# 其余情况不允许另开战场，并在面板内说明真实原因。
+	var can_join_active: bool = active_battle != null \
+		and active_battle.is_party_involved(party.party_id) \
+		and _context.battle_manager.can_party_join(_context.player_party_id)
+	# 加入友军正在进行的战斗是协战，不算“同阵营开战”。
+	var same_faction: bool = party.faction_id == _player_party.faction_id \
+		and not can_join_active
+	var battle_block: String = ""
+	if active_battle != null and not can_join_active:
+		battle_block = _active_battle_block_reason(party)
+	var unavailable_reason: String = ""
+	if not can_join_active:
+		unavailable_reason = _party_unavailable_reason(party)
+	if not _player_party.is_available_for_world():
+		unavailable_reason = "玩家部队当前无法参战"
+
+	_party_fight_button.text = "加入战斗" if can_join_active else "发起战斗"
 	_party_fight_button.disabled = (
 		same_faction
 		or party.member_unit_ids.is_empty()
 		or _player_party.member_unit_ids.is_empty()
+		or not battle_block.is_empty()
+		or not unavailable_reason.is_empty()
 	)
 	if same_faction:
 		_party_status_label.text = "同一阵营无法开战"
+	elif not battle_block.is_empty():
+		_party_status_label.text = battle_block
+	elif not unavailable_reason.is_empty():
+		_party_status_label.text = unavailable_reason
 	elif _party_fight_button.disabled:
 		_party_status_label.text = "双方都需要至少一名士兵才能开战"
 
@@ -1835,22 +2195,91 @@ func _on_party_leave_pressed() -> void:
 
 func _close_party_dialogue() -> void:
 	_party_panel.visible = false
+	if _party_portrait != null:
+		_party_portrait.clear()
 	if _party_pause_active:
 		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
 		_party_pause_active = false
 
 
-## 只创建战斗会话并锁定部队，不切换场景；供 UI 与自动化测试共用。
+## 当前已有战斗时，返回禁止另开战场的说明；空字符串表示可以正常开始/加入。
+## BattleManager 全局只允许一场战斗，离屏 NPC 战斗同样会占用该槽位。
+func _active_battle_block_reason(enemy: PartyData) -> String:
+	var battle := _context.battle_manager.current_battle if _context != null else null
+	if battle == null:
+		return ""
+	if enemy == null or not battle.is_party_involved(enemy.party_id):
+		return "世界上已有另一场战斗正在进行，暂时无法另开战场"
+	if _context.battle_manager.get_join_side(_context.player_party_id) < 0:
+		return "对方正在战斗中，暂时无法开战"
+	return "对方正在战斗中，靠近战场后可加入战斗"
+
+
+## 目标部队当前是否无法作为新的独立战斗对手；返回空字符串表示可用。
+func _party_unavailable_reason(party: PartyData) -> String:
+	if party == null:
+		return "对方已经离开"
+	match party.battle_state:
+		PartyData.BattleState.DISABLED:
+			return "该部队已无法参战"
+		PartyData.BattleState.IN_BATTLE:
+			return "对方正在战斗中"
+		PartyData.BattleState.RETURNING:
+			return "对方正在返回途中"
+		_:
+			return ""
+
+
+## 加入当前战斗；成功后由调用方切换到战斗场景。
+func _join_active_battle(battle: BattleSession) -> BattleSession:
+	if battle == null or _context == null or _player_party == null:
+		return null
+	_context.world_map_manager.stop_party(_context.player_party_id)
+	_battle_transition_started = true
+	if not _context.battle_manager.try_join_battle(_context.player_party_id):
+		_battle_transition_started = false
+		_party_status_label.text = "无法加入该战斗"
+		return null
+	# try_join_battle 已压入战斗暂停；随后再释放对话暂停，避免中间帧恢复世界时间。
+	if _party_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_party_pause_active = false
+	_party_panel.visible = false
+	return _context.battle_manager.current_battle
+
+
+## 只创建/加入战斗会话并锁定部队，不切换场景；供 UI 与自动化测试共用。
 func begin_battle_with_party() -> BattleSession:
 	if _battle_transition_started or _context == null or _player_party == null:
 		return null
 	var enemy := _context.party_manager.get_party(_party_latch_id)
 	if enemy == null or enemy.party_id == _context.player_party_id:
 		return null
-	if enemy.faction_id == _player_party.faction_id:
+	if not _player_party.is_available_for_world() \
+			or _player_party.member_unit_ids.is_empty():
+		_party_status_label.text = "玩家部队当前无法参战"
+		return null
+
+	# 全局已有战斗：参战方允许加入；其它情况明确拒绝并说明原因。
+	# 加入友军战斗属于协战，因此先于“同阵营”检查。
+	var active_battle := _context.battle_manager.current_battle
+	var can_join_active: bool = active_battle != null \
+		and active_battle.is_party_involved(enemy.party_id) \
+		and _context.battle_manager.can_party_join(_context.player_party_id)
+	if enemy.faction_id == _player_party.faction_id and not can_join_active:
 		_party_status_label.text = "同一阵营无法开战"
 		return null
-	if _player_party.member_unit_ids.is_empty() or enemy.member_unit_ids.is_empty():
+	if active_battle != null:
+		if can_join_active:
+			return _join_active_battle(active_battle)
+		_party_status_label.text = _active_battle_block_reason(enemy)
+		return null
+
+	var unavailable_reason := _party_unavailable_reason(enemy)
+	if not unavailable_reason.is_empty():
+		_party_status_label.text = unavailable_reason
+		return null
+	if enemy.member_unit_ids.is_empty():
 		_party_status_label.text = "双方都需要至少一名士兵才能开战"
 		return null
 

@@ -47,9 +47,11 @@ GameManager (Autoload)
     ├── PartyManager                              │
     ├── SettlementManager                         │
     ├── FactionManager（阵营关系）                 │
+    ├── FamilyRegistry（家族视觉配置，只读）        │
     ├── VisionManager（视野查询）                  │
     ├── WorldMapManager（移动/跟随）               │
     ├── EncounterManager（统一遭遇/中途参战）      │
+    ├── WorldLogManager（世界事件日志）             │
     ├── AIManager                                 │
     ├── BattleManager                             │
     ├── DialogueManager                           │
@@ -95,9 +97,13 @@ GameManager (Autoload)
 | `ItemManager` | `ItemConfig` 静态注册与查询（消耗品/杂物） | 持有数量、玩家背包写操作 |
 | `PartyManager` | `PartyData` 增删查、成员关系维护、工资汇总 | 部队 AI |
 | `SettlementManager` | `SettlementData` 增删查、场景路径与序列化 | 地点图标、交互面板 |
+| `FamilyRegistry` | `FamilyConfig` 只读注册与查询（旗帜/罩袍/缨饰） | 外交、成员关系、战斗；家族不进入存档 |
+| `AppearanceConfig` | 士兵外观随机池（等级头盔、罩袍概率） | 运行时单位状态；选择结果写入 `UnitData.appearance` |
 | `DialogueManager` | `DialogueData` 会话与节点跳转 | UI 排版、条件/效果 |
 | `PlayerProfile` | 金币、物品数量（玩家部队共享背包） | 场景节点、装备槽位；装备写操作仍经 `UnitManager` |
-| `WorldMapManager` | 部队坐标、目标、移动、视野 | 图标节点、UI |
+| `WorldMapManager` | 部队坐标、目标、移动、跟随 | 图标节点、UI、遭遇判定 |
+| `EncounterManager` | 统一遭遇判定、玩家追击/被动拦截、战斗创建/加入委托 | 场景表现、UI 排版 |
+| `WorldLogManager` | 监听事件、生成受限日志历史、序列化预留 | 修改战斗/部队、操作 UI |
 | `AIManager` | 三层决策调度 | 直接改场景、UI |
 | `BattleManager` | `BattleSession`、部队锁定、结算 | 直接修改大地图节点 |
 | `DialogueManager` | 对话会话与节点跳转 | UI 排版 |
@@ -171,8 +177,10 @@ Manager → EventBus（只发事实）
 | `PartyData.world_position`、`target_position`、移动状态 | `WorldMapManager` | 其他系统只读 |
 | `PartyData.member_unit_ids` | `PartyManager` | 与 `UnitData.current_party_id` 双向一致 |
 | `PartyData.battle_state` | `BattleManager` | 锁定/解锁；全员阵亡→DISABLED |
+| `PartyData.control_type` / `party_kind` | `WorldInitializer` / 存档恢复（`PartyManager.apply_runtime_defaults()`） | 运行时只读；AI 调度只看 `control_type`，表现与配置按 `party_kind` 取 |
 | `PartyData.ai_type` / `ai_route_settlement_ids` | `WorldInitializer` | 运行时只读，不靠部队名称判断行为 |
 | `PartyData.ai_route_index` | `AIManager` | 到达路线点后推进下一步索引 |
+| 遭遇原因与待处理遭遇 | `EncounterManager` | UI 只读 `get_pending_encounter_reason()`，离场规则由 `can_leave_encounter()` 统一判定 |
 | `LordData` 目标与状态 | `AIManager` / 领主 AI | 通过明确方法 |
 | `SettlementData` 归属、驻军 | `SettlementManager` / 未来的战斗系统 | 地点交互只读 |
 | 世界时间、倍率 | `TimeManager` | 其他系统只能请求 |
@@ -271,10 +279,13 @@ Continue / Load Game
 | `party_position_changed` | `party_id` | `WorldMapManager` | 大地图图标 |
 | `party_battle_state_changed` | `party_id`, `battle_state` | `BattleManager` | 大地图图标、UI |
 | `settlement_interaction_requested` | `settlement_id` | 大地图输入/交互 | 地点面板 |
+| `settlement_entered` | `settlement_id`, `party_id` | `WorldMap` | 世界日志 |
+| `settlement_exited` | `settlement_id`, `party_id` | `VillageScene` | 世界日志 |
 | `battle_started` | `battle_id` | `BattleManager` | UI、场景控制器、音频 |
 | `battle_finished` | `battle_id`, `result` | `BattleManager` | UI、世界模拟 |
 | `battle_participant_joined` | `battle_id`, `party_id`, `side_index` | `BattleManager` | UI、统计、后续战斗场景 |
 | `battle_participants_updated` | `battle_id` | `BattleManager` | 大地图战斗标记/汇总 UI |
+| `entry_added`（WorldLogManager 自定义信号） | `WorldLogEntry` | `WorldLogManager` | 大地图世界日志面板 |
 | `player_encounter_requested` | `encounter_id`, `attacker_party_id`, `target_party_id` | `EncounterManager` | WorldMap 强制遭遇对话 |
 | `player_battle_interaction_requested` | `interaction_id`, `battle_id` | `EncounterManager` | WorldMap 加入/离开面板 |
 | `unit_died` | `unit_id`, `party_id` | `BattleManager` / `UnitManager` | UI、统计 |

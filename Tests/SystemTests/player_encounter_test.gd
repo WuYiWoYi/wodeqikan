@@ -111,12 +111,25 @@ func _run() -> void:
 
 	var fight_button := panel.find_child("EncounterFightButton", true, false) as Button
 	var retreat_button := panel.find_child("EncounterLeaveButton", true, false) as Button
-	_check(fight_button != null, "遭遇对话包含战斗按钮")
-	_check(retreat_button != null and retreat_button.text == "撤退",
-		"遭遇对话包含撤退按钮")
+	_check(fight_button != null and fight_button.visible, "遭遇对话提供战斗选项")
 	_check(
-		panel.find_children("*", "Button", true, false).size() == 2,
-		"遭遇对话提供战斗与撤退两个选项"
+		context.encounter_manager.get_pending_encounter_reason()
+		== EncounterManager.EncounterReason.ENEMY_PURSUIT,
+		"记录敌对追击拦截的遭遇原因"
+	)
+	_check(
+		retreat_button != null and not retreat_button.visible
+		and retreat_button.disabled,
+		"敌对追击成功后不显示离开选项且按钮不可用"
+	)
+	_check(
+		panel.anchor_top >= 0.99 and panel.anchor_bottom >= 0.99,
+		"遭遇对话位于屏幕下方"
+	)
+	var portrait := panel.find_child("EncounterPortrait", true, false) as EncounterPortrait
+	_check(
+		portrait != null and portrait.has_leader_visual(),
+		"遭遇对话显示对方领袖头像/剪影"
 	)
 
 	# 对话期间双方停止移动。

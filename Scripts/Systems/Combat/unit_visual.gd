@@ -22,6 +22,8 @@ const LOCOMOTION_BLEND_TIME: float = 0.18
 var unit_data: UnitData = null
 var _human_visual: Node2D = null
 var _horse_visual: Node2D = null
+## { slot_name: EquipmentConfig }，用于头部/左手/右手装备表现；为空时使用默认长矛与头部。
+var _equipment_configs: Dictionary = {}
 var _facing: float = -1.0
 var _mounted: bool = false
 var _plume_texture_path: String = HumanVisualScript.PLUME_TEXTURE_PATH
@@ -31,8 +33,9 @@ var _locomotion_blend: float = 0.0
 var _locomotion_moving: bool = false
 
 
-func setup(data: UnitData) -> void:
+func setup(data: UnitData, equipment_configs: Dictionary = {}) -> void:
 	unit_data = data
+	_equipment_configs = equipment_configs.duplicate()
 	_ensure_groups()
 	if unit_data == null:
 		_human_visual.clear_parts()
@@ -52,10 +55,70 @@ func rebuild() -> void:
 		_mounted = false
 		return
 
-	_human_visual.rebuild(get_faction_color(), _plume_texture_path)
+	# 外观选择（家族罩袍、领袖缨饰、等级头盔、家族长矛）在创建时一次性
+	# 写入 UnitData.appearance；本类只消费最终结果，不包含任何家族分支规则。
+	var appearance := UnitAppearance.get_appearance(unit_data)
+	var tabard_texture_path: String = str(
+		appearance.get("tabard_texture_path", "")
+	)
+	var plume_texture_path: String = _plume_texture_path
+	if plume_texture_path.is_empty():
+		plume_texture_path = str(appearance.get("plume_texture_path", ""))
+	_human_visual.rebuild(
+		get_tabard_color(), plume_texture_path, tabard_texture_path
+	)
+	_apply_equipment_visuals()
 	_horse_visual.rebuild()
 	set_mounted(unit_data.is_mounted)
 	set_facing(_facing)
+
+
+## 根据装备槽位的视觉配置替换/增加部件；缺少贴图时保持默认表现。
+func _apply_equipment_visuals() -> void:
+	var appearance := UnitAppearance.get_appearance(unit_data)
+	var weapon_applied: bool = false
+	var weapon := _equipment_configs.get("WEAPON") as EquipmentConfig
+	if weapon != null and unit_data.equipment.has("WEAPON") \
+			and not weapon.visual_texture_path.is_empty():
+		_human_visual.set_right_hand_weapon_texture(
+			weapon.visual_texture_path, weapon.visual_layer, weapon.visual_anchor
+		)
+		weapon_applied = true
+	# 没有武器装备时使用家族长矛；它只改变表现，不改变武器/属性数据。
+	if not weapon_applied:
+		var family_spear: String = str(appearance.get("spear_texture_path", ""))
+		if not family_spear.is_empty():
+			_human_visual.set_right_hand_weapon_texture(family_spear)
+
+	var offhand := _equipment_configs.get("OFFHAND") as EquipmentConfig
+	if offhand != null and unit_data.equipment.has("OFFHAND") \
+			and not offhand.visual_texture_path.is_empty():
+		_human_visual.set_left_hand_weapon_texture(
+			offhand.visual_texture_path, offhand.visual_layer, offhand.visual_anchor
+		)
+
+	# 装备头盔优先；没有 HEAD 装备时显示按等级随机并持久化的外观头盔。
+	var head_applied: bool = false
+	var head := _equipment_configs.get("HEAD") as EquipmentConfig
+	if head != null and unit_data.equipment.has("HEAD") \
+			and not head.visual_texture_path.is_empty():
+		_human_visual.set_helmet_texture(
+			head.visual_texture_path, head.visual_layer, head.visual_anchor
+		)
+		head_applied = true
+	if not head_applied:
+		var appearance_helmet: String = str(
+			appearance.get("helmet_texture_path", "")
+		)
+		if not appearance_helmet.is_empty():
+			_human_visual.set_helmet_texture(appearance_helmet)
+
+
+## 运行时更新装备视觉配置并重建部件；不修改 UnitData 的装备数据。
+func set_equipment_configs(equipment_configs: Dictionary) -> void:
+	_equipment_configs = equipment_configs.duplicate()
+	if unit_data != null:
+		rebuild()
 
 
 func set_mounted(mounted: bool) -> void:
@@ -221,6 +284,19 @@ func get_faction_color() -> Color:
 	if unit_data == null:
 		return DEFAULT_FACTION_COLOR
 	return FACTION_COLORS.get(unit_data.faction_id, DEFAULT_FACTION_COLOR)
+
+
+## 罩袍着色优先级：家族外观持久化的颜色 > 阵营默认色。
+## 家族贴图存在时颜色不会覆盖贴图，仅作为缺失资源时的回退。
+func get_tabard_color() -> Color:
+	if unit_data == null:
+		return DEFAULT_FACTION_COLOR
+	var color_text: String = UnitAppearance.get_appearance(unit_data).get(
+		"tabard_color", ""
+	)
+	if color_text.is_empty():
+		return get_faction_color()
+	return Color.from_string(color_text, get_faction_color())
 
 
 func get_human_visual() -> Node2D:

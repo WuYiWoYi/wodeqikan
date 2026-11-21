@@ -6,9 +6,11 @@ extends Node2D
 ## 战斗结算统一由 BattleManager.finish_battle() 执行。
 
 const BATTLEFIELD_SIZE := Vector2(1280.0, 720.0)
-## 初始部署：双方距左右边界 160，质心间距约 906（上一版 220 / 约 786）。
-## 只调整这一处边距，不改双方内部队形结构；仍保证所有单位在战场边界内。
-const SPAWN_MARGIN_X: float = 160.0
+## 初始部署：双方靠近左右边界，阵线间距约 1100（含列间距后质心约 1040）。
+## 这是屏幕战斗唯一的初始距离参数；所有创建入口（玩家遭遇、AI 遭遇、
+## 多方中途加入）都经过 BattleScene，不会各自写不同距离。
+const SPAWN_MARGIN_X: float = 90.0
+const INITIAL_DEPLOYMENT_DISTANCE: float = BATTLEFIELD_SIZE.x - SPAWN_MARGIN_X * 2.0
 const SPAWN_SPACING_X: float = 54.0
 const SPAWN_SPACING_Y: float = 64.0
 
@@ -19,12 +21,16 @@ const BATTLE_CAMERA_Y_OFFSET: float = 30.0
 ## 集群/队形参数集中配置。
 const FORMATION_REFRESH_INTERVAL: float = 0.4
 const NEIGHBOR_REFRESH_INTERVAL: float = 0.3
-const NEIGHBOR_RADIUS: float = 52.0
-const FORMATION_SPACING: float = 34.0
+const NEIGHBOR_RADIUS: float = 56.0
+const FORMATION_SPACING: float = 40.0
 ## 骑乘单位连人带马更宽，队形槽位需要更大间距。
-const FORMATION_SPACING_MOUNTED: float = 46.0
+const FORMATION_SPACING_MOUNTED: float = 56.0
 const PARTY_LANE_SPACING: float = 170.0
-const FORMATION_STANDOFF: float = 28.0
+## 接敌前两军前排槽位之间保留的空隙；双方各自在自己的半场列阵。
+const SIDE_LINE_GAP: float = 90.0
+## 双方质心接近到该距离后视为已接敌，队形自动放松。
+const CONTACT_DISTANCE: float = 220.0
+const CONTACT_SPACING_MULTIPLIER: float = 1.35
 
 @onready var characters: Node2D = $World/Characters
 @onready var camera: Camera2D = $Camera2D
@@ -112,6 +118,7 @@ func _ready() -> void:
 	_assign_initial_control()
 	_update_formations()
 	_refresh_neighbor_cache()
+	_refresh_target_claims()
 
 	_camera_rig = SceneCameraRig.new()
 	_camera_rig.setup(
@@ -157,6 +164,7 @@ func _physics_process(delta: float) -> void:
 	if _neighbor_timer >= NEIGHBOR_REFRESH_INTERVAL:
 		_neighbor_timer = fmod(_neighbor_timer, NEIGHBOR_REFRESH_INTERVAL)
 		_refresh_neighbor_cache()
+		_refresh_target_claims()
 
 	if _camera_rig != null:
 		_camera_rig.update(
@@ -569,11 +577,19 @@ func _update_formations() -> void:
 
 		var own_centroid := _centroid(own_controllers)
 		var enemy_centroid := _centroid(enemy_controllers)
+		var line_distance := own_centroid.distance_to(enemy_centroid)
 		var forward := enemy_centroid - own_centroid
 		if forward.length_squared() < 0.0001:
 			forward = Vector2.RIGHT if side_index < enemy_side else Vector2.LEFT
 		forward = forward.normalized()
 		var right := Vector2(-forward.y, forward.x)
+		# 双方各自在自己的半场列阵：推进到距敌方阵线约 SIDE_LINE_GAP 处，
+		# 而不是让两侧共用中点坐标。接敌后队形自动放松。
+		var advance: float = maxf(
+			0.0, minf(line_distance * 0.45, line_distance * 0.5 - SIDE_LINE_GAP * 0.5)
+		)
+		var line_center := own_centroid + forward * advance
+		var loose_spacing: bool = line_distance <= CONTACT_DISTANCE
 
 		var party_ids: Array[String] = []
 		for party_id: String in _session.get_side_party_ids(side_index):
@@ -597,6 +613,8 @@ func _update_formations() -> void:
 				if controller.unit_data != null and controller.unit_data.is_mounted:
 					spacing = FORMATION_SPACING_MOUNTED
 					break
+			if loose_spacing:
+				spacing *= CONTACT_SPACING_MULTIPLIER
 			var slots := _formation_manager.compute_slots(
 				formation_type, controllers.size(), spacing
 			)
@@ -604,13 +622,7 @@ func _update_formations() -> void:
 				(float(party_index) - (float(party_count) - 1.0) * 0.5)
 				* PARTY_LANE_SPACING
 			)
-			# 两军在双方质心中点附近列阵，避免双方阵型中心互换。
-			var midpoint := (own_centroid + enemy_centroid) * 0.5
-			var center: Vector2 = (
-				midpoint
-				- forward * (FORMATION_STANDOFF * 0.5)
-				+ right * lane
-			)
+			var center: Vector2 = line_center + right * lane
 			if _party_move_orders.has(party_id):
 				center = _party_move_orders[party_id] as Vector2
 			var count: int = mini(controllers.size(), slots.size())
@@ -643,6 +655,26 @@ func _refresh_neighbor_cache() -> void:
 			if a.get_position().distance_to(b.get_position()) <= NEIGHBOR_RADIUS:
 				a.nearby_controllers.append(b)
 				b.nearby_controllers.append(a)
+
+
+## 周期统计每个战斗侧的目标占用情况，供 UnitController 分散选择目标。
+## 只遍历己方控制器，不按单位扫描全场，开销与邻居缓存同阶。
+func _refresh_target_claims() -> void:
+	for side_index: int in _side_order:
+		var controllers := _side_controllers.get(
+			side_index, []
+		) as Array[UnitController]
+		var counts: Dictionary = {}
+		for controller: UnitController in controllers:
+			if controller == null or not controller.is_alive():
+				continue
+			var target_id: String = controller.get_target_unit_id()
+			if target_id.is_empty():
+				continue
+			counts[target_id] = int(counts.get(target_id, 0)) + 1
+		for controller: UnitController in controllers:
+			if controller != null:
+				controller.set_target_claim_counts(counts)
 
 
 func _build_ui() -> void:
@@ -878,7 +910,9 @@ func _spawn_side(side_index: int) -> void:
 		)
 		var actor := UnitActor.new()
 		characters.add_child(actor)
-		actor.setup(unit, state, player_side)
+		actor.setup(
+			unit, state, player_side, _visual_equipment_configs(unit)
+		)
 
 		var controller := UnitController.new()
 		controller.setup(unit, state, player_side, actor, Rect2(Vector2.ZERO, BATTLEFIELD_SIZE))
@@ -887,6 +921,20 @@ func _spawn_side(side_index: int) -> void:
 		_actors[unit_id] = actor
 		_controllers[unit_id] = controller
 		controllers.append(controller)
+
+
+## 为 UnitVisual 提供当前装备槽位的视觉配置；缺失配置时保持默认长矛/头部。
+func _visual_equipment_configs(unit: UnitData) -> Dictionary:
+	var configs: Dictionary = {}
+	if unit == null or _context == null:
+		return configs
+	for slot_key_value: Variant in unit.equipment.keys():
+		var slot_key: String = str(slot_key_value)
+		var equipment_id: String = str(unit.equipment.get(slot_key_value, ""))
+		var equipment := _context.unit_manager.get_equipment_config(equipment_id)
+		if equipment != null:
+			configs[slot_key] = equipment
+	return configs
 
 
 func _spawn_position(

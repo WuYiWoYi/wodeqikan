@@ -35,7 +35,10 @@ func _run() -> void:
 	_check(_player != null, "玩家部队存在")
 	if _player == null:
 		return
-	_check(_player.member_unit_ids.size() == 7, "玩家测试兵力为 7")
+	_check(
+		_player.member_unit_ids.size() == WorldInitializer.PLAYER_TOTAL_MEMBER_COUNT,
+		"玩家初始兵力完整"
+	)
 
 	GameManager.world_context = _context
 	GameManager.player_party_id = _context.player_party_id

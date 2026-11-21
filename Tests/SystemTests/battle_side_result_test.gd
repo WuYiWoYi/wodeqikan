@@ -107,8 +107,9 @@ func _run() -> void:
 	if result != null:
 		_check(result.winning_side_index == 1, "获胜侧为敌方")
 		_check(
-			result.get_party_casualties(_player.party_id) == 7,
-			"玩家部队伤亡 5"
+			result.get_party_casualties(_player.party_id)
+				== WorldInitializer.PLAYER_TOTAL_MEMBER_COUNT,
+			"玩家部队全员伤亡"
 		)
 		_check(
 			result.get_party_casualties(_ally.party_id) == 2,

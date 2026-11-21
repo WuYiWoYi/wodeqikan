@@ -36,7 +36,10 @@ func _run() -> void:
 	_check(player != null and enemy != null, "玩家与敌方部队存在")
 	if player == null or enemy == null:
 		return
-	_check(player.member_unit_ids.size() == 7, "玩家测试兵力为 7")
+	_check(
+		player.member_unit_ids.size() == WorldInitializer.PLAYER_TOTAL_MEMBER_COUNT,
+		"玩家初始兵力完整"
+	)
 	_check(enemy.member_unit_ids.size() == 5, "敌方测试兵力为 5")
 
 	# 商队初始位于橡木村；把它移到远离地点的空地，避免地点面板抢占对话。
@@ -48,6 +51,8 @@ func _run() -> void:
 	player.world_position = enemy.world_position + Vector2(-20.0, 0.0)
 	player.target_position = player.world_position
 	player.movement_state = PartyData.MovementState.IDLE
+	# 新规则：只有玩家主动点击/选择的部队才自动打开普通对话。
+	player.focus_party_id = enemy.party_id
 
 	GameManager.world_context = _context
 	GameManager.player_party_id = _context.player_party_id
@@ -102,10 +107,11 @@ func _run() -> void:
 	player.world_position = enemy.world_position + Vector2(-100.0, 0.0)
 	await get_tree().process_frame
 	await get_tree().process_frame
+	player.focus_party_id = enemy.party_id
 	player.world_position = enemy.world_position + Vector2(-20.0, 0.0)
 	await get_tree().process_frame
 	await get_tree().process_frame
-	_check(panel.visible, "离开范围后再次接近可重新打开对话")
+	_check(panel.visible, "重新主动点击后再次接近可打开对话")
 
 	var fight_button := _map.find_child("PartyFightButton", true, false) as Button
 	_check(fight_button != null and not fight_button.disabled, "双方有兵时发起战斗可用")
@@ -117,7 +123,10 @@ func _run() -> void:
 	if session == null:
 		return
 	_check(_context.battle_manager.current_battle == session, "BattleManager 持有战斗会话")
-	_check(session.attacker_unit_ids.size() == 7, "玩家 7 名士兵进入会话")
+	_check(
+		session.attacker_unit_ids.size() == player.member_unit_ids.size(),
+		"玩家全部士兵进入会话"
+	)
 	_check(session.defender_unit_ids.size() == 5, "敌方 5 名士兵进入会话")
 	_check(player.battle_state == PartyData.BattleState.IN_BATTLE, "玩家部队已锁定")
 	_check(enemy.battle_state == PartyData.BattleState.IN_BATTLE, "敌方部队已锁定")

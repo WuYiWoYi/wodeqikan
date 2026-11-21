@@ -174,13 +174,19 @@ func _test_new_game_composition() -> void:
 			mounted_unit = unit
 		else:
 			foot_count += 1
-	_check(player.member_unit_ids.size() == 7, "玩家部队包含 7 名成员")
+	_check(
+		player.member_unit_ids.size() == WorldInitializer.PLAYER_TOTAL_MEMBER_COUNT,
+		"玩家部队包含全部初始成员"
+	)
 	_check(hero_count == 1, "保留 1 名玩家角色")
 	_check(foot_count >= 1, "存在普通步兵")
-	_check(mounted_count == 3, "玩家部队包含 3 名骑乘测试士兵")
+	_check(
+		mounted_count == WorldInitializer.PLAYER_MOUNTED_TRAINED_COUNT,
+		"玩家部队骑乘士兵数量符合配置"
+	)
 	_check(
 		context.player_profile.get_item_count(MOUNT_ID) == 1,
-		"新游戏马匹库存与已装备数量一致（4 - 3）"
+		"新游戏马匹库存与已装备数量一致"
 	)
 	_check(
 		mounted_unit != null and mounted_unit.config_id == "infantry_trained",

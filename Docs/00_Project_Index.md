@@ -1,6 +1,6 @@
 # 我的骑砍 · 项目总索引
 
-**文档版本：** V0.20（阶段 6：小地图摄像机、按小时离屏战斗、追击接触与战斗 UI）
+**文档版本：** V0.25（修复已有战斗时普通部队对话的战斗占用提示）
 **更新日期：** 2026-11-21
 **引擎：** Godot 4.6.1 / GDScript
 **源规划：** [2D 中世纪沙盒战略游戏核心架构设计与开发规划 V0.2](../md/2D%20中世纪沙盒战略游戏核心架构设计与开发规划.md)
@@ -43,9 +43,11 @@ WorldContext（一局游戏，跨场景常驻）
 ├── PartyManager
 ├── SettlementManager
 ├── FactionManager   阵营关系
+├── FamilyRegistry   家族视觉配置（旗帜/罩袍/缨饰）
 ├── VisionManager    视野查询
 ├── WorldMapManager  移动/跟随
 ├── EncounterManager 统一遭遇/中途参战
+├── WorldLogManager  世界事件日志
 ├── AIManager
 ├── BattleManager
 ├── DialogueManager
@@ -69,7 +71,8 @@ WorldContext（一局游戏，跨场景常驻）
 
 | 文档 | 职责 |
 |---|---|
-| [Systems/World_Map_System.md](Systems/World_Map_System.md) | 大地图坐标、移动、视野、遭遇 |
+| [Systems/World_Map_System.md](Systems/World_Map_System.md) | 大地图坐标、移动、视野、遭遇、战斗标记与日志面板 |
+| [Systems/World_Log_System.md](Systems/World_Log_System.md) | 世界事件日志、类型、上限与 UI 数据来源 |
 | [Systems/Time_System.md](Systems/Time_System.md) | 时间域、倍率、暂停栈、固定步长 |
 | [Systems/Scene_System.md](Systems/Scene_System.md) | 大小场景切换与场景职责 |
 | [Systems/Unit_System.md](Systems/Unit_System.md) | UnitData、表现层级、UnitController、攻击 |
@@ -131,8 +134,13 @@ WorldContext（一局游戏，跨场景常驻）
 - 2026-11-21 优化：马腿移到马身之前；步兵/骑兵待机/移动动画；战斗移动 ×0.6、部署边距 220；1920×1080 原生显示 + 战斗相机 2 倍；武器决定攻击距离；360°定向矩形攻击（单次单目标）；最小间距实体碰撞。
 - 2026-11-21 优化：步兵等幅反相步态；马身主导的跑步动态与克制马腿；玩家无敌人也可自由出矛；攻击后长矛保持 4 秒再恢复；骑乘战斗速度 0.84；部署边距 160（质心间距约 906）。
 - 2026-11-21 优化：步兵腿幅降至 1.5/0.6/0.04；部队 UI 复用 UnitVisual 播放步兵/骑兵待机；马腿改为前后成组跃马；长矛增加方向性后移前摇与 6 px 前伸戳击。
+- 2026-11-21 修复：世界上已有离屏战斗时，普通部队对话不再只显示“无法开始战斗”；无关部队禁用按钮并显示占用原因，参战方可直接“加入战斗”。
 - 2026-11-21 阶段 6：村庄进入/对话/越界返回；大地图追逐不被打断；部队图标只显示人数与悬浮构成；三级兵种（10/50、20/100、25/180）、工资、金币、背包马匹上下马、消耗凭证晋升；世界时间从 1103-01-01 起，6 秒 = 1 小时，显示年月日 + 时间段。
-- 2026-11-21 阶段 6（大地图战斗与小地图视角）：村庄/战斗共用 `SceneCameraRig`（960×540 统一视野、跟随、F 自由视角、边界）；离屏 AI 战斗每游戏小时按战力/等级/骑乘/剩余生命与随机波动结算；玩家追击同向目标可在 50 世界单位内接触且不回弹；同场战斗合并为单标记并按 `side_index` 分组汇总；遭遇面板提供战斗/撤退。
+- 2026-11-21 阶段 6（大地图战斗与小地图视角）：村庄/战斗共用 `SceneCameraRig`（960×540 统一视野、跟随、F 自由视角、边界）；离屏 AI 战斗每游戏小时按战力/等级/骑乘/剩余生命与随机波动结算；玩家追击同向目标可在 50 世界单位内接触且不回弹；同场战斗合并为单标记并按 `side_index` 分组汇总；遭遇面板提供战斗/撤退（后续改为底部 NPC 对话，敌对追击禁止离开）。
+- 2026-11-21 阶段 6（世界日志/美术层级/战斗表现）：大地图左下角世界日志（战斗、胜负、消灭、遭遇、进出村庄，100 条上限与滚动）；右手武器 `-10`、左手武器 `-45` 独立层级；人物头部与头盔分离并接入装备视觉字段；中立/无关部队不再按距离自动弹窗，自动遭遇要求实际追击关系；单位名称与满血隐藏的生命条拆为独立节点。
+- 2026-11-21 阶段 6（家族领袖/NPC 部队/地图表现）：新增 `FamilyConfig`/`FamilyRegistry` 与两家族美术配置；`UnitAppearance` 按 tier 生成并持久化头盔/罩袍/领袖缨饰/家族长矛；巴里、墨西西两村与各 10 人 NPC 家族骑士；新增东路/荒野强盗；`PartyData.leader_unit_id` 统一玩家与 NPC 领袖；部队图标改为圆形家族旗帜标记；地点名称迁移到固定屏幕 UI；大地图实际速度统一 ×0.5。
+- 2026-11-21 阶段 6 后续（统一部队架构与遭遇交互）：`PartyData` 增加 `control_type`/`party_kind`/`banner_texture_path`，旧存档读取时推断且不改位置/路线/成员；`AIManager` 只调度 AI 控制部队；遭遇面板迁至屏幕下方并复用 `UnitVisual` 显示领袖头像/默认剪影；`EncounterReason` 区分 `ENEMY_PURSUIT` 等来源，敌对追击成功时禁止离开；对白来自 `EncounterTextConfig`。
+- 2026-11-21 阶段 6 后续（村庄表现/玩家扩编/战斗集群）：部队标记恢复 18/30 原尺寸；村庄改用半径 32、旗帜 76 的独立圆形标记，名称固定显示在标记正上方；玩家初始部队扩编为 12 人（1 英雄 + 5 民兵 + 6 职业步兵，4 名骑乘）；小地图战斗初始阵线间距 1100，双方半场列阵、接敌后队形放松，并通过目标占用、包围角度与局部分离减少扎堆。
 
 详见 [Development/Current_Status.md](Development/Current_Status.md)。
 
@@ -167,6 +175,9 @@ Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/multi_pa
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/unit_tier_wage_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/time_calendar_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/offscreen_battle_hourly_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/world_log_manager_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/family_appearance_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/party_architecture_test.tscn
 
 # 系统测试套件
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/skeleton_smoke_test.tscn
@@ -192,6 +203,12 @@ Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/party_
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/small_scene_camera_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/player_pursuit_encounter_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/world_map_battle_marker_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/world_log_ui_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/neutral_party_interaction_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/encounter_dialogue_ui_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/player_party_expansion_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/battle_cluster_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/battle_occupancy_ui_test.tscn
 
 # 跨进程存档：先保存退出，再新进程读取
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/milestone1_restart_test.tscn -- save

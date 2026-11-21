@@ -158,6 +158,8 @@ func _test_party_dialogue_blocks_input() -> void:
 	_player.world_position = _enemy.world_position + Vector2(-20.0, 0.0)
 	_player.target_position = _player.world_position
 	_player.movement_state = PartyData.MovementState.IDLE
+	# 新规则：需要玩家主动点击/选择目标部队才会自动打开普通对话。
+	_player.focus_party_id = _enemy.party_id
 	await get_tree().process_frame
 	await get_tree().process_frame
 	await get_tree().process_frame
@@ -238,14 +240,17 @@ func _test_follow_party() -> void:
 		"目标移动后跟随目标持续更新"
 	)
 
-	# 目标离开玩家视野。
+	# 目标离开玩家视野：主动点击的追击不应中断（地图图标始终可见）。
 	_enemy.world_position = Vector2(1600.0, 1200.0)
 	manager.update_party_movement(0.5)
 	_check(
-		_player.current_order != PartyData.OrderType.FOLLOW_PARTY,
-		"目标离开视野后停止跟随"
+		_player.current_order == PartyData.OrderType.FOLLOW_PARTY,
+		"目标离开视野后仍保持主动跟随"
 	)
-	_check(_player.current_target_id.is_empty(), "离开视野后清除跟随目标")
+	_check(
+		_player.target_position == Vector2(1600.0, 1200.0),
+		"视野外目标仍更新跟随坐标"
+	)
 
 	# 目标进入战斗。
 	_player.world_position = Vector2(900.0, 1200.0)
@@ -281,7 +286,7 @@ func _test_follow_party() -> void:
 	_check(_player.current_order == PartyData.OrderType.MOVE, "普通移动覆盖跟随指令")
 	_check(_player.current_target_id.is_empty(), "普通移动清除跟随目标")
 
-	# 点击分发：移动中的部队跟随，静止部队普通移动。
+	# 点击分发：移动中/静止部队都进入跟随，避免目标在接近途中移动后丢失。
 	_player.world_position = Vector2(900.0, 1200.0)
 	_enemy.world_position = Vector2(1000.0, 1200.0)
 	_enemy.movement_state = PartyData.MovementState.MOVING
@@ -293,10 +298,10 @@ func _test_follow_party() -> void:
 	_enemy.movement_state = PartyData.MovementState.IDLE
 	_check(
 		bool(_map.call("request_party_command", _enemy.party_id)),
-		"点击静止部队下达普通移动"
+		"点击静止部队同样下达跟随"
 	)
-	_check(_player.current_order == PartyData.OrderType.MOVE, "点击静止部队执行普通移动")
-	_check(_player.current_target_id.is_empty(), "普通移动不记录跟随目标")
+	_check(_player.current_order == PartyData.OrderType.FOLLOW_PARTY, "点击静止部队进入跟随")
+	_check(_player.current_target_id == _enemy.party_id, "静止部队也记录跟随目标")
 
 	manager.stop_party(_player.party_id)
 	_player.world_position = Vector2(760.0, 620.0)

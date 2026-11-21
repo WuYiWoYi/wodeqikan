@@ -94,7 +94,9 @@ func _tick_party_tactical() -> void:
 		return
 
 	for party: PartyData in _party_manager.get_all_parties():
-		if party == null or party.party_id == player_party_id:
+		# 玩家控制权由 PartyData.control_type 表达；player_party_id 保留为旧数据回退。
+		if party == null or party.is_player_controlled() \
+				or party.party_id == player_party_id:
 			continue
 		if not party.is_available_for_world():
 			continue
@@ -313,7 +315,13 @@ func _update_bandit_route(party: PartyData) -> void:
 
 
 func _update_patrol_party(party: PartyData) -> void:
-	var route_size: int = PATROL_POINTS.size()
+	# 部队可以携带自己的巡逻路线（家族骑士、特殊守卫）；
+	# 没有专属路线时继续使用全局默认巡逻点。
+	var points: Array[Vector2] = (
+		party.ai_patrol_points if not party.ai_patrol_points.is_empty()
+		else PATROL_POINTS
+	)
+	var route_size: int = points.size()
 	if route_size == 0:
 		return
 
@@ -321,11 +329,11 @@ func _update_patrol_party(party: PartyData) -> void:
 	if party.ai_route_index != index:
 		party.ai_route_index = index
 
-	var target: Vector2 = PATROL_POINTS[index]
+	var target: Vector2 = points[index]
 	if party.world_position.distance_to(target) <= AI_ARRIVAL_RADIUS:
 		index = (index + 1) % route_size
 		party.ai_route_index = index
-		target = PATROL_POINTS[index]
+		target = points[index]
 
 	_world_map_manager.set_party_target(party.party_id, target)
 

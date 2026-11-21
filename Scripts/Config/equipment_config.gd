@@ -33,6 +33,14 @@ const SLOT_DISPLAY_NAMES: Array[String] = ["武器", "副手", "头盔", "盔甲
 @export_category("Visual")
 ## 对应 UnitVisual 中的部件名，例如 "RightHandWeapon"。
 @export var visual_part: String = ""
+## 可选的装备贴图路径。空字符串表示使用该槽位的默认表现（例如长矛）。
+## 头盔/左手武器素材尚未提供时可以保持为空，接口与层级仍然有效。
+@export var visual_texture_path: String = ""
+## 可选层级覆盖；0 表示使用槽位默认层级。
+## 右手武器默认 RIGHT_HAND_WEAPON、左手 LEFT_HAND_WEAPON、头盔 HELMET。
+@export var visual_layer: int = 0
+## 可选素材锚点（素材左上角像素坐标）；(-1,-1) 表示使用部件默认锚点。
+@export var visual_anchor: Vector2 = Vector2(-1.0, -1.0)
 ## 预留：未来可用于职业装备限制；当前不做校验。
 @export var allowed_unit_config_ids: Array[String] = []
 

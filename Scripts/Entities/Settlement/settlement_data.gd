@@ -14,6 +14,8 @@ var settlement_type: SettlementType = SettlementType.VILLAGE
 
 var world_position: Vector2 = Vector2.ZERO
 var faction_id: String = ""
+## 地点所属家族（持久化）；仅用于地图名称旁的家族旗帜，不影响外交。
+var family_id: String = ""
 var owner_lord_id: String = ""
 
 ## 该地点对应的小场景路径。空字符串表示使用村庄/城镇/城堡的默认模板。
@@ -33,6 +35,7 @@ func to_dict() -> Dictionary:
 		"settlement_type": int(settlement_type),
 		"world_position": [world_position.x, world_position.y],
 		"faction_id": faction_id,
+		"family_id": family_id,
 		"owner_lord_id": owner_lord_id,
 		"scene_path": scene_path,
 		"population": population,
@@ -51,6 +54,7 @@ static func from_dict(data: Dictionary) -> SettlementData:
 	) as SettlementType
 	settlement.world_position = _read_vector2(data.get("world_position", []))
 	settlement.faction_id = str(data.get("faction_id", ""))
+	settlement.family_id = str(data.get("family_id", ""))
 	settlement.owner_lord_id = str(data.get("owner_lord_id", ""))
 	settlement.scene_path = str(data.get("scene_path", ""))
 	settlement.population = int(data.get("population", 0))

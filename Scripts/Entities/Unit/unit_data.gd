@@ -24,11 +24,18 @@ var move_speed: float = 60.0
 var attack_range: float = 20.0
 
 var faction_id: String = ""
+## 家族身份（持久化）。空字符串表示无家族，使用阵营色/默认外观。
+var family_id: String = ""
 var current_party_id: String = ""
 var equipment: Dictionary = {}
 var is_mounted: bool = false
 ## 玩家角色身份（持久化）；当前由谁控制由 BattleScene 运行时决定。
 var is_player_character: bool = false
+## 创建时一次性生成并持久化的外观选择。
+## 键：family_id / tabard_variant / tabard_texture_path / tabard_color /
+##     helmet_texture_path / plume_texture_path / spear_texture_path。
+## 旧存档缺失时为空字典，回退到原有阵营外观。
+var appearance: Dictionary = {}
 
 ## 招募来源信息（游戏内时间、方式、地点、原阵营）。
 var joined_at_game_time: float = 0.0
@@ -60,10 +67,12 @@ func to_dict() -> Dictionary:
 		"move_speed": move_speed,
 		"attack_range": attack_range,
 		"faction_id": faction_id,
+		"family_id": family_id,
 		"current_party_id": current_party_id,
 		"equipment": equipment.duplicate(true),
 		"is_mounted": is_mounted,
 		"is_player_character": is_player_character,
+		"appearance": appearance.duplicate(true),
 		"joined_at_game_time": joined_at_game_time,
 		"recruit_source": recruit_source,
 		"recruit_settlement_id": recruit_settlement_id,
@@ -87,8 +96,14 @@ static func from_dict(data: Dictionary) -> UnitData:
 	unit.move_speed = float(data.get("move_speed", 60.0))
 	unit.attack_range = float(data.get("attack_range", 20.0))
 	unit.faction_id = str(data.get("faction_id", ""))
+	unit.family_id = str(data.get("family_id", ""))
 	unit.current_party_id = str(data.get("current_party_id", ""))
 	unit.is_player_character = bool(data.get("is_player_character", false))
+
+	# 外观字段是阶段 6 追加的可选数据；旧存档没有时保持空字典。
+	var appearance_value: Variant = data.get("appearance", {})
+	if appearance_value is Dictionary:
+		unit.appearance = (appearance_value as Dictionary).duplicate(true)
 	unit.joined_at_game_time = float(data.get("joined_at_game_time", 0.0))
 	unit.recruit_source = str(data.get("recruit_source", ""))
 	unit.recruit_settlement_id = str(data.get("recruit_settlement_id", ""))

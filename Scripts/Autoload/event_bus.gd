@@ -15,6 +15,9 @@ signal game_session_ended()
 signal party_position_changed(party_id: String)
 signal party_battle_state_changed(party_id: String, battle_state: int)
 signal settlement_interaction_requested(settlement_id: String)
+## 玩家实际进入/离开小场景的事实，供世界日志等系统消费。
+signal settlement_entered(settlement_id: String, party_id: String)
+signal settlement_exited(settlement_id: String, party_id: String)
 
 signal battle_started(battle_id: String)
 signal battle_finished(battle_id: String, result: int)

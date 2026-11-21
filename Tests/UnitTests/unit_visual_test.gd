@@ -9,7 +9,6 @@ const UnitActorScript = preload("res://Scripts/Systems/Combat/unit_actor.gd")
 const HumanVisualScript = preload("res://Scripts/Systems/Combat/human_visual.gd")
 const HorseVisualScript = preload("res://Scripts/Systems/Combat/horse_visual.gd")
 const PartVisualScript = preload("res://Scripts/Systems/Combat/part_visual.gd")
-const VisualLayersScript = preload("res://Scripts/Systems/Combat/visual_layers.gd")
 
 var _failed: bool = false
 
@@ -40,6 +39,7 @@ func _run() -> void:
 	_test_mounted_parts(foot_unit)
 	_test_locomotion_animation(foot_unit)
 	_test_layer_order(foot_unit)
+	_test_equipment_visuals(foot_unit)
 	_test_faction_tabard(foot_unit, enemy_unit)
 	_test_facing(foot_unit)
 	_test_spear_animation(foot_unit)
@@ -381,9 +381,14 @@ func _test_layer_order(unit: UnitData) -> void:
 	add_child(visual)
 	visual.setup(unit)
 
+	var human = visual.get_human_visual()
+	human.set_left_hand_weapon_texture(HumanVisualScript.HEAD_PATH)
+	human.set_helmet_texture(HumanVisualScript.HEAD_PATH)
 	var weapon_z: int = visual.get_part_effective_z("Weapon")
 	var horse_head_z: int = visual.get_part_effective_z("MountHead")
 	var head_z: int = visual.get_part_effective_z("Head")
+	var helmet_z: int = visual.get_part_effective_z("Helmet")
+	var left_hand_z: int = visual.get_part_effective_z("LeftHandWeapon")
 	var body_z: int = visual.get_part_effective_z("Body")
 	var right_leg_z: int = visual.get_part_effective_z("LegRight")
 	var saddle_z: int = visual.get_part_effective_z("MountSaddle")
@@ -392,8 +397,13 @@ func _test_layer_order(unit: UnitData) -> void:
 	var horse_leg_z: int = visual.get_part_effective_z("MountLegFront")
 	var shadow_z: int = visual.get_part_effective_z("MountShadow")
 
-	_check(weapon_z > horse_head_z, "武器在马头之前")
+	_check(weapon_z > horse_head_z, "右手武器在马头之前")
+	_check(left_hand_z < horse_head_z, "左手武器层级低于马头")
+	_check(left_hand_z < head_z, "左手武器不遮挡人头")
 	_check(horse_head_z > head_z, "马头在人头之前")
+	_check(helmet_z > head_z, "头盔显示在人头之前")
+	_check(visual.has_part("Head") and visual.has_part("Helmet"),
+		"人物头部与头盔是独立部件且同时存在")
 	_check(head_z > body_z, "人头在人身体之前")
 	_check(body_z > right_leg_z, "人身体在人右腿之前")
 	_check(right_leg_z > saddle_z, "人右腿在马鞍之前")
@@ -405,6 +415,80 @@ func _test_layer_order(unit: UnitData) -> void:
 	_check(visual.get_part_effective_z("Tabard") > body_z, "罩袍层紧贴人身体前方")
 	visual.queue_free()
 	unit.is_mounted = false
+
+
+func _test_equipment_visuals(unit: UnitData) -> void:
+	var equipment_before: Dictionary = unit.equipment.duplicate(true)
+	unit.equipment["HEAD"] = "test_helmet"
+	unit.equipment["OFFHAND"] = "test_shield"
+
+	var helmet := EquipmentConfig.new()
+	helmet.equipment_id = "test_helmet"
+	helmet.display_name = "测试头盔"
+	helmet.slot = EquipmentConfig.Slot.HEAD
+	helmet.visual_texture_path = HumanVisualScript.HEAD_PATH
+
+	var shield := EquipmentConfig.new()
+	shield.equipment_id = "test_shield"
+	shield.display_name = "测试盾牌"
+	shield.slot = EquipmentConfig.Slot.OFFHAND
+	shield.visual_texture_path = HumanVisualScript.HEAD_PATH
+	# 配置覆盖层级也必须低于马头，同时验证视觉层级来自 EquipmentConfig。
+	shield.visual_layer = -25
+
+	var visual = UnitVisualScript.new()
+	add_child(visual)
+	visual.setup(unit, {"HEAD": helmet, "OFFHAND": shield})
+	var human = visual.get_human_visual()
+	_check(visual.has_part("Head"), "装备头盔时人物头部仍然存在")
+	_check(visual.has_part("Helmet"), "装备头盔时生成独立头盔部件")
+	_check(visual.has_part("LeftHandWeapon"), "装备副手时生成独立左手武器部件")
+	_check(
+		visual.get_part_effective_z("Helmet")
+		> visual.get_part_effective_z("Head"),
+		"头盔层级在人头之前"
+	)
+	_check(
+		visual.get_part_effective_z("LeftHandWeapon")
+		< visual.get_part_effective_z("MountHead"),
+		"左手武器配置层级低于马头"
+	)
+	_check(
+		visual.get_part_effective_z("LeftHandWeapon") == -25,
+		"左手武器层级使用 EquipmentConfig 覆盖值"
+	)
+	_check(
+		visual.has_part("Weapon")
+		and visual.get_part_effective_z("Weapon")
+		> visual.get_part_effective_z("MountHead"),
+		"右手长矛保持原有高层级"
+	)
+	var head_part: Sprite2D = human.get_part("Head")
+	var helmet_part: Sprite2D = human.get_part("Helmet")
+	for i: int in range(4):
+		visual.update_locomotion(0.05, false)
+	_check(
+		head_part != null and helmet_part != null
+		and is_equal_approx(head_part.rotation, helmet_part.rotation),
+		"头部与头盔保持相同朝向/微摆"
+	)
+
+	# 卸下头盔后只保留人物头部；副手不受影响。
+	unit.equipment.erase("HEAD")
+	visual.setup(unit, {"OFFHAND": shield})
+	_check(visual.has_part("Head"), "卸下头盔后人物头部仍显示")
+	_check(not visual.has_part("Helmet"), "卸下头盔后隐藏头盔部件")
+	_check(visual.has_part("LeftHandWeapon"), "卸下头盔不影响左手武器")
+
+	# 卸下副手后恢复默认长矛与头部。
+	unit.equipment.erase("OFFHAND")
+	visual.setup(unit)
+	_check(not visual.has_part("LeftHandWeapon"), "卸下副手后移除左手武器")
+	_check(visual.has_part("Weapon"), "卸下副手后右手武器仍为默认长矛")
+	_check(visual.has_part("Head") and visual.has_part("Weapon"), "默认外观恢复成功")
+
+	unit.equipment = equipment_before
+	visual.queue_free()
 
 
 func _test_faction_tabard(player_unit: UnitData, enemy_unit: UnitData) -> void:
@@ -594,6 +678,63 @@ func _test_unit_actor_integration(unit: UnitData) -> void:
 				is_equal_approx(pivot.rotation, HumanVisualScript.SPEAR_ATTACK_ROTATION),
 				"UnitActor 攻击动画到达横向姿态"
 			)
+	var name_label: Label = actor.get_name_label()
+	var health_bar: UnitHealthBar = actor.get_health_bar()
+	_check(name_label != null and health_bar != null, "名称与生命条是独立 UI 节点")
+	_check(name_label != health_bar, "生命条不替代名称 Label")
+	_check(not actor.is_name_visible(), "普通士兵默认隐藏头顶名称")
+	actor.set_process(false)
+	actor._process(0.016)
+	_check(not health_bar.is_bar_visible(), "满血时隐藏生命条")
+
+	actor.set_controlled(true)
+	_check(actor.is_name_visible(), "玩家当前控制单位显示头顶名称")
+	state.battle_hp = maxi(1, unit.max_hp - 1)
+	actor._process(0.016)
+	_check(health_bar.is_bar_visible(), "受伤后显示生命条")
+	_check(actor.is_name_visible(), "控制单位受伤后名称仍显示")
+
+	state.battle_hp = unit.max_hp
+	actor._process(0.016)
+	_check(not health_bar.is_bar_visible(), "恢复满血后重新隐藏生命条")
+	_check(actor.is_name_visible(), "控制单位恢复满血后名称仍显示")
+
+	# 名称与控制权联动；隐藏名称不能连带隐藏生命条。
+	state.battle_hp = maxi(1, unit.max_hp - 1)
+	actor._process(0.016)
+	actor.set_controlled(false)
+	_check(not actor.is_name_visible(), "切换控制后原单位隐藏头顶名称")
+	_check(health_bar.is_bar_visible(), "隐藏名称不影响受伤生命条")
+	actor.set_controlled(true)
+	_check(actor.is_name_visible(), "重新取得控制后名称恢复显示")
+	state.battle_hp = unit.max_hp
+	actor._process(0.016)
+
+	state.alive = false
+	actor._process(0.016)
+	_check(not health_bar.is_bar_visible(), "死亡状态不显示无效生命条")
+	state.alive = true
+	state.battle_hp = unit.max_hp
+	actor._process(0.016)
+
+	var name_offset: Vector2 = name_label.global_position - actor.global_position
+	state.battle_position += Vector2(12.0, -4.0)
+	actor._process(0.016)
+	_check(
+		(name_label.global_position - actor.global_position).distance_to(name_offset) < 0.001,
+		"名称跟随单位移动且无额外偏移"
+	)
+	_check(
+		(health_bar.global_position - actor.global_position).distance_to(
+			Vector2(0.0, UnitHealthBar.BAR_TOP)
+		) < 0.001,
+		"生命条保持独立的固定头顶偏移"
+	)
+	# 清空这次位置变化造成的视觉跑动缓冲，避免干扰后续移动状态测试。
+	for i: int in range(10):
+		actor._process(0.05)
+	_check(not actor.is_visual_moving(), "名称/生命条测试后恢复待机状态")
+
 	# 移动状态缓冲：实际位移驱动待机/跑动，停止后经过短暂缓冲回到待机。
 	actor.set_process(false)
 	actor._process(0.016)

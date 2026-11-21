@@ -72,7 +72,14 @@ func has_equipment_config(equipment_id: String) -> bool:
 
 ## 依据兵种配置生成一个运行时单位。
 ## 基础属性统一由 StatCalculator 计算，避免与 UnitManager 各维护一套规则。
-func create_unit(config: UnitConfig, faction_id: String) -> UnitData:
+## display_name/level 是可选的个体覆盖：家族领袖、剧情角色可以拥有自己的名字
+## 与初始等级；普通新兵保持空名称与配置基础等级。
+func create_unit(
+	config: UnitConfig,
+	faction_id: String,
+	display_name: String = "",
+	level: int = 0
+) -> UnitData:
 	if _id_generator == null:
 		push_error("UnitManager 尚未初始化 IdGenerator")
 		return null
@@ -90,8 +97,14 @@ func create_unit(config: UnitConfig, faction_id: String) -> UnitData:
 		return null
 
 	unit.config_id = resolved.config_id
-	unit.display_name = _next_unit_name(resolved)
-	unit.level = clampi(resolved.base_level, 1, maxi(resolved.max_level, 1))
+	unit.display_name = (
+		display_name if not display_name.strip_edges().is_empty()
+		else _next_unit_name(resolved)
+	)
+	var max_level: int = maxi(resolved.max_level, 1)
+	unit.level = clampi(
+		level if level > 0 else resolved.base_level, 1, max_level
+	)
 	unit.exp = 0
 	unit.wage = maxi(0, resolved.daily_wage)
 	unit.faction_id = faction_id

@@ -122,7 +122,12 @@ func _test_player_joins_offscreen_battle() -> void:
 			battle_scene.get_player_side() == session.get_side_of_party(player.party_id),
 			"战斗场景使用玩家的实际战斗侧"
 		)
-		_check(battle_scene.get_actor_count() == 17, "三方参战共生成 17 名士兵")
+		_check(
+			battle_scene.get_actor_count()
+				== player.member_unit_ids.size() + merchant.member_unit_ids.size()
+					+ bandit.member_unit_ids.size(),
+			"三方参战生成全部士兵"
+		)
 
 	context.battle_manager.abort_battle(session.battle_id)
 	GameManager.enter_main_menu()
@@ -165,7 +170,11 @@ func _test_battle_started_signal_enters_scene() -> void:
 	var battle_scene := get_tree().current_scene as BattleScene
 	_check(battle_scene != null, "信号路径生成 BattleScene")
 	if battle_scene != null:
-		_check(battle_scene.get_actor_count() == 12, "双方参战生成 12 名士兵")
+		_check(
+			battle_scene.get_actor_count()
+				== player.member_unit_ids.size() + bandit.member_unit_ids.size(),
+			"双方参战生成全部士兵"
+		)
 
 	context.battle_manager.abort_battle(session.battle_id)
 	GameManager.enter_main_menu()

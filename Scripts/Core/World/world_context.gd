@@ -9,6 +9,8 @@ const DEFAULT_WORLD_SIZE: Vector2 = Vector2(3000.0, 2000.0)
 const UNIT_CONFIG_DIR: String = "res://Data/Units"
 const EQUIPMENT_CONFIG_DIR: String = "res://Data/Equipment"
 const ITEM_CONFIG_DIR: String = "res://Data/Items"
+const FAMILY_CONFIG_DIR: String = "res://Data/Families"
+const APPEARANCE_CONFIG_PATH: String = "res://Data/Appearance/appearance_config.tres"
 
 var id_generator: IdGenerator = IdGenerator.new()
 var unit_manager: UnitManager = UnitManager.new()
@@ -16,9 +18,14 @@ var item_manager: ItemManager = ItemManager.new()
 var party_manager: PartyManager = PartyManager.new()
 var settlement_manager: SettlementManager = SettlementManager.new()
 var faction_manager: FactionManager = FactionManager.new()
+## 家族静态配置只影响外观，不参与外交/存档。
+var family_registry: FamilyRegistry = FamilyRegistry.new()
+## 士兵外观随机池；只读静态资源，不进入存档。
+var appearance_config: AppearanceConfig = null
 var vision_manager: VisionManager = VisionManager.new()
 var world_map_manager: WorldMapManager = WorldMapManager.new()
 var encounter_manager: EncounterManager = EncounterManager.new()
+var world_log_manager: WorldLogManager = WorldLogManager.new()
 var ai_manager: AIManager = AIManager.new()
 var battle_manager: BattleManager = BattleManager.new()
 var dialogue_manager: DialogueManager = DialogueManager.new()
@@ -41,6 +48,7 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	world_log_manager.dispose()
 	if TimeManager.world_tick.is_connected(world_simulation.on_world_tick):
 		TimeManager.world_tick.disconnect(world_simulation.on_world_tick)
 
@@ -108,6 +116,9 @@ func load_from_save_data(save: SaveData) -> bool:
 	id_generator.restore_from(save.id_counters)
 	unit_manager.load_from_dict(save.units)
 	party_manager.load_from_dict(save.parties)
+	# 旧存档没有 control_type / party_kind / banner_texture_path：
+	# 按 player_party_id、阵营、家族与 AI 类型补齐安全默认值。
+	party_manager.apply_runtime_defaults(player_party_id)
 	settlement_manager.load_from_dict(save.settlements)
 	world_map_manager.world_bounds = Rect2(Vector2.ZERO, world_size)
 
@@ -165,6 +176,21 @@ func register_static_configs() -> bool:
 			push_error("物品配置注册失败: %s" % path)
 			success = false
 
+	for path: String in _list_resource_paths(FAMILY_CONFIG_DIR):
+		var family_config := load(path) as FamilyConfig
+		if family_config == null:
+			push_error("无法加载家族配置: %s" % path)
+			success = false
+			continue
+		if not family_registry.register_config(family_config):
+			push_error("家族配置注册失败: %s" % path)
+			success = false
+
+	appearance_config = load(APPEARANCE_CONFIG_PATH) as AppearanceConfig
+	if appearance_config == null:
+		push_error("无法加载外观配置: %s" % APPEARANCE_CONFIG_PATH)
+		success = false
+
 	_static_configs_registered = success
 	return success
 
@@ -200,6 +226,7 @@ func _wire_managers() -> void:
 	encounter_manager.setup(
 		party_manager, faction_manager, battle_manager, world_map_manager
 	)
+	world_log_manager.setup(battle_manager, party_manager, settlement_manager)
 	ai_manager.setup(
 		unit_manager,
 		party_manager,

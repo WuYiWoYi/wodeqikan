@@ -3,7 +3,7 @@
 **核心数据：** `Scripts/Entities/Unit/unit_data.gd`、`Scripts/Config/unit_config.gd`
 **核心逻辑：** `Scripts/Core/World/unit_manager.gd`、`Scripts/Core/Gameplay/stat_calculator.gd`
 **战斗表现：** `Scripts/Systems/Combat/unit_actor.gd`、`unit_controller.gd`
-**状态：** 数据层、三级兵种与工资、等级成长、消耗物品晋升、武器攻击距离、马匹骑乘状态、部队查看 UI 待机动画、克制步兵步态、跃马式马腿动画、自由攻击、360°攻击、长矛前后摇与攻击后保持、实体碰撞与临时部件美术完成；招募、装备获取、正式美术与复杂状态机未实现
+**状态：** 数据层、三级兵种与工资、等级成长、消耗物品晋升、武器攻击距离、马匹骑乘状态、部队查看 UI 待机动画、克制步兵步态、跃马式马腿动画、自由攻击、360°攻击、长矛前后摇与攻击后保持、实体碰撞、左右手武器独立层级、人物头部/头盔分离、满血隐藏生命条与临时部件美术完成；招募、装备获取、正式头盔/盾牌美术与复杂状态机未实现
 
 ---
 
@@ -75,7 +75,7 @@
 - “玩家角色身份”与“当前控制权”分离：
   - 身份由 `is_player_character` 表示；
   - 当前控制权由 `BattleScene._controlled_unit_id` 运行时表示，可切换到其他存活友军。
-- 新游戏玩家部队：3 民兵 + 3 名装备马匹的职业步兵 + 1 玩家角色，共 7 人；玩家角色最后加入。3 名骑乘单位中 2 名为本阶段新增的测试骑兵。
+- 新游戏玩家部队：5 民兵 + 6 职业步兵（其中 4 名装备马匹）+ 1 玩家角色，共 12 人；玩家角色最后加入。人数由 `WorldInitializer` 的玩家编制常量集中配置。
 - 骑乘职业步兵仍然使用 `infantry_trained` 配置，不新增骑兵 `config_id`；其 `is_mounted` 只表示 MOUNT 装备状态。
 - `UnitController` 同时支持 AI 与玩家控制模式；玩家控制不影响 UnitData 本身。
 
@@ -195,6 +195,15 @@ exp_to_next_level(level) = base_exp_to_next_level
 - `default_equipment` 在创建单位时逐条校验，非法条目报告错误并丢弃，不进入 `UnitData`。
 - 数据层使用 `equip_item()` / `unequip_slot()`；阶段 6 起部队面板提供 MOUNT 上下马与晋升，其他装备槽位的更换 UI 尚未实现（KI327）。
 - 本次不实现品质、耐久、随机词条、职业限制与装备获取（商店/掉落）。
+- 装备视觉字段（`EquipmentConfig`）：
+  - `visual_texture_path`：可选贴图；空路径表示使用槽位默认表现。
+  - `visual_layer`：可选层级覆盖；0 表示槽位默认（右手 `-10` / 左手 `-45` / 头盔 `-35`）。
+  - `visual_anchor`：可选素材锚点；`(-1,-1)` 使用默认锚点。
+  - `UnitVisual.setup(unit, {slot_name: EquipmentConfig})` 读取对应槽位；缺少配置时：
+    - 右手保持默认长矛；
+    - 无头盔部件，只显示人物头部；
+    - 无左手武器。
+  - 当前 `helmet_iron_01` / `shield_wood_01` 尚无正式贴图，路径为空；接口已完成，填充 `.tres` 的 `visual_texture_path` 后即可显示。
 
 示例装备（`Data/Equipment/*.tres`，仅数据层测试）：
 
@@ -262,11 +271,12 @@ exp_to_next_level(level) = base_exp_to_next_level
 | 节点/类 | 职责 |
 |---|---|
 | `PartVisual`（Node2D） | 通用部件管理：贴图加载、Sprite2D 创建、命名、整体朝向、缺失素材一次性警告 |
-| `HumanVisual`（PartVisual） | 人物影子、左右腿、身体、罩袍、头部、缨饰、长矛枢轴与攻击动画 |
+| `HumanVisual`（PartVisual） | 人物影子、左右腿、身体、罩袍、头部、头盔、缨饰、左右手武器枢轴与右手攻击动画 |
 | `HorseVisual`（PartVisual） | 骑马影子、四条独立马腿、马身、马鞍、马头 |
-| `UnitVisual`（Node2D） | 统一组合 HumanVisual + HorseVisual，读取 UnitData 的阵营与骑乘状态 |
+| `UnitVisual`（Node2D） | 统一组合 HumanVisual + HorseVisual，读取 UnitData 的阵营/骑乘状态与装备视觉配置 |
 | `VisualLayers` | 跨人物/马匹组的最终 z 层级集中配置 |
-| `UnitActor`（Node2D） | 持有 UnitVisual，绘制血条、名称、控制金圈与攻击闪光 |
+| `UnitHealthBar`（Node2D） | 独立头顶生命条；满血/死亡隐藏，受伤显示 |
+| `UnitActor`（Node2D） | 持有 UnitVisual、名称 Label 与 UnitHealthBar，绘制选中圈与攻击闪光 |
 | `UnitController`（RefCounted） | AI 移动/索敌/攻击，或玩家 WASD/左键控制；队形槽位、局部避让、受伤与死亡 |
 
 - 人物与马匹贴图分别管理，但两个组都是 `UnitVisual` 的直接子节点（z_index = 0），因此 `VisualLayers` 的相对 z 可以跨组形成最终遮挡。
@@ -285,18 +295,24 @@ exp_to_next_level(level) = base_exp_to_next_level
 
 | 顺序（前→后） | 部件 | z |
 |---:|---|---:|
-| 1 | 武器（长矛枢轴） | -10 |
+| 1 | 右手武器（长矛枢轴） | -10 |
 | 2 | 马头 | -20 |
 | 3 | 缨饰（有素材时） | -30 |
-| 4 | 人头部 | -40 |
-| 5 | 人身体 | -50 |
-| 5.1 | 阵营罩袍层（紧贴身体前方） | -49 |
-| 6 | 人右腿 | -60 |
-| 7 | 马鞍 | -69 |
-| 8 | 四条马腿（独立，位于马身之前） | -71 |
-| 9 | 马身体 | -72 |
-| 10 | 人左腿 | -80 |
-| 11 | 人物影子 / 骑马影子（互斥） | -99 |
+| 4 | 头盔（有素材时） | -35 |
+| 5 | 人头部 | -40 |
+| 6 | 左手武器（盾牌等，有素材时） | -45 |
+| 7 | 人身体 | -50 |
+| 7.1 | 阵营罩袍层（紧贴身体前方） | -49 |
+| 8 | 人右腿 | -60 |
+| 9 | 马鞍 | -69 |
+| 10 | 四条马腿（独立，位于马身之前） | -71 |
+| 11 | 马身体 | -72 |
+| 12 | 人左腿 | -80 |
+| 13 | 人物影子 / 骑马影子（互斥） | -99 |
+
+- 左右手武器使用独立层级，不能共用一个 z 值。
+- 左手武器低于马头，骑兵不会用盾牌遮住马头。
+- 头盔在人头之前，但不替代 Head 节点；未装备时只创建 Head。
 
 ```text
 UnitActor (Node2D)
@@ -307,8 +323,10 @@ UnitActor (Node2D)
 │   │   └── UpperBody (Node2D, 待机/跑动起伏与轻微倾斜)
 │   │       ├── Body
 │   │       ├── Tabard
-│   │       ├── WeaponPivot → Weapon
+│   │       ├── WeaponPivot → Weapon（右手）
+│   │       ├── LeftHandWeaponPivot → LeftHandWeapon（有素材时）
 │   │       ├── Head
+│   │       ├── Helmet（有素材时）
 │   │       └── Plume（素材存在时）
 │   └── HorseVisual (Node2D, 仅骑乘时 visible)
 │       ├── MountShadow
@@ -318,12 +336,15 @@ UnitActor (Node2D)
 │           ├── MountBody
 │           ├── MountSaddle
 │           └── MountHead
-└── NameLabel
+├── NameLabel（仅玩家当前控制的单位显示）
+└── HealthBar（UnitHealthBar，满血/死亡隐藏）
 ```
 
 - 本阶段按需求把四条马腿移到马身体之前；马鞍保持原层级，人马其他部件关系不变。
 - 马鞍与罩袍未在设计表单列：马鞍在马腿/马身之前，罩袍紧贴人身体前方。
-- 血条与控制圈由 `UnitActor` 绘制在所有部件之上。
+- 名称与生命条是独立节点；选中圈由 `UnitActor` 绘制在部件之上。
+- `UnitActor.set_controlled()` 同步 `NameLabel.visible`：当前控制单位显示名称，其他普通士兵隐藏；切换控制或死亡转移时即时更新。
+- `HealthBar` 满血时隐藏，受伤时显示；隐藏名称不会隐藏生命条，二者互不影响。
 
 ### 4.3 骑乘偏移
 
@@ -508,8 +529,11 @@ Idle
 | 完整装备更换 UI | 未实现（KI327）；当前只提供 MOUNT 与晋升操作 |
 | 战斗经验来源 | 已实现：战斗存活/获胜经验，经 `add_exp()` 升级 |
 | 成员归属 | 由 `PartyManager` 维护，见 [Party_System.md](Party_System.md) |
-| `UnitActor` | 已实现：`UnitVisual` 部件、血条、名称、玩家控制金圈、攻击闪光；`z_index = 200` 高于战场背景 |
+| `UnitActor` | 已实现：`UnitVisual` 部件、独立 `UnitHealthBar`、仅控制单位显示的名称、玩家控制金圈、攻击闪光；`z_index = 200` 高于战场背景 |
 | `PartVisual` / `HumanVisual` / `HorseVisual` | 已实现：人物与马匹分组管理；`VisualLayers` 统一最终层级；人体双腿始终创建 |
+| 左右手武器独立层级 | 已实现：右手 `-10`、左手 `-45`；左手低于马头 |
+| 人物头部与头盔分离 | 已实现：独立 `Head` / `Helmet` 部件；装备视觉由 `EquipmentConfig` 注入 |
+| 头顶名称与生命条 | 已实现：名称只对玩家当前控制单位显示；生命条满血/死亡隐藏；二者独立控制 |
 | `UnitVisual` | 已实现：临时 PNG 组合、骑乘 15 像素偏移、影子互斥、四条独立马腿、阵营罩袍着色、整体朝向、缺失素材回退 |
 | 长矛枢轴/动画 | 已实现：48×96 素材、枢轴 (24,18)、360°方向旋转、前后摇位移、4 秒保持、平滑恢复；伤害仍即时 |
 | 步兵/骑兵待机与移动动画 | 已实现：双腿挂载并继承身体整体运动；马身整体跃动（幅度已下调）为主、马腿局部动作适度增大、骑手跟随；骑马影子随抬升轻微缩小/变淡；人物腿枢轴 6 px、马腿枢轴 9 px |
@@ -526,7 +550,7 @@ Idle
 | 控制权切换 / 观战 | 已实现，见 [Combat_System.md](Combat_System.md) |
 | 部件视觉与动画 | 临时部件、待机/跑动动画、长矛 360°攻击/恢复动画已接入；受击动画与正式资源 TODO |
 | 受击硬直 / 命中动画 | 未实现（KI124）；长矛动画不改变即时命中规则 |
-| 初始世界/招募生成士兵 | 已用临时测试兵力打通；玩家部队含 3 名骑乘测试士兵（本阶段新增 2 名）；招募系统 TODO |
+| 初始世界/招募生成士兵 | 已用临时测试兵力打通；玩家部队共 12 人，含 4 名骑乘职业步兵；招募系统 TODO |
 
 ## 9. 待确认
 
@@ -548,3 +572,56 @@ Idle
 - 长矛前摇/戳击/保持/恢复时长、位移距离与最终美术的平衡；马腿已改为前后成组跃马，但仍非骨骼/逐帧动画。
 - 部队预览区域尺寸、缩放与装备差异化外观（当前所有武器都显示长矛占位）。
 - 玩家移动命令是否改为选中单位、阵型站位或拖拽框选。
+
+## 10. 家族身份与一次性外观（阶段 6 新增）
+
+### 10.1 数据字段
+
+`UnitData` 追加以下持久化字段（旧存档缺失时使用安全默认值）：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `family_id` | `String` | 所属家族；空字符串表示无家族 |
+| `appearance` | `Dictionary` | 创建时一次性生成的外观选择 |
+
+`appearance` 只包含字符串/简单值，可直接 JSON 序列化：
+
+- `version`
+- `family_id`
+- `tabard_variant`：`PRIMARY` / `SECONDARY`
+- `tabard_texture_path`
+- `tabard_color`：HTML 颜色字符串，作为缺失贴图时的回退色
+- `helmet_texture_path`
+- `plume_texture_path`：仅家族领袖
+- `spear_texture_path`：家族配置存在时
+
+### 10.2 配置与生成
+
+- `FamilyConfig`（`Data/Families/*.tres`）：`family_id`、名称、主/副色、旗帜、主/副罩袍、领袖缨饰、可选家族长矛。
+- `AppearanceConfig`（`Data/Appearance/appearance_config.tres`）：1/2/3 级头盔池与主罩袍概率。
+- `FamilyRegistry`：只读注册家族配置，不进入存档；家族不是阵营，也不承担外交。
+- `UnitAppearance.ensure_random()`：单位首次创建时生成外观；已有 `appearance` 时直接返回，不重新随机。
+- 头盔按兵种 `tier` 从对应池随机；`level` 与 `tier` 分离。
+- 罩袍规则：
+  - 领袖与三级兵始终主罩袍；
+  - 二级兵 50% 主 / 50% 副；
+  - 一级兵 20% 主 / 80% 副；
+  - 未配置副罩袍时使用主罩袍。
+- 领袖仅生成家族缨饰；家族长矛是全家族可选表现。
+- 随机最终结果写入 `appearance`；读档直接使用持久化路径，不依赖随机种子复现。
+
+### 10.3 表现层优先级
+
+`UnitVisual` 只读取最终 `appearance`，不包含具体家族判断：
+
+1. 罩袍：`tabard_texture_path` 直接绘制；缺失时回退原阵营色着色。
+2. 头盔：装备 `HEAD` 的视觉路径优先；未装备时才显示 `appearance.helmet_texture_path`。
+3. 右手武器：`WEAPON` 装备视觉优先；无武器装备时使用家族长矛；再缺失时回退默认长矛。
+4. 缨饰：家族配置存在且为领袖时显示；`set_plume_texture()` 仍可覆盖。
+5. 左手装备、攻击动画、属性、装备数据与碰撞规则均不受家族外观影响。
+
+### 10.4 旧存档兼容
+
+- 旧单位没有 `family_id` / `appearance` 时保持原有阵营外观，不自动补随机头盔或家族服装。
+- 新游戏创建的士兵（包括玩家起始部队）在 `WorldInitializer` 统一生成外观。
+- 外观资源缺失时 `PartVisual` 只跳过对应部件并记录一次警告，不阻止单位生成。

@@ -1,8 +1,8 @@
 # 当前开发状态
 
 **更新日期：** 2026-11-21
-**当前阶段：** 阶段 6 · 大地图战斗与小地图视角优化完成
-**整体状态：** 村庄/战斗共用摄像机（统一 960×540 视野、跟随、自由视角、边界）、AI 对 AI 按游戏小时离屏结算、玩家追击同向目标接触、遭遇面板撤退、同场战斗单标记与多方汇总 UI 均已实现并通过自动化测试；村庄、部队经济、大地图与关联战斗/存档回归通过
+**当前阶段：** 阶段 6 后续 · 村庄表现、玩家扩编与小地图战斗集群完成
+**整体状态：** 部队标记已恢复原尺寸，村庄改用独立放大的圆形旗帜标记且名称位于正上方；玩家初始部队扩编为 12 人；小地图战斗初始距离拉开，并通过双方半场列阵、接敌放松、目标分流与局部分离减少扎堆；统一 Party 架构与底部遭遇对话保持有效；相关系统与单元测试通过
 
 ---
 
@@ -27,6 +27,9 @@
 | 5（原路线图）AI 领主与交互 | 未开始 | 数据层已具备 |
 | 6 村庄场景、交互与部队管理 | 完成 | 村庄小场景、对话、追逐保护、背包/马匹、金币/工资、三级兵种/晋升、世界日历、大地图部队 UI |
 | 6 大地图战斗与小地图视角 | 完成 | 统一摄像机/自由视角、按小时离屏结算、追击接触修复、战斗单标记与多方汇总 UI |
+| 6 世界日志、美术层级与战斗表现 | 完成 | 左下角世界日志、左右手独立层级、头部/头盔分离、中立部队不自动打断、满血隐藏生命条 |
+| 6 后续 · 统一部队架构与遭遇交互 | 完成 | 统一 Party 控制类型/类型标识、底部 NPC 遭遇对话、领袖头像/默认剪影、遭遇原因、ENEMY_PURSUIT 禁止离开、旧存档安全推断 |
+| 6 后续 · 村庄表现/玩家扩编/战斗集群 | 完成 | 部队标记恢复原尺寸、村庄圆形标记放大、名称位于上方、玩家 12 人、初始部署距离 1100、半场列阵/接敌放松/目标分流/局部避让 |
 | 6（原路线图）援军与高级战斗 | 未开始 | 并入后续高级战斗阶段 |
 | 7 沙盒扩展 | 未开始 | — |
 
@@ -139,7 +142,7 @@
 ### NPC 自主移动
 
 - `PartyData` 新增 `ai_type`、`ai_route_index`、`ai_route_settlement_ids`，旧存档缺失字段使用安全默认值。
-- 河畔商队 `TRADE_ROUTE`：在橡木村与河畔村之间循环往返，路线使用 stable `settlement_id`，坐标来自 `SettlementManager`。
+- 河畔商队 `TRADE_ROUTE`：在巴里与墨西西之间循环往返，路线使用 stable `settlement_id`，坐标来自 `SettlementManager`。
 - 北境巡逻队 `PATROL`：按 `(2200,500) → (2600,900) → (2400,1500) → (1900,1200)` 循环。
 - `AIManager` 每 1 世界秒决策；跳过玩家、非 `AVAILABLE`、正在移动的部队；只通过 `WorldMapManager.set_party_target()` 下达目标。
 - 到达路线点后，下一次决策推进路线索引；移动仍由 `WorldSimulation` 固定 tick 驱动。
@@ -209,7 +212,7 @@
 - 后续 AI 优化将速度关系调整为治安队 120 > 强盗 100 > 商队 80，玩家仍为 150。
 - 速度只改初始化参数，不在移动函数中额外缩放。
 - 玩家点击移动中的有效部队进入 `FOLLOW_PARTY`，每 0.5 世界秒读取目标最新位置。
-- 追上目标（14 像素）、目标离开视野、进入战斗或失效时自动取消跟随。
+- 追上目标（14 像素）、进入战斗或失效时自动取消跟随；主动点击的跟随不因目标离开视野中断（D088）。
 - 普通地图点击、时间倍率与 UI 输入屏蔽规则保持不变。
 
 ### Step 5：阵营关系与视野
@@ -807,7 +810,7 @@
 
 - `SettlementData.scene_path`：三个初始村庄均关联 `res://Scenes/Village/village.tscn`；城镇/城堡为空。
 - 大地图地点面板对村庄增加“进入村庄”；`WorldMap.enter_village()` 校验类型与场景、记录进入前倍率、压入 `small_scene`、释放 `ui_panel` 后切换场景。
-- 返回大地图时写入 `GameManager.pending_settlement_latch_id`，新大地图实例消费为一次性交互锁，玩家离开 64 像素前不会立刻重开地点面板。
+- 返回大地图时写入 `GameManager.pending_settlement_latch_id`，新大地图实例消费并记录当前村口村庄；地点面板不再自动打开，必须由玩家主动点击地点。
 - `VillageScene` 只读取 `WorldContext`：玩家角色直接复用 `UnitData` / `UnitVisual`；村庄头人使用运行时 `UnitData`（不注册进 `UnitManager`）。
 - 进入村庄调用 `UnitVisual.set_weapon_visible(false)`，只隐藏本次场景的武器 Sprite，不修改 `UnitData.equipment`。
 - 村庄移动 WASD，速度 = `UnitData.move_speed × 2.0`；固定 1920×1080 场景与相机。
@@ -819,8 +822,8 @@
 ### 大地图遭遇与部队 UI
 
 - `PartyData.focus_party_id`（运行时）记录玩家主动追逐/接近目标：
-  - 移动目标进入 `FOLLOW_PARTY`；静止目标进入普通 `MOVE`；
-  - 焦点非空时跳过村庄自动面板、无关部队普通对话与“接近离屏战斗”面板；
+  - 有效目标（移动中或静止）进入 `FOLLOW_PARTY`；仅战斗中/失效/空部队退回普通 `MOVE`（D088）；
+  - 焦点非空时跳过无关部队普通对话与“接近离屏战斗”面板；地点面板始终只由点击打开；
   - 敌对 AI 主动追击玩家的遭遇不受影响，可以打断玩家行动；
   - 到达、停止或目标失效后清理焦点，恢复原交互。
 - `PartyIcon` 不再显示部队名称，只显示 `member_unit_ids.size()`；人数变化同步刷新。
@@ -919,6 +922,206 @@
 - 新增 `world_map_battle_marker_test`：单标记、图标隐藏、按战斗侧汇总、小时伤亡刷新、新部队加入、结束恢复。
 - 更新 `battle_scene_test` 统一视野断言、`player_control_test` 摄像机跟随/自由视角断言、`player_encounter_test` 战斗/撤退按钮；旧离屏结算测试改为按小时推进。
 
+## 8.11 阶段 6 · 世界日志、美术层级与战斗表现优化
+
+### 世界日志
+
+- 新增 `WorldLogEntry`（事件类型 / 世界时间 / 时间文本 / 显示文本 / 元数据）与 `WorldLogManager`。
+- `WorldLogManager` 监听 EventBus 事实生成日志：
+  - 战斗开始与结束（胜负/平局/撤退/中止）；
+  - 被消灭部队；
+  - 玩家遭遇；
+  - 进入/离开村庄。
+- `add_event()` 提供其他世界事件扩展接口；最多保留 100 条，超出移除最早记录。
+- 新增 `EventBus.settlement_entered` / `settlement_exited`，由大地图与村庄场景在场景切换成功后广播。
+- 大地图左下角新增固定 `WorldLogPanel`：世界日志标题、时间 + 文本、滚动区域、自动滚动到最新。
+- 面板使用 `MOUSE_FILTER_PASS`，不永久吞掉地图点击；日志文本不拦截输入。
+- `to_dict/from_dict` 已实现，作为后续存档持久化预留；本阶段不写入存档。
+
+### 角色美术
+
+- `VisualLayers` 拆分左右手武器层级：
+  - 右手武器 `RIGHT_HAND_WEAPON = -10`（保留 `WEAPON` 别名）；
+  - 左手武器 `LEFT_HAND_WEAPON = -45`，低于马头，避免骑兵盾牌遮挡马头。
+- 新增独立 `LeftHandWeaponPivot`；右手长矛枢轴、动画、位置与旋转中心不变。
+- 人物 `Head` 与装备 `Helmet` 分离：
+  - 头盔位于人头之前、缨饰之后；
+  - 未装备头盔时只显示 Head；
+  - 头盔是独立 Sprite2D，不替代头部节点。
+- `EquipmentConfig` 新增 `visual_texture_path` / `visual_layer` / `visual_anchor`；
+  - `UnitVisual.setup(unit, {slot_name: EquipmentConfig})` 按装备槽注入视觉；
+  - BattleScene、VillageScene、部队预览均已传入当前装备视觉配置。
+- 当前无正式头盔/盾牌贴图，路径为空时安全跳过；接口已完成。
+
+### 大地图遭遇
+
+- `_check_party_interaction()` 不再按距离扫描全部中立/友方部队；只有 `focus_party_id` 指向的主动点击目标才打开普通对话。
+- 普通寻路、追击目标途中路过中立或无关部队不会弹窗或暂停。
+- `_update_focus_state()` 在到达目标附近时保留焦点，供主动对话打开；远离/失效后清除。
+- `EncounterManager` 自动遭遇仍要求阵营敌对 + 实际追击关系：
+  - 敌对 AI `attack_intent` 指向玩家并追上；
+  - 或玩家主动点击并追击敌对目标（显式交互）；
+  - 无关敌对部队仅靠近不会打断玩家。
+- 同一追击关系只触发一次；撤退与 90 世界单位拒绝锁保持不变。
+
+### 战斗单位 UI
+
+- `UnitActor` 拆分独立 `UnitHealthBar` 与 `NameLabel`。
+- 满血或死亡时隐藏生命条；受伤后显示；恢复满血后重新隐藏。
+- 头顶名称只对玩家当前控制的单位显示；普通士兵（含友军/敌军）隐藏名称，控制权转移时即时更新。
+- 名称与生命条独立控制，隐藏名称不影响生命条显隐。
+- 满血判定使用实际 HP / 最大 HP 与浮点容差；不再在 `UnitActor._draw()` 中绘制血条。
+
+### 测试
+
+- 新增 `world_log_manager_test`：事件类型、战斗/胜负/消灭/遭遇/地点文本、扩展事件、上限与序列化。
+- 新增 `world_log_ui_test`：左下角固定面板、事件自动刷新、滚动、地图移动不受阻挡。
+- 新增 `neutral_party_interaction_test`：路过中立不弹窗、追击不被无关目标打断、主动点击对话、AI 追击遭遇与防重复。
+- 扩展 `unit_visual_test`：左右手层级、头部/头盔独立、装备视觉注入、名称/生命条独立、满血隐藏、普通士兵名称隐藏与控制权切换。
+- 更新 `party_dialogue_test`、`world_map_input_test`、`world_map_milestone6_test`、`milestone2_flow_test` 以匹配“主动点击后才自动对话”。
+
+## 8.12 阶段 6 · 家族领袖、NPC 部队与地图表现系统
+
+**状态：** 完成（2026-11-21）
+
+### 家族与外观
+
+- 新增 `FamilyConfig` / `FamilyRegistry` / `Data/Families/*.tres`：巴里家族、墨西西家族；包含旗帜、主/副色、主/副罩袍、领袖缨饰与家族长矛。
+- 新增 `AppearanceConfig` / `Data/Appearance/appearance_config.tres`：1/2/3 级头盔池与罩袍概率。
+- `UnitData` 新增 `family_id`、`appearance`；`UnitAppearance` 在创建时一次性生成并持久化最终资源路径。
+- 头盔按 `tier` 随机；罩袍主/副概率 20% / 50% / 100%；三级与领袖始终主罩袍；无副罩袍回退主罩袍。
+- 领袖显示家族缨饰；家族长矛为可选表现；装备 `HEAD` / `WEAPON` 视觉优先。
+- `UnitVisual` / `HumanVisual` 只消费结果，不硬编码家族规则。
+
+### 部队、领袖与地点
+
+- 新增两支家族骑士：巴里骑士、墨西西骑士，各 10 人，`FACTION_LOCAL`，专属巡逻点，由现有 `AIManager` 控制。
+  编制：1 领袖（三级）+ 1 骑乘侍从（三级）+ 3 骑乘军士（二级）+ 2 军士（二级）+ 3 步兵（一级）。
+- 新增两支强盗：东路强盗、荒野强盗；独立出生点、路线与部队 ID。
+- `PartyData` 新增 `family_id`、`leader_unit_id`、`ai_patrol_points`；`PartyManager.get_leader_unit()`。
+- 玩家身份、当前控制、部队领袖、部队归属保持四个独立概念；玩家部队领袖指向 `player_hero`。
+- 村庄重命名为巴里、墨西西，并记录 `family_id`；北境村、灰石城堡不变。
+- 新增 `world_log` 不受影响；读档不重复生成新部队。
+
+### 地图表现与速度
+
+- `PartyIcon` 改为圆形标记，家族旗帜等比缩放放入圆内；尺寸/边框/旗帜/人数位置由 `PartyMarkerStyle` 集中配置。
+- 地点名称迁移到固定屏幕 UI 层 `SettlementNameTag`，名称左侧显示圆形家族旗帜；文字不随相机缩放，标签不拦截鼠标。
+- `WorldMapManager` 统一将大地图实际速度乘以 0.5；`PartyData.movement_speed` 与战斗移动速度不变。
+
+### 测试
+
+- 新增 `family_appearance_test`：家族配置、两村改名、两队 10 人编制、领袖/成员关系、外观池与概率、装备优先级、序列化、旧存档默认值、统一速度倍率。
+- 更新：`milestone1_test`、`milestone1_restart_test`、`milestone2_flow_test`、`unit_party_serialization_test`、`world_map_milestone6_test`。
+- 通过：`family_appearance_test`、`unit_visual_test`、`milestone1_test`、`milestone1_restart_test`（save/load）、`milestone2_flow_test`、`world_map_input_test`、`world_map_milestone6_test`、`party_dialogue_test`、`neutral_party_interaction_test`、`ai_manager_test`、`unit_party_serialization_test`。
+- 未执行无关的全量测试；未做非 headless 截图验收。
+
+### 明确未实现
+
+- 家族外交/战争、领袖关系/任务、招募 UI、玩家家族创建/编辑、家族盾牌、家族领地。
+- NPC 领袖管理 UI、家族旗帜资源缺失时的专属阵营旗帜美术（当前使用颜色回退）。
+
+## 8.13 阶段 6 后续 · 统一大地图部队架构与遭遇交互
+
+### 部队架构
+
+- `PartyData` 新增持久化字段 `control_type`（PLAYER / AI）、`party_kind`（GENERIC / PLAYER / FAMILY / MERCHANT / BANDIT / GUARD）与 `banner_texture_path`。
+- 玩家、家族、盗贼、商队、治安队继续共用 `PartyData` / `PartyManager` / `WorldMapManager` / `AIManager` / `BattleManager`；未新增任何按类型拆分的管理器或标记节点。
+- `AIManager` 只调度 `control_type == AI` 的部队；`party_kind` 不参与移动、成员、战斗、结算流程。
+- 普通 NPC 部队在初始化时设置 `leader_unit_id`，领袖名称沿用部队名。
+- 旧存档缺失新字段时由 `PartyManager.apply_runtime_defaults()` 按 `player_party_id`、阵营、家族与 `ai_type` 推断；不修改成员、位置、路线或已有明确类型。
+
+### 大地图标记
+
+- `PartyMarkerStyle` 标准半径 18 → 26，边框 3、旗帜最大边长 56、阴影与人数位置同步放大（该尺寸已在 8.14 恢复为 18/30；村庄标记改为独立放大）。
+- 所有部队共用 `PartyIcon`；旗帜优先 `PartyData.banner_texture_path`，为空回退家族旗帜；无家族色时按阵营读取回退色。
+- `map_flag_circle.gdshader` 新增 `uv_radius`，旗帜可大于内径并在边框内缘裁掉四角，不覆盖外圈边框。
+
+### 遭遇 UI 与规则
+
+- `PartyDialoguePanel` 与 `PlayerEncounterPanel` 迁移到屏幕下方：左侧领袖头像/剪影，右侧姓名、阵营、兵力、对白与选项。
+- `EncounterPortrait` 复用 `UnitVisual`；无有效领袖时绘制安全默认头肩剪影。
+- `EncounterManager` 记录 `EncounterReason`：`PASSIVE_ENCOUNTER` / `PLAYER_INITIATED` / `ENEMY_PURSUIT` / `OTHER`。
+- `ENEMY_PURSUIT`（敌对 AI 主动追击并成功拦截）隐藏并禁用离开选项，`decline_player_encounter()` 同步拒绝；玩家主动接近仍保留离开。
+- 对白来自 `EncounterTextConfig`（`Data/Encounters/encounter_text_config.tres`），按遭遇原因与部队类型选择，UI 不硬编码文本。
+
+### 测试
+
+- 新增 `party_architecture_test`：统一字段、类型/控制权、NPC 领袖、序列化往返、旧存档默认值与类型推断、读档不重置位置/成员/领袖。
+- 新增 `encounter_dialogue_ui_test`：统一标记尺寸、底部布局、领袖头像、无领袖默认剪影、敌对追击无离开、玩家主动接近保留离开、配置文本。
+- 更新：`player_encounter_test`（ENEMY_PURSUIT 选项与布局）、`neutral_party_interaction_test`（敌对追击禁离开、普通对话底部布局）。
+- 通过：`party_architecture_test`、`encounter_dialogue_ui_test`、`player_encounter_test`、`neutral_party_interaction_test`、`player_pursuit_encounter_test`、`party_dialogue_test`、`party_manager_test`、`unit_party_serialization_test`、`ai_manager_test`、`ai_encounter_flow_test`、`world_map_milestone6_test`、`world_map_input_test`、`milestone1_test`、`milestone2_flow_test`。
+- 未执行无关的全量测试；未做非 headless 截图验收。
+
+### 明确未实现
+
+- 完整 NPC 对话树、好感度、家族外交与联盟。
+- 交涉/缴赎等额外遭遇选项；当前只保留战斗与按原因生成的离开规则。
+- 遭遇 UI 的复杂动画与配音。
+
+## 8.14 阶段 6 后续 · 村庄表现、玩家扩编与小地图战斗集群
+
+### 大地图村庄与部队标记
+
+- `PartyMarkerStyle` 恢复半径 18、边框 2、旗帜 30、人数偏移 24；所有部队类型重新使用扩编前尺寸。
+- `SettlementIcon` 只对村庄使用放大圆形标记：半径 32、旗帜 76，旗帜超出内径部分由 `map_flag_circle.gdshader` 裁剪；城堡保持原建筑绘制。
+- 村庄点击继续由 `SETTLEMENT_CLICK_RADIUS = 45` 判定，不随绘制尺寸改变。
+- `SettlementNameTag` 改为纯文本、水平居中，位于圆形标记正上方；间距由标记半径 × 相机缩放 + 10 屏幕像素计算，文字尺寸固定，标签不拦截鼠标。
+- 每个名称标签仍按 `settlement_id` 独立创建，同名村庄不会合并。
+
+### 玩家初始部队
+
+- 新游戏玩家部队扩编为 12 人：1 玩家角色 + 5 民兵 + 6 职业步兵，其中前 4 名职业步兵装备马匹。
+- 人数与骑乘数量集中在 `WorldInitializer.PLAYER_MILITIA_COUNT`、`PLAYER_TRAINED_COUNT`、`PLAYER_MOUNTED_TRAINED_COUNT`、`PLAYER_TOTAL_MEMBER_COUNT`。
+- 所有新增成员继续经 `UnitManager.create_unit`、`PartyManager.add_member` 与统一外观初始化；不新增骑兵兵种。
+- 马匹库存为 5：4 匹装备、1 匹留在背包；旧存档已有成员时不补兵、不重复生成。
+
+### 小地图战斗部署与集群
+
+- `BattleScene.SPAWN_MARGIN_X` 调整为 90，`INITIAL_DEPLOYMENT_DISTANCE = 1100`；双方阵线分居左右，质心距离约 1040，全部位于 1280×720 内。
+- `_update_formations()` 改为双方各自半场列阵：阵线中心为己方质心向前推进，双方前排保留 `SIDE_LINE_GAP = 90`，不再共享中点。
+- 双方质心距离 ≤ `CONTACT_DISTANCE = 220` 后队形间距 × 1.35 放松；步行间距 40、骑乘 56。
+- `BattleScene` 每 0.3 秒统计每个战斗侧的目标占用；`UnitController` 按“距离 + 占用惩罚”选择目标，已进入攻击范围时不重新索敌。
+- 接近目标时远距离参考队形槽位方向，距离 ≤ 140 后按当前包围角度接近并带 ±10 切向偏移；友军分离半径 44、敌军 34。
+- 未新增单位移动管理器，继续复用 `FormationManager` 与 BattleScene 周期缓存。
+
+### 测试
+
+- 新增 `player_party_expansion_test`：12 人编制、完整 UnitData、兵种/骑乘数量、领袖、马匹库存、存档往返不丢失或重复生成。
+- 新增 `battle_cluster_test`：初始部署距离、边界、双方半场槽位、接近/接敌后无严重重叠、局部拥挤上限、目标分流与纵深分布。
+- 更新：`world_map_milestone6_test`（村庄标记尺寸/旗帜/名称上方）、大量玩家兵力断言改用 `PLAYER_TOTAL_MEMBER_COUNT`、`mounted_unit_test` 与 `unit_tier_wage_test` 的编制派生值。
+- 通过：`player_party_expansion_test`、`battle_cluster_test`、`battle_scene_test`、`battle_formation_test`、`battle_retreat_test`、`battle_side_result_test`、`milestone2_flow_test`、`party_panel_test`、`party_dialogue_test`、`player_control_test`、`world_map_milestone6_test`、`encounter_dialogue_ui_test`、`player_encounter_test`、`neutral_party_interaction_test`、`player_pursuit_encounter_test`、`ai_encounter_flow_test`、`milestone1_test`、`milestone1_flow_test`、`world_map_input_test`、`village_flow_test`、`village_scene_test`、`party_architecture_test`、`unit_party_serialization_test`、`ai_manager_test`、`faction_vision_test`、`world_map_battle_marker_test`、`world_log_ui_test`、`mounted_unit_test`、`unit_tier_wage_test`、`player_character_data_test`、`unit_controller_test`、`formation_manager_test`。
+- 未执行无关的全量测试；未做非 headless 战斗观感/截图验收。
+
+### 明确未实现
+
+- 显式攻击槽位分配、等待/换位策略、寻路与复杂军事战术。
+- 阵型编辑 UI 与完整战术指挥。
+- 集群参数仍为集中常量，需实机观察后微调（KI404）。
+
+## 8.15 战斗占用提示修复
+
+### 问题
+
+- `BattleManager` 全局只允许一场战斗。NPC 对 NPC 的离屏战斗进行时，玩家与无关部队发起战斗会被 `start_battle` 拒绝。
+- 普通部队对话只知道“双方有兵/同阵营”，没有读取 `current_battle`，因此按钮仍可点击，点击后只显示笼统的“无法开始战斗”，真实原因仅在控制台警告中。
+
+### 修复
+
+- `_open_party_dialogue()` 会读取当前战斗：
+  - 点击方是当前战斗参战方且 `can_party_join(玩家)` 成立 → 按钮文本改为“加入战斗”；
+  - 点击方与当前战斗无关 → 禁用按钮并显示“世界上已有另一场战斗正在进行，暂时无法另开战场”；
+  - 点击方属于当前战斗但玩家无法加入 → 显示“对方正在战斗中，靠近战场后可加入战斗”或“对方正在战斗中，暂时无法开战”。
+- 目标 `IN_BATTLE` / `RETURNING` / `DISABLED` 和玩家自身不可参战时显示对应状态，不再复用同一句模糊提示。
+- `begin_battle_with_party()` 增加同样的分支；即使绕过按钮直接调用，也会拒绝并在面板内写明原因。
+- 加入路径复用 `BattleManager.try_join_battle()`，不新建战斗；成功后的暂停顺序仍为“先压入 battle，再移除 ui_panel”。
+- `BattleManager` 的“一场战斗”规则未改变；本修复只解决提示与入口问题。
+
+### 测试
+
+- 新增 `battle_occupancy_ui_test`：离屏战斗占用时独立部队按钮禁用且原因明确；绕过按钮直接调用同样被拒绝；参战方按钮变为“加入战斗”，加入后复用同一会话并切换为屏幕战斗。
+- 回归通过：`party_dialogue_test`、`encounter_dialogue_ui_test`、`world_map_milestone6_test`、`player_encounter_test`、`ai_encounter_flow_test`。
+
 ## 9. 自动化验收
 
 ### 测试套件
@@ -929,16 +1132,22 @@
 | `Tests/UnitTests/party_manager_test.tscn` | 成员增删、重复加入、转队、阵营拒绝、重复部队 ID、解散、双向一致性校验 |
 | `Tests/UnitTests/stat_calculator_test.tscn` | 两种兵种基础属性、等级成长、装备叠加、武器攻击距离覆盖/切换、无效装备、属性写入、HP clamp 与不自动回血 |
 | `Tests/UnitTests/unit_party_serialization_test.tscn` | 5 名士兵与多部队存档往返、等级/经验/装备/当前 HP 恢复、读档重算、旧存档缺失字段、无效装备清理、继续转队、损坏引用拒绝加载 |
-| `Tests/SystemTests/party_panel_test.tscn` | 大地图部队按钮、面板打开/关闭、概览、7 人成员列表、详情属性、装备槽位、步兵/骑兵 SubViewport 美术预览、预览只读、暂停原因栈 |
+| `Tests/SystemTests/party_panel_test.tscn` | 大地图部队按钮、面板打开/关闭、概览、完整初始成员列表、详情属性、装备槽位、步兵/骑兵 SubViewport 美术预览、预览只读、暂停原因栈 |
 | `Tests/UnitTests/faction_vision_test.tscn` | 阵营关系组合与对称性、视野发现/离开、敌友中立筛选、失效观察者与目标 |
 | `Tests/UnitTests/multi_party_battle_test.tscn` | 双方回归、友军加入、独立第三方、中立拒绝、距离/重复校验、多方离屏结算、多侧战斗场景 |
 | `Tests/SystemTests/ai_encounter_flow_test.tscn` | 玩家加入离屏战斗、玩家实际战斗侧、`battle_started` 自动进入战斗场景 |
-| `Tests/SystemTests/player_encounter_test.tscn` | 敌对 AI 主动拦截玩家、遭遇对话内容、暂停原因栈、防重复、异常清理、战斗/撤退选项、进入战斗场景 |
+| `Tests/SystemTests/player_encounter_test.tscn` | 敌对 AI 主动拦截玩家、ENEMY_PURSUIT 原因、底部布局与领袖头像、无离开选项、暂停原因栈、防重复、异常清理、进入战斗场景 |
+| `Tests/SystemTests/world_map_milestone6_test.tscn` | 村庄圆形标记放大、旗帜裁剪、名称位于标记上方、部队标记保持原尺寸、悬浮与点击 |
+| `Tests/UnitTests/party_architecture_test.tscn` | 统一 Party 字段、控制类型/部队类型、NPC 领袖、序列化往返、旧存档默认值与类型推断、读档不重置位置/成员 |
+| `Tests/SystemTests/encounter_dialogue_ui_test.tscn` | 部队标记恢复原尺寸、底部 NPC 对话、领袖头像/默认剪影、敌对追击无离开、玩家主动接近保留离开、配置文本 |
+| `Tests/SystemTests/player_party_expansion_test.tscn` | 玩家 12 人编制、完整 UnitData、兵种/骑乘数量、领袖、马匹库存、存档往返不丢失或重复生成 |
+| `Tests/SystemTests/battle_cluster_test.tscn` | 初始部署距离、战场边界、双方半场列阵、接近/接敌后无严重重叠、局部拥挤上限、目标分流、纵深分布 |
+| `Tests/SystemTests/battle_occupancy_ui_test.tscn` | 已有战斗时独立部队禁止另开战场、原因文本、绕过按钮拒绝、参战方“加入战斗”复用同一会话 |
 | `Tests/SystemTests/player_battle_interaction_test.tscn` | 接近离屏战斗加入/离开面板、加入已有战斗、离开拒绝与重触发、战斗结束/异常清理、暂停与倍率保护 |
 | `Tests/UnitTests/unit_controller_test.tscn` | 接近、攻击间隔、伤害、死亡、重新索敌、手动移动、5v5 自动战斗收敛 |
 | `Tests/UnitTests/combat_attack_rules_test.tscn` | 三人围攻、被围攻反击、独立冷却、360°定向矩形、背后/横向/超距排除、玩家四方向、单次单目标、武器距离变化、实体碰撞、骑乘移动加成 |
-| `Tests/UnitTests/mounted_unit_test.tscn` | 马匹库存消耗/返还、库存不足、重复装备、MOUNT 派生状态、骑乘属性、旧存档、新游戏 7 人/3 骑乘、存档往返 |
-| `Tests/UnitTests/unit_visual_test.tscn` | 人物/马匹分组、层级（马腿在马身之前）、人体双腿、四腿独立、影子互斥、15 像素偏移、待机/跑动动画、武器摇摆、马匹动画、360°攻击方向、长矛枢轴、缺失缨饰回退、UnitActor 集成 |
+| `Tests/UnitTests/mounted_unit_test.tscn` | 马匹库存消耗/返还、库存不足、重复装备、MOUNT 派生状态、骑乘属性、旧存档、新游戏 12 人/4 骑乘、存档往返 |
+| `Tests/UnitTests/unit_visual_test.tscn` | 人物/马匹分组、层级（左右手武器、头部/头盔、马腿在马身之前）、人体双腿、四腿独立、影子互斥、15 像素偏移、待机/跑动动画、武器摇摆、马匹动画、360°攻击方向、长矛枢轴、装备视觉注入、缺失缨饰回退、UnitActor 名称/生命条集成与名称控制权联动 |
 | `Tests/UnitTests/formation_manager_test.tscn` | 横向/纵深/松散/方阵站位、列数自动扩展、间距 |
 | `Tests/UnitTests/battle_result_test.tscn` | 胜负/伤亡/经验升级/金币/战利品/撤退/多方/离屏/中途加入/重复结算保护 |
 | `Tests/UnitTests/player_character_data_test.tscn` | 玩家角色创建、身份持久化、玩家档案金币/物品往返 |
@@ -946,7 +1155,7 @@
 | `Tests/UnitTests/ai_manager_test.tscn` | 商队往返、治安队巡逻、玩家/战斗/NONE 跳过、强盗动态评分/切换阈值/追击/失去视野、攻击意图、单方/双方意图遭遇、友方不遭遇、治安队拦截/恢复巡逻、离屏遭遇与中途加入、AI 字段序列化 |
 | `Tests/SystemTests/party_dialogue_test.tscn` | 接近 AI 部队、对话内容、暂停恢复、重复 UI、战斗准备、战斗中禁存档 |
 | `Tests/SystemTests/world_map_input_test.tscn` | 数字键 1/2/3、小键盘/echo、UI 屏蔽、点击切 1x、真实 tick 下 NPC 移动 |
-| `Tests/SystemTests/battle_scene_test.tscn` | 12 名士兵生成（玩家 7 + 敌方 5）、唯一 unit_id、初始部署距离、边界、2 倍相机、1920×1080 设置、部件 z/贴图、骑乘保留人腿、实时伤害、死亡移除、胜利、结算与存档 |
+| `Tests/SystemTests/battle_scene_test.tscn` | 全部参战士兵生成（玩家 12 + 敌方 5）、唯一 unit_id、初始部署距离、边界、2 倍相机、1920×1080 设置、部件 z/贴图、骑乘保留人腿、实时伤害、死亡移除、胜利、结算与存档 |
 | `Tests/SystemTests/player_control_test.tscn` | 玩家角色控制、WASD/斜向、左键攻击/冷却、受伤、控制权转移、观战、战败结果 |
 | `Tests/SystemTests/battle_formation_test.tscn` | 队形槽位、同队间距、多友军 lane 分区、阵亡后重分配 |
 | `Tests/SystemTests/battle_side_result_test.tscn` | 同侧一支部队全灭但仍有友军时战斗继续；侧全灭后失败 |
@@ -967,6 +1176,9 @@
 | `Tests/SystemTests/small_scene_camera_test.tscn` | 统一视野、跟随、自由视角、边界限制、切回跟随、村庄摄像机 |
 | `Tests/SystemTests/player_pursuit_encounter_test.tscn` | 同向追击接触、停止/清目标、暂停与面板、撤退、拒绝锁、重新触发、进入战斗 |
 | `Tests/SystemTests/world_map_battle_marker_test.tscn` | 单战斗标记、参战图标隐藏、按战斗侧汇总、小时伤亡刷新、第三方加入、结束恢复 |
+| `Tests/UnitTests/world_log_manager_test.tscn` | 战斗/胜负/消灭/遭遇/地点事件文本、扩展事件、100 条上限、序列化预留 |
+| `Tests/SystemTests/world_log_ui_test.tscn` | 左下角日志面板、自动刷新、滚动区域、不阻挡地图移动 |
+| `Tests/SystemTests/neutral_party_interaction_test.tscn` | 路过中立不弹窗、追击不被无关目标打断、主动点击对话、AI 追击遭遇、防重复 |
 
 ### 运行命令
 
@@ -1020,6 +1232,11 @@ Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/small_
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/player_pursuit_encounter_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/world_map_battle_marker_test.tscn
 
+# 阶段 6 世界日志、美术层级与战斗表现
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/world_log_manager_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/world_log_ui_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/neutral_party_interaction_test.tscn
+
 # 手动视觉验收（非 headless，打开窗口并保存截图到 user://）
 Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/visual_probe.tscn
 Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/party_preview_probe.tscn
@@ -1030,26 +1247,34 @@ Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/main_menu_probe.tscn
 
 本次实际执行（阶段 6 大地图战斗与小地图视角）：新增 `offscreen_battle_hourly_test`、`small_scene_camera_test`、`player_pursuit_encounter_test`、`world_map_battle_marker_test` 全部通过；更新并回归 `multi_party_battle_test`、`battle_result_test`、`ai_manager_test`、`battle_scene_test`、`player_control_test`、`player_encounter_test`、`player_battle_interaction_test`、`world_map_milestone6_test`、`world_map_input_test`、`party_dialogue_test`、`village_scene_test`、`village_flow_test`、`milestone2_flow_test`，全部通过。未执行非 headless 视觉截图与跨进程重启测试。未改变存档 Schema；摄像机、离屏战斗与战斗 UI 状态均为运行时数据。
 
+本次实际执行（阶段 6 世界日志/美术层级/战斗表现）：新增 `world_log_manager_test`、`world_log_ui_test`、`neutral_party_interaction_test` 全部通过；扩展 `unit_visual_test` 通过；更新并回归 `party_dialogue_test`、`world_map_input_test`、`world_map_milestone6_test`、`milestone2_flow_test`、`battle_scene_test`、`player_control_test`、`party_panel_test`、`village_scene_test`、`village_flow_test`、`player_encounter_test`、`player_battle_interaction_test`、`player_pursuit_encounter_test`、`ai_encounter_flow_test`、`battle_retreat_test`、`world_map_battle_marker_test`、`multi_party_battle_test`、`offscreen_battle_hourly_test`，全部通过。未执行非 headless 视觉截图与跨进程重启测试。未改变存档 Schema；日志历史本阶段不持久化。
+
+本次实际执行（阶段 6 地点点击交互与战斗名称显隐）：`unit_visual_test`、`world_map_milestone6_test`、`world_map_input_test`、`party_dialogue_test`、`village_flow_test`、`milestone1_test`、`battle_scene_test`、`neutral_party_interaction_test` 全部通过。覆盖点击地点才打开面板、路过/追击不弹窗、普通士兵隐藏名称、控制单位保留名称、名称与生命条独立显隐。未改变存档 Schema。
+
+本次实际执行（阶段 6 家族领袖/NPC 部队/地图表现）：新增 `family_appearance_test` 全部通过；更新后通过 `unit_visual_test`、`milestone1_test`、`milestone1_restart_test`（save/load 两阶段）、`milestone2_flow_test`、`world_map_input_test`、`world_map_milestone6_test`、`party_dialogue_test`、`neutral_party_interaction_test`、`ai_manager_test`、`unit_party_serialization_test`。覆盖家族配置/外观池与概率/装备优先级/两村改名/两队 10 人编制/领袖与序列化/旧存档默认值/圆形旗帜标记/固定屏幕地点名称/统一 0.5 速度。未执行无关全量测试与非 headless 截图。
+
+本次实际执行（战斗占用提示修复）：新增 `battle_occupancy_ui_test` 全部通过；回归通过 `party_dialogue_test`、`encounter_dialogue_ui_test`、`world_map_milestone6_test`、`player_encounter_test`、`ai_encounter_flow_test`。覆盖离屏战斗占用时的禁用与原因文本、绕过按钮直接拒绝、参战方加入已有战斗。未改变存档 Schema；未修改 BattleManager 单一战斗会话规则。
+
 ### 手动验证步骤
 
 1. 启动游戏，进入主菜单。
-2. New Game → 大地图默认暂停；玩家部队 7 名成员（含 3 名骑乘职业步兵），移动速度 150。
-3. 按 `2` 进入 1x，观察河畔商队向橡木村移动、北境巡逻队向第一个巡逻点移动；按 `1` / `3` 验证暂停与二倍速。
+2. New Game → 大地图默认暂停；玩家部队 12 名成员（含 4 名骑乘职业步兵），数据速度 150（大地图实际 75）。
+3. 按 `2` 进入 1x，观察河畔商队向巴里移动、北境巡逻队向第一个巡逻点移动；按 `1` / `3` 验证暂停与二倍速。
 4. 点击地图移动玩家部队；若点击前为 2x，应自动切回 1x；观察玩家速度明显慢于 NPC。
-5. 持续运行一段时间，确认商队到达橡木村后转向河畔村，巡逻队按四点顺序循环。
-6. 移动至“河畔商队”附近，接近后自动打开部队对话。
+5. 持续运行一段时间，确认商队到达巴里后转向墨西西，巡逻队按四点顺序循环；确认巴里/墨西西骑士沿各自专属巡逻点移动。
+6. 主动点击“河畔商队”并接近后打开部队对话。
 7. 确认面板显示部队名称、阵营“商队”、兵力 5；点击离开，确认世界恢复暂停前倍率。
-8. 再次接近并点击“发起战斗”，进入战斗场景；确认玩家 7 名士兵（含 3 名骑乘）、敌方 5 名士兵、玩家角色带金色控制圈、阵营罩袍区分、位置不重叠。
+8. 再次接近并点击“发起战斗”，进入战斗场景；确认玩家 12 名士兵（含 4 名骑乘）、敌方 5 名士兵、双方分居战场两侧、玩家角色带金色控制圈、阵营罩袍区分、位置不重叠。
 9. 使用 WASD 移动玩家角色，验证四方向与斜向速度一致；鼠标左键攻击范围内敌人，确认伤害/攻击间隔来自 Unit。
 10. 消灭全部敌人后查看结果面板（胜负、伤亡、经验、金币/战利品），点击“返回大地图”，确认部队解锁、存活士兵保留 HP、阵亡敌人变为 DISABLED。
 11. 检查保存面板打开时数字键与地图点击均被屏蔽。
 12. 保存并读取，确认 NPC 路线进度、目标、移动状态与玩家速度正确恢复。
 13. 在大地图顶部点击“部队”，确认面板打开且世界暂停、基础倍率不变。
-14. 检查部队名称、阵营、人数（7）、移速、状态；左侧 7 名士兵各显示一次，默认选中第一名；右侧美术预览随选中切换。
+14. 检查部队名称、阵营、人数（12）、移速、状态；左侧 12 名士兵各显示一次，默认选中第一名；右侧美术预览随选中切换。
 15. 点击不同士兵，确认右侧姓名、兵种、等级、经验、HP、攻击、攻击间隔、移速、射程与装备槽位正确切换；空槽显示“无”。
 16. 关闭面板，确认恢复打开前的时间倍率；若存在其他暂停原因，关闭后仍保持暂停。
 17. 通过数据层（或后续装备 UI）给士兵装备铁剑后重新打开面板，确认攻击与装备槽位更新；保存并读档后确认等级、经验、装备、当前 HP 与最终属性一致。
-18. 点击移动中的商队，确认玩家部队持续跟随；追上商队、商队离开视野或进入战斗后，跟随自动取消。
+18. 点击移动或静止的商队/家族骑士，确认玩家部队持续跟随（目标离开视野也不中断）；追上目标、目标进入战斗或失效后跟随自动取消。
 19. 观察山道强盗游荡；当商队进入视野后，强盗应追击并在接近后触发离屏战斗，世界时间继续推进。
 20. 让治安队接近商队-强盗战斗，确认治安队加入商队一方；再让玩家部队接近战场，确认进入战斗场景且玩家位于正确战斗侧。
 21. 在战斗场景确认同侧士兵不互相攻击、第三方拥有独立战斗侧；战斗结束后所有参战部队解除锁定。
@@ -1095,6 +1320,17 @@ Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/main_menu_probe.tscn
 61. 观察骑兵跑动：马腿局部伸展比上一版更明显，但仍远小于马身整体跃动；前腿组/后腿组关系保持。
 62. 比较骑兵整体上下幅度：比上一版更低，但仍保留必要跃动感；骑手与马身保持整体协调。
 63. 观察骑马影子：马匹抬高时影子轻微缩小/变淡，回落时恢复；影子没有明显跳动、闪烁或位置漂移。
+64. 进入大地图，确认左下角显示“世界日志”面板；触发一场 AI 对 AI 战斗，日志应出现战斗开始、胜负与被消灭部队；进入/离开村庄后出现对应日志；历史条目可滚动查看。
+65. 普通寻路或追击目标时路过中立/无关部队，不应自动暂停或弹窗；主动点击中立部队并接近后才打开对话；敌对 AI 实际追上玩家时正常弹出遭遇。
+66. 进入战斗，普通士兵不显示头顶名称与满血生命条；玩家当前控制角色保留头顶名称；受伤士兵出现生命条，恢复满血后重新隐藏；切换控制后名称显示随控制权更新。
+67. 数据层给头盔/盾牌配置 `visual_texture_path` 后，确认头盔与头部同时显示、左手武器位于马头之后；卸下后头部仍显示，右手长矛动画不变。
+68. 大地图上确认玩家、家族、强盗、商队标记保持原有小尺寸，村庄圆形标记明显更大且旗帜被边框裁剪；村庄名称在标记正上方。
+69. 被盗贼主动追上时，底部遭遇对话显示领袖头像/名称与威胁对白，且没有离开选项；玩家主动点击敌对部队时仍可离开。
+70. 清空某支部队的 `leader_unit_id` 后触发遭遇，确认显示默认剪影与部队名，UI 不报错。
+71. 新游戏部队面板确认玩家 12 人（5 民兵、6 职业步兵、1 玩家角色），其中 4 名职业步兵显示骑马；背包剩 1 匹马。
+72. 小地图战斗开始时确认双方位于战场两侧，有明显接近距离；步兵与骑兵都能正常接敌。
+73. 接敌后观察 1–2 分钟，确认士兵不再全部叠在一点，后排不会全部挤到前排，骑兵有更大活动空间。
+74. 多方战斗/中途加入时确认各战斗侧保持自己的集群，不混成一个点；单位不越出战场边界或卡死。
 
 ## 10. 下一步任务
 
@@ -1114,6 +1350,8 @@ Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/main_menu_probe.tscn
 14. 目标周围显式攻击槽位分配、位置不足时的等待/换位；AI 骑兵不停步攻击与冲锋加成。
 15. 小场景高级镜头：缩放、边缘拖动、手柄/Input Map、战斗标记点击与单部队详情。
 16. 大地图战斗观察体验：远离战场时的小地图指示、战斗标记点击交互与旁观模式。
+17. 世界日志持久化、类型过滤、点击跳转与完整事件覆盖。
+18. 正式头盔/左手武器素材与装备差异化外观；生命条样式与战斗 UI 缩放。
 
 ## 11. 当前风险
 
@@ -1129,8 +1367,9 @@ Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/main_menu_probe.tscn
 - 被击溃的敌方部队保留为 DISABLED 图标，仅禁止交互与 AI。
 - 临时测试兵力会进入新存档；新游戏共 4 支部队、20 名士兵；旧存档读档后可能无兵可战。
 - 旧存档保留原阵营 ID 与原速度；新游戏使用新阵营与 80/120/100 速度。
-- 遭遇对话提供“战斗/撤退”，仍不能谈判或缴赎；撤退后记录 90 世界单位拒绝锁，但该锁与玩家追击焦点均不持久化。
-- 攻击意图与待处理遭遇不持久化，读档后由 AI 重新建立。
+- 遭遇对话已区分来源：`ENEMY_PURSUIT` 只提供战斗；`PLAYER_INITIATED`/普通敌对遭遇保留离开。仍不能谈判或缴赎；离开后记录 90 世界单位拒绝锁，但该锁与玩家追击焦点均不持久化。
+- 攻击意图、遭遇原因与待处理遭遇不持久化，读档后由 AI 重新建立。
+- 旧存档部队的 `control_type`/`party_kind` 按玩家 ID、家族、阵营与 `ai_type` 推断；自定义阵营可能归为 `GENERIC`，但不会影响移动、成员或战斗流程。
 - 玩家角色永久阵亡后没有复活/继承流程；后续战斗会退化到第一名存活友军作为控制对象。
 - 撤退目前主要由玩家 UI 发起；AI 战斗侧没有主动撤退决策，`retreat_side()` 已预留接口。
 - 队形/避让是局部算法，没有寻路与地形阻挡；狭窄地形或大量单位仍可能拥挤。
@@ -1140,7 +1379,10 @@ Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/main_menu_probe.tscn
 - 长矛枢轴按当前 48×96 临时素材映射；设计稿人物身体为 96×32，正式素材替换时需要重新核对枢轴。
 - 四条马腿仍是独立贴图，已挂载在马身 rig 下并继承整体跃动，但仍是程序化局部动作；没有骨骼/正式逐帧动画。骑手只跟随马身垂直偏移，不跟随马身俯仰/缩放，不是完整骑乘绑定。骑马影子仅有缩放/透明度响应，没有轮廓形态变化。
 - 目标周围没有显式攻击槽位分配，单位很多时仍可能因局部避让而拥挤（KI348）。
-- `art/` 没有独立缨饰与独立罩袍贴图；罩袍暂用身体贴图蓝色区域着色，缨饰插槽为空（KI349）。
+- 战斗集群参数（初始距离、队形间距、接敌放松、分离半径、目标占用惩罚）目前为集中常量，仅通过自动化位置断言验证，仍需实机观察微调（KI404）。
+- 玩家扩编只作用于新游戏；已有成员的旧存档保持原人数与位置，不会自动补到 12 人（KI405）。
+- 村庄名称位置按标记半径 × 相机缩放计算，使用固定 32 半径；若未来村庄标记改为可配置尺寸，需要同步读取配置而不是硬编码。
+- `art/正式人物美术/` 已提供巴里/墨西西两家族独立的罩袍、缨饰、旗帜与长矛；普通无家族士兵仍使用身体贴图蓝色区域着色，缨饰插槽为空（KI349）。
 - 没有骑乘/卸下马匹 UI，也没有物品数量 UI（KI350/KI351）。
 - 部队预览固定 1.6 倍缩放，尚未根据装备切换不同武器/护甲外观；预览背景与布局仍为临时方案。
 - 实体碰撞是“最小间距推开”，不是物理刚体；没有寻路/地形阻挡，大量单位拥挤时仍可能反复调整。
@@ -1150,11 +1392,14 @@ Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/main_menu_probe.tscn
 - 大地图相机默认 1.5 倍，世界地图图标/道路表现需要继续按正式美术校准。
 - 村庄与战斗共用 960×540 视野；自由视角仅支持 WASD/方向键移动，无缩放、边缘拖动或手柄，`F` 为硬编码快捷键（KI402）。
 - 战斗期间参战部队图标隐藏，只能查看战斗侧汇总，无法悬浮单支部队或点击标记查看详情（KI403/KI405）。
+- 世界日志只在运行时保留，未写入存档；无按类型过滤、点击跳转与触屏滚动入口（KI407–KI409）。
+- 已提供 1/2/3 级正式头盔并接入外观随机；左手盾牌仍无正式贴图，`LeftHandWeapon` 部件与 `EquipmentConfig` 视觉字段保持就绪（KI406）。
+- 普通部队对话现在只对主动点击目标自动打开；玩家若只是路过中立部队，需要主动点击才能交互。这是有意设计。
 - AI 进入射程后停步攻击，因此 AI 骑兵通常不会触发移动攻击加成（KI352）。
 - 数字键 1/2/3 为硬编码，尚未迁移到 Input Map。
 - 渲染器仍为 Forward+，2D 项目是否需要切 Compatibility 待验证。
 - `LordData` / `FactionData` 尚无仓储管理器；阵营关系当前由 `FactionManager` 代码默认值维护。
-- 项目尚无正式美术资源目录；地图与图标仍为程序绘制，士兵已接入 `art/` 临时部件。
+- 美术资源仍在 `art/` 下按来源分目录，尚未整理为统一 `Assets/` 正式目录；地图与图标仍为程序绘制，士兵已接入 `art/` 临时部件、正式头盔与两家族服装。
 - 士兵等级成长与装备属性已生效，但装备无法通过 UI 更换；装备只能由代码调用 `equip_item()` 获得（KI327）。
 - 战斗存活/获胜经验已接入；击杀、助攻与最后一击奖励仍未实现（KI328）。
 - 装备职业限制字段已预留但未校验（KI329）。

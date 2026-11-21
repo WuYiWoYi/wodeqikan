@@ -145,7 +145,7 @@ func _build_actor_visuals() -> void:
 	_player_visual.position = _player_position
 	_player_visual.z_index = 100
 	add_child(_player_visual)
-	_player_visual.setup(_player_unit)
+	_player_visual.setup(_player_unit, _visual_equipment_configs(_player_unit))
 	# 只隐藏本次场景的武器表现；UnitData.equipment 不修改。
 	_player_visual.set_weapon_visible(false)
 	_player_visual.set_facing(_facing)
@@ -174,6 +174,19 @@ func _build_actor_visuals() -> void:
 	npc_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	npc_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(npc_label)
+
+
+func _visual_equipment_configs(unit: UnitData) -> Dictionary:
+	var configs: Dictionary = {}
+	if unit == null or _context == null:
+		return configs
+	for slot_key_value: Variant in unit.equipment.keys():
+		var slot_key: String = str(slot_key_value)
+		var equipment_id: String = str(unit.equipment.get(slot_key_value, ""))
+		var equipment := _context.unit_manager.get_equipment_config(equipment_id)
+		if equipment != null:
+			configs[slot_key] = equipment
+	return configs
 
 
 func _build_ui() -> void:
@@ -502,6 +515,8 @@ func _request_exit() -> void:
 		push_error("无法返回大地图（错误码 %s）" % error)
 		TimeManager.push_pause(GameManager.PAUSE_REASON_SMALL_SCENE)
 		_returning = false
+		return
+	EventBus.settlement_exited.emit(settlement_id, _context.player_party_id)
 
 
 func _abort_to_world_map() -> void:

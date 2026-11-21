@@ -10,7 +10,6 @@ const UnitVisualScript = preload("res://Scripts/Systems/Combat/unit_visual.gd")
 
 const SELECTION_RADIUS: float = 20.0
 const SELECTION_RADIUS_MOUNTED: float = 27.0
-const HP_BAR_TOP: float = -50.0
 
 ## 整个 UnitActor 必须高于战场背景（BattleScene 根节点 z_index = 0）。
 ## UnitVisual 的部件使用相对负 z_index，因此实际 canvas z = 本值 + 部件 z。
@@ -28,12 +27,18 @@ var visual: Node2D = null
 
 var _facing: float = -1.0
 var _name_label: Label = null
+var _health_bar: UnitHealthBar = null
 var _attack_flash: float = 0.0
 var _visual_moving: bool = false
 var _move_buffer: float = 0.0
 
 
-func setup(data: UnitData, state: BattleUnitState, player_side: bool) -> void:
+func setup(
+	data: UnitData,
+	state: BattleUnitState,
+	player_side: bool,
+	equipment_configs: Dictionary = {}
+) -> void:
 	unit_data = data
 	battle_state = state
 	is_player_side = player_side
@@ -44,9 +49,10 @@ func setup(data: UnitData, state: BattleUnitState, player_side: bool) -> void:
 	visual = UnitVisualScript.new()
 	visual.name = "Visual"
 	add_child(visual)
-	visual.setup(data)
+	visual.setup(data, equipment_configs)
 
 	_create_label()
+	_create_health_bar()
 	queue_redraw()
 
 
@@ -77,14 +83,24 @@ func _process(delta: float) -> void:
 		_attack_flash = maxf(0.0, _attack_flash - delta)
 		if _attack_flash <= 0.0 and is_instance_valid(visual):
 			visual.set_attack_flash(false)
+	if _health_bar != null and unit_data != null:
+		_health_bar.update_health(
+			battle_state.battle_hp, unit_data.max_hp, battle_state.alive
+		)
 	queue_redraw()
 
 
 func set_controlled(value: bool) -> void:
-	if is_controlled == value:
-		return
-	is_controlled = value
-	queue_redraw()
+	if is_controlled != value:
+		is_controlled = value
+		queue_redraw()
+	_update_name_visibility()
+
+
+## 普通士兵隐藏头顶名称；只有玩家当前控制的单位显示名称。
+func _update_name_visibility() -> void:
+	if _name_label != null:
+		_name_label.visible = is_controlled
 
 
 func play_attack(direction: Vector2 = Vector2.LEFT) -> void:
@@ -143,24 +159,35 @@ func _draw() -> void:
 			true
 		)
 
-	var max_hp: int = maxi(unit_data.max_hp, 1)
-	var ratio: float = clampf(float(battle_state.battle_hp) / float(max_hp), 0.0, 1.0)
-	draw_rect(
-		Rect2(-16.0, HP_BAR_TOP, 32.0, 5.0),
-		Color(0.0, 0.0, 0.0, 0.7),
-		true
-	)
-	var hp_color := Color("#6fdc6f") if ratio > 0.35 else Color("#e05a4f")
-	draw_rect(Rect2(-16.0, HP_BAR_TOP, 32.0 * ratio, 5.0), hp_color, true)
-
 	if not battle_state.alive:
 		draw_line(Vector2(-10.0, -10.0), Vector2(10.0, 10.0), Color(0.0, 0.0, 0.0, 0.7), 2.5)
+
+
+func _create_health_bar() -> void:
+	_health_bar = UnitHealthBar.new()
+	_health_bar.name = "HealthBar"
+	_health_bar.setup(unit_data.max_hp if unit_data != null else 1)
+	add_child(_health_bar)
+
+
+func get_health_bar() -> UnitHealthBar:
+	return _health_bar
+
+
+func get_name_label() -> Label:
+	return _name_label
+
+
+func is_name_visible() -> bool:
+	return _name_label != null and _name_label.visible
 
 
 func _create_label() -> void:
 	_name_label = Label.new()
 	_name_label.name = "NameLabel"
 	_name_label.text = unit_data.display_name
+	# 默认隐藏；由 set_controlled() 按当前控制权切换，不影响生命条。
+	_name_label.visible = is_controlled
 	_name_label.position = Vector2(-50.0, -70.0)
 	_name_label.size = Vector2(100.0, 18.0)
 	_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

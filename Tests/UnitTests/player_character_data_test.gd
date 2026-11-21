@@ -29,7 +29,10 @@ func _run() -> void:
 	_check(player != null, "玩家部队存在")
 	if player == null:
 		return
-	_check(player.member_unit_ids.size() == 7, "玩家部队包含 7 名成员")
+	_check(
+		player.member_unit_ids.size() == WorldInitializer.PLAYER_TOTAL_MEMBER_COUNT,
+		"玩家部队包含全部初始成员"
+	)
 
 	var hero: UnitData = null
 	for unit_id: String in player.member_unit_ids:

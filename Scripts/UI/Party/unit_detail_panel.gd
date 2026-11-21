@@ -357,10 +357,23 @@ func _build_preview() -> void:
 func _refresh_preview(unit: UnitData) -> void:
 	if _preview_visual == null:
 		return
-	_preview_visual.setup(unit)
+	_preview_visual.setup(unit, _visual_equipment_configs(unit))
 	_preview_visual.set_facing(-1.0)
 	# 切换预览对象时从干净的待机相位开始，避免沿用上一名士兵的状态。
 	_preview_visual.reset_locomotion()
+
+
+func _visual_equipment_configs(unit: UnitData) -> Dictionary:
+	var configs: Dictionary = {}
+	if unit == null or _context == null:
+		return configs
+	for slot_key_value: Variant in unit.equipment.keys():
+		var slot_key: String = str(slot_key_value)
+		var equipment_id: String = str(unit.equipment.get(slot_key_value, ""))
+		var equipment := _context.unit_manager.get_equipment_config(equipment_id)
+		if equipment != null:
+			configs[slot_key] = equipment
+	return configs
 
 
 ## 复用战斗表现层的待机动画；面板不可见时不推进动画。

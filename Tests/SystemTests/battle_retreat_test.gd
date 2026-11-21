@@ -87,7 +87,11 @@ func _run() -> void:
 	if result != null:
 		_check(result.end_reason == BattleResultData.EndReason.RETREAT, "结束原因为撤退")
 		_check(result.get_party_casualties(_player.party_id) == 0, "撤退不产生阵亡")
-		_check(result.get_party_survivors(_player.party_id) == 7, "撤退保留全部士兵")
+		_check(
+			result.get_party_survivors(_player.party_id)
+				== WorldInitializer.PLAYER_TOTAL_MEMBER_COUNT,
+			"撤退保留全部士兵"
+		)
 		_check(result.reward_gold == 0, "撤退无金币奖励")
 	_check(_context.player_profile.gold == gold_before, "撤退不改变玩家金币")
 	_check(_context.battle_manager.current_battle == null, "撤退结算后清理会话")

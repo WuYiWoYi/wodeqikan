@@ -17,7 +17,10 @@ func setup(unit_manager: UnitManager, id_generator: IdGenerator) -> void:
 
 
 func create_party(
-	faction_id: String, world_position: Vector2, party_name: String = ""
+	faction_id: String,
+	world_position: Vector2,
+	party_name: String = "",
+	party_kind: PartyData.PartyKind = PartyData.PartyKind.GENERIC
 ) -> PartyData:
 	if _id_generator == null:
 		push_error("PartyManager 尚未初始化 IdGenerator")
@@ -27,6 +30,7 @@ func create_party(
 	party.party_id = _id_generator.next_id(IdGenerator.PARTY)
 	party.party_name = party_name if not party_name.is_empty() else "未命名部队"
 	party.faction_id = faction_id
+	party.party_kind = party_kind
 	party.world_position = world_position
 	party.target_position = world_position
 	_parties[party.party_id] = party
@@ -110,6 +114,7 @@ func transfer_member(unit_id: String, target_party_id: String) -> bool:
 
 ## 从部队移除单位。单位本身保留；若其归属指向该部队则清空。
 ## 成员不存在或重复移除返回 false，不产生异常。
+## 领袖被移除时同步清空 leader_unit_id，避免留下悬空引用。
 func remove_member(party_id: String, unit_id: String) -> bool:
 	var party := get_party(party_id)
 	if party == null:
@@ -117,12 +122,34 @@ func remove_member(party_id: String, unit_id: String) -> bool:
 
 	var removed: bool = party.member_unit_ids.has(unit_id)
 	_remove_all_occurrences(party.member_unit_ids, unit_id)
+	if removed and party.leader_unit_id == unit_id:
+		party.leader_unit_id = ""
 
 	if _unit_manager != null:
 		var unit := _unit_manager.get_unit(unit_id)
 		if unit != null and unit.current_party_id == party_id:
 			unit.current_party_id = ""
 	return removed
+
+
+## 返回部队领袖单位；未设置、已移除或单位不存在时返回 null。
+func get_leader_unit(party_id: String) -> UnitData:
+	var party := get_party(party_id)
+	if party == null or party.leader_unit_id.is_empty() or _unit_manager == null:
+		return null
+	var unit := _unit_manager.get_unit(party.leader_unit_id)
+	if unit == null or not party.member_unit_ids.has(unit.unit_id):
+		return null
+	return unit
+
+
+func is_party_leader(unit_id: String) -> bool:
+	if unit_id.is_empty():
+		return false
+	for party: PartyData in get_all_parties():
+		if party.leader_unit_id == unit_id:
+			return true
+	return false
 
 
 func get_member_ids(party_id: String) -> Array[String]:
@@ -230,6 +257,14 @@ func load_from_dict(payload: Dictionary) -> void:
 			push_error("存档中存在重复部队 ID，已跳过后续记录: %s" % party.party_id)
 			continue
 		_parties[party.party_id] = party
+
+
+## 读档后统一补齐运行时默认值：玩家部队控制权、旧存档缺失的部队类型。
+## 必须在成员关系校验前调用，但不修改成员、位置或路线数据。
+func apply_runtime_defaults(player_party_id: String) -> void:
+	for party: PartyData in get_all_parties():
+		if party != null:
+			party.apply_runtime_defaults(player_party_id)
 
 
 ## 从除目标部队外的所有部队成员列表中移除该单位，保证一单位最多一支部队。

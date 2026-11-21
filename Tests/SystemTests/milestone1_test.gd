@@ -33,7 +33,7 @@ func _run() -> void:
 	_check(WorldInitializer.create_new_world(_context), "新世界初始化成功")
 	_check(_context.world_id.begins_with("WORLD_"), "世界 ID 使用 WORLD 前缀")
 	_check(_context.world_size == Vector2(3000.0, 2000.0), "世界尺寸为 3000x2000")
-	_check(_context.party_manager.get_all_parties().size() == 4, "生成 4 支部队")
+	_check(_context.party_manager.get_all_parties().size() == 8, "生成 8 支部队")
 	_check(_context.settlement_manager.get_all_settlements().size() == 4, "生成 4 个地点")
 	_check(_context.get_player_party() != null, "玩家部队存在")
 
@@ -42,7 +42,7 @@ func _run() -> void:
 		unique_ids[party.party_id] = true
 	for settlement: SettlementData in _context.settlement_manager.get_all_settlements():
 		unique_ids[settlement.settlement_id] = true
-	_check(unique_ids.size() == 8, "8 个实体 ID 全部唯一")
+	_check(unique_ids.size() == 12, "12 个实体 ID 全部唯一")
 
 	var player := _context.get_player_party()
 	var start_position := player.world_position
@@ -61,7 +61,9 @@ func _run() -> void:
 	_check(_context.world_map_manager.set_party_target(
 		player.party_id, start_position + Vector2(100.0, 0.0)
 	), "玩家可设置移动目标")
-	for i: int in range(10):
+	# 大地图实际速度统一为 PartyData.movement_speed 的 0.5 倍；
+	# 给足 tick 数以确保走完 100 像素。
+	for i: int in range(30):
 		_context.world_map_manager.update_party_movement(TimeManager.WORLD_TICK_INTERVAL)
 	_check(player.world_position == start_position + Vector2(100.0, 0.0), "玩家到达目标点")
 	_check(player.movement_state == PartyData.MovementState.IDLE, "到达后停止移动")
@@ -73,7 +75,7 @@ func _run() -> void:
 	var save := _context.to_save_data()
 	_check(save.world_id == _context.world_id, "存档包含世界 ID")
 	_check(save.player_party_id == _context.player_party_id, "存档包含玩家部队 ID")
-	_check(save.parties.size() == 4, "存档包含 4 支部队")
+	_check(save.parties.size() == 8, "存档包含 8 支部队")
 	_check(save.settlements.size() == 4, "存档包含 4 个地点")
 	_check(save.id_counters.size() > 0, "存档包含 ID 计数器")
 	_check(is_equal_approx(save.world_elapsed_seconds, 321.0), "存档包含世界时间")
@@ -92,7 +94,7 @@ func _run() -> void:
 	add_child(_second_context)
 	_check(_second_context.load_from_save_data(loaded), "WorldContext 从存档恢复")
 	_check(_second_context.world_id == _context.world_id, "世界 ID 恢复一致")
-	_check(_second_context.party_manager.get_all_parties().size() == 4, "部队数量恢复一致")
+	_check(_second_context.party_manager.get_all_parties().size() == 8, "部队数量恢复一致")
 	_check(_second_context.settlement_manager.get_all_settlements().size() == 4, "地点数量恢复一致")
 	_check(
 		_second_context.get_player_party().world_position == player.world_position,
@@ -195,7 +197,7 @@ func _run() -> void:
 	await get_tree().process_frame
 
 	var entities := _map.get_node("WorldEntities") as Node2D
-	_check(entities.get_child_count() == 8, "大地图生成 4 个部队图标与 4 个地点图标")
+	_check(entities.get_child_count() == 12, "大地图生成 8 个部队图标与 4 个地点图标")
 	_check(_map.find_child("TopBar", true, false) != null, "大地图时间 UI 已生成")
 	_check(_map.find_child("SettlementPanel", true, false) != null, "地点交互面板已生成")
 
@@ -206,9 +208,13 @@ func _run() -> void:
 	await get_tree().process_frame
 
 	var settlement_panel := _map.find_child("SettlementPanel", true, false) as PanelContainer
-	_check(settlement_panel != null and settlement_panel.visible, "接近地点后打开交互面板")
+	_check(settlement_panel != null and not settlement_panel.visible,
+		"到达地点附近不会自动打开交互面板")
+	_map.call("handle_left_click", player.world_position)
+	await get_tree().process_frame
+	_check(settlement_panel != null and settlement_panel.visible, "主动点击地点后打开交互面板")
 	_check(is_zero_approx(TimeManager.get_effective_world_scale()), "打开地点面板后世界暂停")
-	_check(player.movement_state == PartyData.MovementState.IDLE, "到达地点后停止移动")
+	_check(player.movement_state == PartyData.MovementState.IDLE, "打开地点面板后停止移动")
 
 	var leave_button := _map.find_child("SettlementLeaveButton", true, false) as Button
 	_check(leave_button != null, "地点面板包含离开按钮")

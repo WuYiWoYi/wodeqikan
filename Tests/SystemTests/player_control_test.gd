@@ -39,7 +39,10 @@ func _run() -> void:
 	_check(_player != null and _enemy != null, "玩家与敌人部队存在")
 	if _player == null or _enemy == null:
 		return
-	_check(_player.member_unit_ids.size() == 7, "玩家部队仍为 7 人")
+	_check(
+		_player.member_unit_ids.size() == WorldInitializer.PLAYER_TOTAL_MEMBER_COUNT,
+		"玩家部队保持完整编制"
+	)
 
 	for unit_id: String in _player.member_unit_ids:
 		var unit := _context.unit_manager.get_unit(unit_id)
@@ -332,8 +335,9 @@ func _test_spectate_and_defeat() -> void:
 	if _session.final_result != null:
 		_check(_session.final_result.player_won == false, "战败不标记玩家获胜")
 		_check(
-			_session.final_result.get_party_casualties(_player.party_id) == 7,
-			"玩家部队伤亡 7"
+			_session.final_result.get_party_casualties(_player.party_id)
+				== WorldInitializer.PLAYER_TOTAL_MEMBER_COUNT,
+			"玩家部队全员伤亡"
 		)
 		_check(_session.final_result.reward_gold == 0, "战败没有金币奖励")
 

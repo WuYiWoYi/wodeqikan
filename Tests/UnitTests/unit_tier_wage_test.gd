@@ -72,12 +72,18 @@ func _test_configs(
 
 func _test_new_game_economy(context: WorldContext) -> void:
 	var player := context.get_player_party()
-	_check(player != null and player.member_unit_ids.size() == 7, "玩家部队 7 人")
+	_check(
+		player != null
+			and player.member_unit_ids.size() == WorldInitializer.PLAYER_TOTAL_MEMBER_COUNT,
+		"玩家部队为完整初始编制"
+	)
 	_check(context.player_profile.get_item_count(TOKEN_ID) == 2, "新游戏测试晋升凭证 2 个")
 	_check(context.player_profile.get_item_count(MOUNT_ID) == 1, "新游戏背包剩余 1 匹马")
 	_check(
-		context.party_manager.get_total_wage(player.party_id) == 21,
-		"玩家部队每日工资 3×2 + 3×5 = 21"
+		context.party_manager.get_total_wage(player.party_id)
+			== WorldInitializer.PLAYER_MILITIA_COUNT * 2
+				+ WorldInitializer.PLAYER_TRAINED_COUNT * 5,
+		"玩家部队每日工资按民兵/职业步兵数量计算"
 	)
 
 	var militia_unit: UnitData = null

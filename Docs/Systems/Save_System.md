@@ -192,6 +192,7 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 - `BattleSession` / `BattleUnitState` / `BattleParticipant` 不进入存档；战斗期间不序列化实时 HP、位置、战斗侧与索敌目标。
 - 离屏战斗是临时世界状态，读档后不会恢复；读档统一回到大地图。
 - 暂停原因不存档；读档后由新的进入状态建立。
+- 世界日志历史不进入存档；`WorldLogManager` 已提供序列化接口，但本阶段读档后日志从空开始。
 - 读档统一回到大地图，不恢复小场景或战斗。
 - 当前不支持 Schema v1 的完整恢复（旧存档缺少 `world_id`，会被判定为无效）。
 
@@ -263,3 +264,40 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 - 多存档槽 UI 排序规则（当前按 `saved_at` 倒序）。
 - 是否压缩/加密存档。
 - 战斗、对话、场景切换中的保存限制。
+
+## 13. 阶段 6 家族/外观增量字段（Schema 仍为 v2）
+
+本阶段字段均为“存在则读取、缺失则安全默认”的增量字段，不提升 Schema 版本，也不需要迁移：
+
+| 实体 | 新增字段 | 默认值 |
+|---|---|---|
+| `UnitData` | `family_id` | `""` |
+| `UnitData` | `appearance` | `{}` |
+| `PartyData` | `family_id` | `""` |
+| `PartyData` | `leader_unit_id` | `""` |
+| `PartyData` | `ai_patrol_points` | `[]` |
+| `SettlementData` | `family_id` | `""` |
+
+- `appearance` 内全部是字符串/整数，可直接 JSON 序列化；不保存 `Resource`、`Texture2D` 或 `Color` 对象。
+- 旧存档单位没有外观时保持原有阵营外观，不会在读档时重新随机。
+- 新游戏由 `WorldInitializer` 生成外观；读档路径不生成新部队，因此不会重复创建家族/新强盗。
+- 家族与外观静态配置（`Data/Families`、`Data/Appearance`）不进入存档。
+
+## 14. 统一部队架构增量字段（Schema 仍为 v2）
+
+| 实体 | 新增字段 | 默认值 | 旧存档处理 |
+|---|---|---|---|
+| `PartyData` | `control_type` | `AI`（玩家为 `PLAYER`） | 按 `player_party_id` 推断，不覆盖已有值 |
+| `PartyData` | `party_kind` | `GENERIC` | 按玩家 ID、家族、阵营、`ai_type` 推断 |
+| `PartyData` | `banner_texture_path` | `""` | 空值回退家族旗帜/样式默认 |
+
+- 读取顺序：`PartyManager.load_from_dict()` → `PartyManager.apply_runtime_defaults(player_party_id)` → 地点/引用校验。
+- 推断只补类型/控制权字段，不修改成员、位置、路线、路线索引、领袖或战斗状态。
+- `attack_intent`、`current_target_id`、`focus_party_id` 与待处理遭遇仍不存档。
+- 静态遭遇对白配置 `Data/Encounters/encounter_text_config.tres` 不进入存档。
+
+## 15. 玩家初始部队扩编（Schema 仍为 v2）
+
+- 新游戏玩家部队为 12 人（1 玩家角色 + 5 民兵 + 6 职业步兵，其中 4 名骑乘）；成员数据仍走现有 `UnitData` / `PartyData` 序列化，不新增 Schema 字段。
+- `WorldInitializer._populate_player_party()` 在 `party.member_unit_ids` 非空时直接返回；旧存档读档不会补兵或重复生成。
+- 旧存档保留原人数、位置、装备和成员关系；扩编仅作用于新游戏。

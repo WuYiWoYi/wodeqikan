@@ -75,7 +75,10 @@ func _run() -> void:
 func _check_formations() -> void:
 	var player_slots := _collect_slots(_player)
 	var ally_slots := _collect_slots(_ally)
-	_check(player_slots.size() == 7, "玩家部队获得 7 个队形槽位")
+	_check(
+		player_slots.size() == WorldInitializer.PLAYER_TOTAL_MEMBER_COUNT,
+		"玩家部队获得全部成员的队形槽位"
+	)
 	_check(ally_slots.size() == 3, "援军部队获得 3 个队形槽位")
 	_check(_unique_count(player_slots) == player_slots.size(), "玩家部队槽位互不重复")
 	_check(_unique_count(ally_slots) == ally_slots.size(), "援军槽位互不重复")
@@ -135,7 +138,7 @@ func _test_unit_death_reassignment() -> void:
 		"阵亡后队形槽位重新分配且不重复"
 	)
 	_check(
-		remaining_slots.size() < 7,
+		remaining_slots.size() < WorldInitializer.PLAYER_TOTAL_MEMBER_COUNT,
 		"阵亡单位不再占用队形槽位"
 	)
 

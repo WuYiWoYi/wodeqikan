@@ -6,6 +6,10 @@ extends RefCounted
 ## 视觉节点读取数据并在 _process 中插值。
 
 const ARRIVAL_RADIUS: float = 2.0
+## 大地图实际移动速度倍率。所有部队都经过 update_party_movement 的统一入口，
+## 因此只在这里乘一次；PartyData.movement_speed 仍保存原始基础速度，
+## 小地图/战斗移动完全不受影响。
+const WORLD_MAP_SPEED_SCALE: float = 0.5
 ## 跟随目标位置的刷新间隔（世界秒），避免每个 tick 都重新寻路。
 const FOLLOW_REFRESH_INTERVAL: float = 0.5
 ## 与跟随目标距离小于该值视为追上，结束跟随。
@@ -43,7 +47,10 @@ func set_party_target(party_id: String, target: Vector2) -> bool:
 
 
 ## 让 follower 持续追赶 target 的最新位置。
-## 目标必须存在、可用、有存活成员，且当前在观察者视野内。
+## 目标必须存在、可用、有存活成员。
+## 跟随只由玩家主动点击地图部队触发：部队图标始终可见，
+## 因此不要求目标处于观察者视野内，否则远距离点击只会走向旧坐标，
+## 目标继续巡逻后就再也追不上（中立家族骑士等不会主动接近玩家）。
 func set_party_follow(follower_id: String, target_id: String) -> bool:
 	if _party_manager == null:
 		return false
@@ -54,12 +61,6 @@ func set_party_follow(follower_id: String, target_id: String) -> bool:
 	if not follower.is_available_for_world() or not target.is_available_for_world():
 		return false
 	if target.member_unit_ids.is_empty():
-		return false
-
-	if _vision_manager != null:
-		if not _vision_manager.can_see(follower_id, target_id):
-			return false
-	elif follower.world_position.distance_to(target.world_position) > follower.sight_range:
 		return false
 
 	follower.current_order = PartyData.OrderType.FOLLOW_PARTY
@@ -113,10 +114,20 @@ func update_party_movement(fixed_delta: float) -> void:
 			EventBus.party_position_changed.emit(party.party_id)
 			continue
 
-		var step_distance: float = minf(party.movement_speed * fixed_delta, distance)
+		var step_distance: float = minf(
+			get_effective_movement_speed(party) * fixed_delta, distance
+		)
 		var next_position := party.world_position + to_target.normalized() * step_distance
 		party.world_position = _clamp_to_world(next_position)
 		EventBus.party_position_changed.emit(party.party_id)
+
+
+## 大地图实际速度（含统一倍率）。仅用于移动计算与测试展示；
+## 不改写 PartyData.movement_speed，避免重复乘 0.5。
+func get_effective_movement_speed(party: PartyData) -> float:
+	if party == null:
+		return 0.0
+	return party.movement_speed * WORLD_MAP_SPEED_SCALE
 
 
 func stop_party(party_id: String) -> bool:
@@ -162,11 +173,8 @@ func _refresh_follow_party(party: PartyData) -> bool:
 		return false
 	if not target.is_available_for_world() or target.member_unit_ids.is_empty():
 		return false
-	if _vision_manager != null:
-		if not _vision_manager.can_see(party.party_id, target.party_id):
-			return false
-	elif party.world_position.distance_to(target.world_position) > party.sight_range:
-		return false
+	# 玩家主动点击的追击不因目标离开视野而中断；地图图标始终可见，
+	# 中断会让远距离点击巡逻部队时永远无法接触。
 
 	if party.world_position.distance_to(target.world_position) <= FOLLOW_COMPLETE_RADIUS:
 		return false

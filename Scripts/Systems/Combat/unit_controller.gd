@@ -14,11 +14,19 @@ extends RefCounted
 const RETARGET_INTERVAL: float = 0.3
 const ARRIVAL_RADIUS: float = 4.0
 const AUTO_ACQUIRE_RANGE: float = 1000.0
-const SEPARATION_RADIUS: float = 38.0
+## 友军间距略大于实体最小间距，形成前后层次；敌军之间只避免严重重叠。
+const SEPARATION_RADIUS: float = 44.0
+const ENEMY_SEPARATION_RADIUS: float = 34.0
 const SEPARATION_STRENGTH: float = 0.75
 const PLAYER_SEPARATION_STRENGTH: float = 0.3
-const ENEMY_SEPARATION_MULTIPLIER: float = 0.65
+const ENEMY_SEPARATION_MULTIPLIER: float = 0.5
 const FORMATION_SLOT_EPSILON: float = 6.0
+## 目标分配：同一敌人已被多名友军攻击时，后来者倾向于选择其他目标。
+const TARGET_CLAIM_PENALTY: float = 90.0
+## 接近目标时，超过该距离才参考队形槽位方向；近距离按当前包围角度接近，
+## 避免后排单位绕到目标另一侧、与前排挤在同一点。
+const CLOSE_APPROACH_RANGE: float = 140.0
+const TARGET_APPROACH_LATERAL: float = 10.0
 
 ## 战斗场景移动速度系数；只影响战斗，不影响大地图 PartyData.movement_speed。
 ## 步兵保持原值：民兵 60→36、职业步兵 55→33、玩家角色 75→45。
@@ -55,6 +63,8 @@ var battle_bounds: Rect2 = Rect2()
 var formation_slot: Vector2 = Vector2.ZERO
 var has_formation_slot: bool = false
 var nearby_controllers: Array[UnitController] = []
+## 由 BattleScene 周期刷新：本战斗侧每个敌人当前被多少友军选为目标。
+var target_claim_counts: Dictionary = {}
 
 var _attack_cooldown: float = 0.0
 var _retarget_timer: float = 0.0
@@ -108,6 +118,14 @@ func is_moving() -> bool:
 
 func get_ai_state() -> AIState:
 	return _ai_state
+
+
+func get_target_unit_id() -> String:
+	return _target.unit_id if _target != null else ""
+
+
+func set_target_claim_counts(counts: Dictionary) -> void:
+	target_claim_counts = counts
 
 
 # ---------------------------------------------------------------------------
@@ -207,12 +225,12 @@ func tick(delta: float, enemies: Array[UnitController]) -> void:
 
 	_retarget_timer -= delta
 	if _target == null or not _target.is_alive():
-		_target = _find_nearest_enemy(enemies)
+		_target = _find_best_enemy(enemies)
 		_retarget_timer = RETARGET_INTERVAL
 	elif _retarget_timer <= 0.0:
 		# 已经在射程内时不换目标，避免攻击前一刻被重新索敌打断。
 		if not is_target_in_attack_range(_target):
-			_target = _find_nearest_enemy(enemies)
+			_target = _find_best_enemy(enemies)
 		_retarget_timer = RETARGET_INTERVAL
 
 	if _target == null:
@@ -367,13 +385,21 @@ func _attack_approach_position(target: UnitController) -> Vector2:
 		ARRIVAL_RADIUS, get_attack_center_range() - ARRIVAL_RADIUS
 	)
 	var direction_from_target := state.battle_position - target_position
-	if has_formation_slot:
+	var distance_to_target: float = direction_from_target.length()
+	# 远距离按队形槽位方向接近；进入近距离后按自身当前包围角度接近，
+	# 让同一目标周围的士兵保持分散，而不是全部换到同一条槽位线。
+	if has_formation_slot and distance_to_target > CLOSE_APPROACH_RANGE:
 		var slot_direction := formation_slot - target_position
 		if slot_direction.length_squared() > 1.0:
 			direction_from_target = slot_direction
 	if direction_from_target.length_squared() <= 0.0001:
 		direction_from_target = Vector2.LEFT
-	return target_position + direction_from_target.normalized() * desired_distance
+	var approach_direction := direction_from_target.normalized()
+	# 同向接近时给不同单位一个很小的切向偏移，避免多个单位落到同一点。
+	var tangent := Vector2(-approach_direction.y, approach_direction.x)
+	var lateral: float = float(posmod(unit_id.hash(), 21) - 10) \
+		/ 10.0 * TARGET_APPROACH_LATERAL
+	return target_position + approach_direction * desired_distance + tangent * lateral
 
 
 # ---------------------------------------------------------------------------
@@ -431,17 +457,17 @@ func _compute_separation() -> Vector2:
 	for other: UnitController in nearby_controllers:
 		if other == null or other == self or not other.is_alive():
 			continue
+		var friendly: bool = other.side_index == side_index
+		var radius: float = SEPARATION_RADIUS if friendly else ENEMY_SEPARATION_RADIUS
 		var offset := state.battle_position - other.get_position()
 		var distance := offset.length()
-		if distance >= SEPARATION_RADIUS:
+		if distance >= radius:
 			continue
 		if distance <= 0.001:
 			offset = Vector2(0.5, 0.5)
 			distance = offset.length()
-		var weight: float = 1.0 - distance / SEPARATION_RADIUS
-		var side_multiplier: float = (
-			1.0 if other.side_index == side_index else ENEMY_SEPARATION_MULTIPLIER
-		)
+		var weight: float = 1.0 - distance / radius
+		var side_multiplier: float = 1.0 if friendly else ENEMY_SEPARATION_MULTIPLIER
 		push += offset.normalized() * weight * side_multiplier
 	return push.limit_length(1.0)
 
@@ -494,17 +520,26 @@ func _resolve_spatial_overlap() -> void:
 			break
 
 
-func _find_nearest_enemy(enemies: Array[UnitController]) -> UnitController:
-	var nearest: UnitController = null
-	var nearest_distance: float = AUTO_ACQUIRE_RANGE
+## 目标评分：距离 + 已被友军占用惩罚。允许多名士兵攻击同一敌人，
+## 但当附近存在其他合适目标时，后来者会自然分流，避免全体追同一个点。
+func _find_best_enemy(enemies: Array[UnitController]) -> UnitController:
+	var best: UnitController = null
+	var best_score: float = INF
 	for enemy: UnitController in enemies:
 		if enemy == null or not enemy.is_alive():
 			continue
 		var distance := state.battle_position.distance_to(enemy.get_position())
-		if distance <= nearest_distance:
-			nearest_distance = distance
-			nearest = enemy
-	return nearest
+		if distance > AUTO_ACQUIRE_RANGE:
+			continue
+		var claim_count: int = int(target_claim_counts.get(enemy.unit_id, 0))
+		# 自己当前目标不计入“其他友军占用”，减少无意义的来回切换。
+		if _target != null and _target.unit_id == enemy.unit_id:
+			claim_count = maxi(0, claim_count - 1)
+		var score: float = distance + float(claim_count) * TARGET_CLAIM_PENALTY
+		if score < best_score:
+			best_score = score
+			best = enemy
+	return best
 
 
 func _clamp_to_bounds(position: Vector2) -> Vector2:
