@@ -1,0 +1,33 @@
+[gd_resource type="Resource" script_class="UnitConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/unit_config.gd" id="1_unitconfig"]
+
+[resource]
+script = ExtResource("1_unitconfig")
+config_id = "player_hero"
+display_name = "玩家角色"
+description = "玩家直接控制的角色。使用与普通士兵相同的 UnitData 与属性系统；不领取工资。"
+unit_class = 0
+is_mounted = false
+is_player_character = true
+tier = 1
+base_level = 1
+base_max_hp = 80
+base_attack = 10
+attack_interval = 0.8
+attack_range = 30.0
+move_speed = 75.0
+daily_wage = 0
+promotion_item_id = ""
+promotion_item_cost = 1
+promotion_target_config_id = ""
+max_level = 10
+base_exp_to_next_level = 100
+exp_growth_per_level = 50
+hp_per_level = 8
+attack_per_level = 2
+move_speed_per_level = 0.0
+attack_range_per_level = 0.0
+visual_scene_path = ""
+recruit_cost = 0
+default_equipment = {}

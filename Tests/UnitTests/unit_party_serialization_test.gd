@@ -46,6 +46,7 @@ func _run() -> void:
 	_check(context.unit_manager.get_all_units().is_empty(), "清空预置测试士兵")
 
 	var militia_ids: Array[String] = []
+	var trained_ids: Array[String] = []
 	for i: int in range(3):
 		var unit := context.unit_manager.create_unit(militia, WorldInitializer.PLAYER_FACTION_ID)
 		_check(unit != null, "创建第 %d 名民兵" % (i + 1))
@@ -59,14 +60,34 @@ func _run() -> void:
 		var unit := context.unit_manager.create_unit(trained, WorldInitializer.PLAYER_FACTION_ID)
 		_check(unit != null, "创建第 %d 名职业步兵" % (i + 1))
 		if unit != null:
+			trained_ids.append(unit.unit_id)
 			_check(
 				context.party_manager.add_member(party_a.party_id, unit.unit_id),
 				"职业步兵 %d 加入 Party A" % (i + 1)
 			)
 
 	_check(militia_ids.size() == 3, "3 名民兵创建成功")
+	_check(trained_ids.size() == 2, "2 名职业步兵创建成功")
 	_check(party_a.member_unit_ids.size() == 5, "Party A 包含 5 名成员")
 	_check(context.party_manager.get_units_of_party(party_a.party_id).size() == 5, "Party A 成员可查询")
+
+	# 为序列化准备多种状态：等级、经验、装备、当前 HP 都不同。
+	var veteran := context.unit_manager.get_unit(militia_ids[1])
+	_check(veteran != null, "取得用于成长测试的民兵")
+	if veteran != null:
+		_check(context.unit_manager.add_exp(veteran.unit_id, 250), "老兵获得 250 经验")
+		_check(veteran.level == 3 and veteran.exp == 0, "老兵升到 3 级")
+		_check(
+			context.unit_manager.equip_item(veteran.unit_id, "weapon_sword_01"),
+			"老兵装备铁剑"
+		)
+		_check(
+			context.unit_manager.equip_item(veteran.unit_id, "armor_leather_01"),
+			"老兵装备皮甲"
+		)
+		_check(veteran.max_hp == 68 and veteran.attack == 14, "老兵最终属性正确")
+		veteran.current_hp = 12
+		_check(veteran.current_hp == 12, "老兵当前生命可低于上限")
 
 	if militia_ids.is_empty():
 		return
@@ -90,7 +111,7 @@ func _run() -> void:
 
 	var save := context.to_save_data()
 	_check(save.units.size() == 5, "存档包含 5 名士兵")
-	_check(save.parties.size() == 4, "存档包含 4 支部队")
+	_check(save.parties.size() == 5, "存档包含 5 支部队")
 	_check(SaveManager.save_game(TEST_SLOT, save) == OK, "第一次保存成功")
 
 	var loaded := SaveManager.load_game(TEST_SLOT)
@@ -119,9 +140,31 @@ func _run() -> void:
 	if restored_unit != null:
 		_check(restored_unit.current_party_id == party_b.party_id, "恢复后归属指向 Party B")
 		_check(restored_unit.config_id == "infantry_militia", "恢复后兵种正确")
-		_check(restored_unit.max_hp == 30 and restored_unit.attack == 5, "恢复后基础属性正确")
-		_check(restored_unit.current_hp == 30, "恢复后当前生命正确")
+		_check(restored_unit.max_hp == 50 and restored_unit.attack == 10, "恢复后基础属性正确")
+		_check(restored_unit.current_hp == 50, "恢复后当前生命正确")
 		_check(is_equal_approx(restored_unit.attack_interval, 1.2), "恢复后攻击间隔正确")
+
+	var restored_veteran := restored.unit_manager.get_unit(militia_ids[1])
+	_check(restored_veteran != null, "恢复老兵数据")
+	if restored_veteran != null:
+		_check(restored_veteran.level == 3, "恢复老兵等级")
+		_check(restored_veteran.exp == 0, "恢复老兵经验")
+		_check(
+			restored_veteran.equipment.get("WEAPON", "") == "weapon_sword_01",
+			"恢复老兵武器"
+		)
+		_check(
+			restored_veteran.equipment.get("BODY", "") == "armor_leather_01",
+			"恢复老兵护甲"
+		)
+		_check(restored_veteran.current_hp == 12, "恢复老兵当前生命")
+		_check(restored_veteran.max_hp == 68, "读档后按配置与装备重算最大生命")
+		_check(restored_veteran.attack == 14, "读档后按配置与装备重算攻击")
+		_check(
+			restored_veteran.display_name == veteran.display_name,
+			"恢复老兵独立名称"
+		)
+		_check(not restored_veteran.display_name.is_empty(), "老兵名称非空")
 
 	var militia_count: int = 0
 	var trained_count: int = 0
@@ -163,10 +206,83 @@ func _run() -> void:
 		_check(final_b.member_unit_ids.has(second_moved_id), "二次往返后转移结果保留")
 
 	_check_corrupt_payload_rejected(loaded_again, party_a.party_id)
+	_check_legacy_payload_safe(loaded_again, militia_ids[1])
+	_check_invalid_equipment_safe(loaded_again, militia_ids[1])
 
 	context.queue_free()
 	restored.queue_free()
 	restored_again.queue_free()
+
+
+## 旧存档缺少等级/经验/装备/名称字段时，使用安全默认值并回填兵种名称。
+func _check_legacy_payload_safe(loaded: SaveData, unit_id: String) -> void:
+	var legacy := _copy_save(loaded)
+	var payload: Dictionary = (legacy.units[unit_id] as Dictionary).duplicate(true)
+	payload.erase("display_name")
+	payload.erase("level")
+	payload.erase("exp")
+	payload.erase("equipment")
+	legacy.units[unit_id] = payload
+
+	var legacy_context := WorldContext.new()
+	legacy_context.name = "UnitPartyLegacyContext"
+	add_child(legacy_context)
+	_check(legacy_context.load_from_save_data(legacy), "旧存档缺失新字段时正常读取")
+
+	var unit := legacy_context.unit_manager.get_unit(unit_id)
+	_check(unit != null, "旧存档单位成功恢复")
+	if unit != null:
+		_check(unit.level == 1, "缺失等级使用默认值 1")
+		_check(unit.exp == 0, "缺失经验使用默认值 0")
+		_check(unit.equipment.is_empty(), "缺失装备使用空槽位")
+		_check(not unit.is_mounted, "旧存档缺少 MOUNT 时按步兵处理")
+		var config: UnitConfig = legacy_context.unit_manager.get_unit_config(unit.config_id)
+		_check(config != null, "旧存档单位的兵种配置可查询")
+		if config != null:
+			_check(unit.display_name == config.display_name, "缺失名称回填兵种名称")
+		_check(unit.max_hp == 50 and unit.attack == 10, "旧存档按当前配置重算属性")
+	legacy_context.queue_free()
+
+
+## 无效装备引用报告错误并清理，不阻止读档，也不参与属性计算。
+func _check_invalid_equipment_safe(loaded: SaveData, unit_id: String) -> void:
+	var invalid := _copy_save(loaded)
+	var payload: Dictionary = (invalid.units[unit_id] as Dictionary).duplicate(true)
+	payload["equipment"] = {"WEAPON": "missing_equipment"}
+	invalid.units[unit_id] = payload
+
+	var invalid_context := WorldContext.new()
+	invalid_context.name = "UnitPartyInvalidEquipmentContext"
+	add_child(invalid_context)
+	_check(invalid_context.load_from_save_data(invalid), "无效装备引用不阻止读档")
+
+	var unit := invalid_context.unit_manager.get_unit(unit_id)
+	_check(unit != null, "无效装备单位成功恢复")
+	if unit != null:
+		_check(unit.equipment.is_empty(), "无效装备引用被清理")
+		_check(unit.level == 3, "等级不因装备清理而改变")
+		_check(unit.max_hp == 60 and unit.attack == 12, "无效装备不参与属性计算")
+	invalid_context.queue_free()
+
+
+func _copy_save(source: SaveData) -> SaveData:
+	var copy := SaveData.new()
+	copy.schema_version = source.schema_version
+	copy.project_version = source.project_version
+	copy.world_id = source.world_id
+	copy.world_created_at = source.world_created_at
+	copy.world_size = source.world_size
+	copy.world_elapsed_seconds = source.world_elapsed_seconds
+	copy.world_base_speed = source.world_base_speed
+	copy.id_counters = source.id_counters.duplicate(true)
+	copy.player_party_id = source.player_party_id
+	copy.player = source.player.duplicate(true)
+	copy.world_state = source.world_state.duplicate(true)
+	copy.scene_state = source.scene_state.duplicate(true)
+	copy.units = source.units.duplicate(true)
+	copy.parties = source.parties.duplicate(true)
+	copy.settlements = source.settlements.duplicate(true)
+	return copy
 
 
 func _check_corrupt_payload_rejected(loaded: SaveData, party_id: String) -> void:

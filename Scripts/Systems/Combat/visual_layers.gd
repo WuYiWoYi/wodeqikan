@@ -1,0 +1,34 @@
+class_name VisualLayers
+extends RefCounted
+## 士兵部件最终可见性层级（数值越大越靠前）。
+##
+## 人物与马匹分别由 HumanVisual / HorseVisual 管理，但两者都是 UnitVisual
+## 的直接子组（z_index = 0），因此这里的相对 z 值可以跨组统一排序。
+## 实际 canvas z = UnitActor.z_index + UnitVisual.z_index + 部件 z。
+##
+## 基础顺序：武器 → 马头 → 缨饰 → 人头 → 人身体 → 人右腿
+## → 马鞍 → 四条马腿 → 马身体 → 人左腿 → 影子。
+## 本阶段按需求把四条马腿移到马身体之前；马鞍、人体等其余关系保持原设计。
+## 马鞍与罩袍未在设计表单列：马鞍在马身体/马腿之前，罩袍紧贴人身体前方。
+
+const WEAPON: int = -10
+const MOUNT_HEAD: int = -20
+const PLUME: int = -30
+const HEAD: int = -40
+const TABARD: int = -49
+const BODY: int = -50
+const LEG_RIGHT: int = -60
+const MOUNT_SADDLE: int = -69
+const LEG_LEFT: int = -80
+
+## 四条马腿独立贴图，全部位于马身体之前、马鞍/人右腿之后；
+## 四条腿使用同一 z 值，先后由树顺序决定（需求不强制固定顺序）。
+const MOUNT_LEG_FRONT: int = -71
+const MOUNT_LEG_FRONT_2: int = -71
+const MOUNT_LEG_BACK: int = -71
+const MOUNT_LEG_BACK_2: int = -71
+## 马身体放在马腿之后、人左腿之前；其他部件层级不变。
+const MOUNT_BODY: int = -72
+
+const FOOT_SHADOW: int = -99
+const MOUNT_SHADOW: int = -99

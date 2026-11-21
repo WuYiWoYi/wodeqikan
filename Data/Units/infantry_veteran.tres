@@ -1,0 +1,32 @@
+[gd_resource type="Resource" script_class="UnitConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/unit_config.gd" id="1_unitconfig"]
+
+[resource]
+script = ExtResource("1_unitconfig")
+config_id = "infantry_veteran"
+display_name = "小贵族"
+description = "训练有素的三级小贵族。最高兵种等级，可继续通过经验成长。"
+unit_class = 0
+is_mounted = false
+tier = 3
+base_level = 1
+base_max_hp = 180
+base_attack = 25
+attack_interval = 1.0
+attack_range = 20.0
+move_speed = 55.0
+daily_wage = 10
+promotion_item_id = ""
+promotion_item_cost = 1
+promotion_target_config_id = ""
+max_level = 10
+base_exp_to_next_level = 100
+exp_growth_per_level = 50
+hp_per_level = 10
+attack_per_level = 3
+move_speed_per_level = 0.0
+attack_range_per_level = 0.0
+visual_scene_path = ""
+recruit_cost = 0
+default_equipment = {}

@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="OffscreenBattleConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/offscreen_battle_config.gd" id="1_offscreen"]
+
+[resource]
+script = ExtResource("1_offscreen")
+settlement_interval_world_seconds = 6.0
+max_settlement_hours = 48
+base_hourly_casualty_fraction = 0.2
+pressure_scale = 2.0
+min_pressure_factor = 0.35
+max_pressure_factor = 2.0
+max_hourly_casualty_fraction = 0.55
+casualty_variance = 0.3
+attack_power_weight = 1.0
+hp_power_weight = 0.35
+tier_power_bonus_per_level = 0.18
+mounted_power_bonus = 0.15
+random_seed = -1

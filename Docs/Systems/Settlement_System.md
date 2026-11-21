@@ -2,7 +2,7 @@
 
 **核心数据：** `Scripts/Entities/Settlement/settlement_data.gd`
 **核心逻辑：** `Scripts/Core/World/settlement_manager.gd`
-**状态：** 数据仓储、地图图标与基础交互面板已实现
+**状态：** 数据仓储、地图图标、基础交互面板与村庄小场景入口已实现
 
 ---
 
@@ -16,6 +16,7 @@
 | `world_position` | 大地图坐标（像素） |
 | `faction_id` | 所属阵营 |
 | `owner_lord_id` | 归属领主 |
+| `scene_path` | 该地点小场景路径；旧存档/城镇/城堡为空 |
 | `population` | 人口 |
 | `prosperity` | 繁荣度 |
 | `garrison_unit_ids` | 驻军单位 ID |
@@ -50,7 +51,8 @@ Milestone 1 初始地点（名称与坐标按需求，ID 使用项目统一生�
   → TimeManager.push_pause(&"ui_panel")
   → 打开左侧交互面板
   → 显示名称、类型
-  → 初期只有“离开”
+  → 村庄：显示“进入村庄” + “离开地点”
+  → 城镇/城堡：只显示“离开地点”
 ```
 
 触发检测位于大地图场景控制器：
@@ -61,7 +63,7 @@ Milestone 1 初始地点（名称与坐标按需求，ID 使用项目统一生�
 - 玩家必须主动选择 1x / 2x 才会继续世界推进。
 - 玩家离开地点 64 像素后解除触发锁，之后再次接近可重新打开。
 
-Milestone 1 只做基础面板，不实现村庄内部功能。
+Milestone 1 只做基础面板；阶段 6 起村庄面板增加进入小场景入口，城镇/城堡仍只做基础面板。
 
 ## 3. 后续交互
 
@@ -80,17 +82,23 @@ Milestone 1 只做基础面板，不实现村庄内部功能。
 - 在离开时成对移除；
 - 更新本文件与存档结构。
 
-## 4. 进入小场景
+## 4. 进入小场景（阶段 6 已实现）
 
 ```text
 交互面板选择“进入村庄”
-  → 记录返回信息
-  → 切换 VillageScene
-  → WorldTime = 0（small_scene 暂停）
-  → SceneTime = 1.0
+  → WorldMap.enter_village(settlement_id)
+      ├── 校验 settlement_type == VILLAGE 与 scene_path 存在
+      ├── 记录 current_settlement_id / 进入前基础倍率
+      ├── push_pause(small_scene) → pop_pause(ui_panel)
+      └── SceneManager.change_scene(scene_path)
+  → VillageScene：WorldTime = 0，SceneTime = 1.0
 ```
 
-离开小场景回到大地图时，恢复进入前的时间状态。
+- 三个村庄当前共用 `res://Scenes/Village/village.tscn`；每个 `SettlementData.scene_path` 独立保存，后续可逐村替换。
+- 返回大地图时恢复进入前基础倍率，并写入一次性地点交互锁，避免玩家站在村口时立即重开面板。
+- 城镇/城堡尚未接入小场景。
+
+详见 [Village_System.md](Village_System.md)。
 
 ## 5. 驻军
 
@@ -120,9 +128,10 @@ Milestone 1 只做基础面板，不实现村庄内部功能。
 | `SettlementData` 与序列化 | 已实现 |
 | `SettlementManager` | 已实现并接入 `WorldContext` |
 | 大地图标记 | 已实现（程序绘制村庄/城堡） |
-| 交互面板 | 已实现（名称/类型/离开） |
+| 交互面板 | 已实现（名称/类型/离开；村庄额外提供进入） |
 | 触发停止与暂停 | 已实现 |
-| 小场景进入 | TODO(阶段5) |
+| 村庄小场景进入/返回 | 已实现（scene_path + small_scene 暂停 + 返回锁） |
+| 城镇/城堡小场景 | 未实现 |
 | 驻军与归属 | TODO(阶段5/7) |
 | 地点模拟 | TODO(阶段7) |
 

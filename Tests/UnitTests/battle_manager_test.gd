@@ -116,8 +116,8 @@ func _run() -> void:
 	_check(units.get_unit(unit_a2.unit_id) == null, "战败方单位数据删除 2")
 	_check(party_b.member_unit_ids.size() == 2, "胜利方成员保留")
 	_check(units.get_unit(unit_b1.unit_id).current_hp == 7, "胜利方写回剩余 HP")
-	_check(units.get_unit(unit_b2.unit_id).current_hp == 30, "未受伤单位保持满血")
-	_check(party_a.battle_state == PartyData.BattleState.AVAILABLE, "战败方解锁")
+	_check(units.get_unit(unit_b2.unit_id).current_hp == 50, "未受伤单位保持满血")
+	_check(party_a.battle_state == PartyData.BattleState.DISABLED, "战败方全员阵亡后失效")
 	_check(party_b.battle_state == PartyData.BattleState.AVAILABLE, "胜利方解锁")
 	_check(
 		is_equal_approx(TimeManager.get_effective_world_scale(), TimeManager.SPEED_NORMAL),

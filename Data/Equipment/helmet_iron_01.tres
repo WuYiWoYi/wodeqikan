@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="EquipmentConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/equipment_config.gd" id="1_equipmentconfig"]
+
+[resource]
+script = ExtResource("1_equipmentconfig")
+equipment_id = "helmet_iron_01"
+display_name = "铁盔"
+slot = 2
+attack_bonus = 0
+max_hp_bonus = 3
+move_speed_bonus = 0.0
+attack_range_bonus = 0.0
+visual_part = ""
+allowed_unit_config_ids = Array[String]([])

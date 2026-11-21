@@ -8,10 +8,20 @@ const INTERACTION_RADIUS: float = 40.0
 const INTERACTION_EXIT_RADIUS: float = 64.0
 const PARTY_INTERACTION_RADIUS: float = 40.0
 const PARTY_INTERACTION_EXIT_RADIUS: float = 64.0
+## 点击部队图标的判定半径（世界像素）。
+const PARTY_CLICK_RADIUS: float = 26.0
+## 鼠标悬浮部队图标的判定半径；略大于点击半径便于触发。
+const PARTY_HOVER_RADIUS: float = 30.0
+const HOVER_PANEL_WIDTH: float = 320.0
+const HOVER_PANEL_LINE_HEIGHT: float = 22.0
+const BATTLE_SUMMARY_WIDTH: float = 360.0
+const BATTLE_SUMMARY_SEPARATOR: String = "────────────"
 const CAMERA_FOLLOW_SPEED: float = 8.0
 const CAMERA_PAN_SPEED: float = 650.0
 const CAMERA_ZOOM_MIN: float = 0.5
 const CAMERA_ZOOM_MAX: float = 2.0
+## 1920×1080 下保持与旧 1152×648 接近的大地图视野/图标比例。
+const CAMERA_DEFAULT_ZOOM: float = 1.5
 
 @onready var map_background: MapBackground = $MapBackground
 @onready var world_entities: Node2D = $WorldEntities
@@ -35,7 +45,9 @@ var _time_buttons: Array[Button] = []
 var _settlement_panel: PanelContainer = null
 var _settlement_name_label: Label = null
 var _settlement_type_label: Label = null
+var _settlement_enter_button: Button = null
 var _settlement_pause_active: bool = false
+var _settlement_entry_pending: bool = false
 
 var _party_panel: PanelContainer = null
 var _party_name_label: Label = null
@@ -46,6 +58,44 @@ var _party_fight_button: Button = null
 var _party_pause_active: bool = false
 var _party_latch_id: String = ""
 var _battle_transition_started: bool = false
+
+var _party_manage_panel: PartyPanel = null
+var _party_manage_pause_active: bool = false
+
+var _encounter_panel: PanelContainer = null
+var _encounter_name_label: Label = null
+var _encounter_faction_label: Label = null
+var _encounter_troop_label: Label = null
+var _encounter_description_label: Label = null
+var _encounter_status_label: Label = null
+var _encounter_fight_button: Button = null
+var _encounter_leave_button: Button = null
+var _encounter_pause_active: bool = false
+var _encounter_id: String = ""
+
+var _battle_interaction_panel: PanelContainer = null
+var _battle_interaction_summary_label: Label = null
+var _battle_interaction_status_label: Label = null
+var _battle_join_button: Button = null
+var _battle_leave_button: Button = null
+var _battle_interaction_pause_active: bool = false
+var _battle_interaction_id: String = ""
+var _battle_interaction_battle_id: String = ""
+
+var _hover_panel: PanelContainer = null
+var _hover_content: VBoxContainer = null
+var _hover_party_id: String = ""
+var _hover_signature: String = ""
+
+## 同一场战斗只显示一个标记；参战部队图标暂时隐藏。
+var _party_icons: Dictionary = {}
+var _battle_marker: BattleMarker = null
+var _battle_marker_id: String = ""
+var _battle_summary_panel: PanelContainer = null
+var _battle_summary_title: Label = null
+var _battle_summary_content: VBoxContainer = null
+var _battle_summary_text: String = ""
+var _battle_summary_signature: String = ""
 
 var _save_dim: ColorRect = null
 var _save_panel: PanelContainer = null
@@ -71,14 +121,67 @@ func _ready() -> void:
 	map_background.set_world_size(_context.world_size)
 	_context.world_map_manager.world_bounds = Rect2(Vector2.ZERO, _context.world_size)
 
+	# 从小场景返回时，玩家仍站在村口；先锁住一次地点交互，
+	# 直到离开地点范围后才允许重新自动打开面板。
+	_settlement_latch_id = GameManager.pending_settlement_latch_id
+	GameManager.pending_settlement_latch_id = ""
+
 	_build_ui()
 	_build_world_entities()
 	_connect_time_signals()
+	if not EventBus.battle_started.is_connected(_on_battle_started):
+		EventBus.battle_started.connect(_on_battle_started)
+	if not EventBus.player_encounter_requested.is_connected(_on_player_encounter_requested):
+		EventBus.player_encounter_requested.connect(_on_player_encounter_requested)
+	if not EventBus.player_battle_interaction_requested.is_connected(
+		_on_player_battle_interaction_requested
+	):
+		EventBus.player_battle_interaction_requested.connect(
+			_on_player_battle_interaction_requested
+		)
+	if not EventBus.battle_participants_updated.is_connected(
+		_on_battle_participants_updated
+	):
+		EventBus.battle_participants_updated.connect(_on_battle_participants_updated)
 
 	camera.position = _player_party.world_position
+	_set_camera_zoom(CAMERA_DEFAULT_ZOOM)
 	_last_player_position = _player_party.world_position
 	_update_time_ui()
 	_update_player_info()
+
+	# 若世界 tick 在大地图加载前已产生待处理遭遇，补一次 UI 呈现。
+	var pending: Dictionary = _context.encounter_manager.get_pending_player_encounter()
+	if not pending.is_empty():
+		call_deferred(
+			"_on_player_encounter_requested",
+			str(pending.get("encounter_id", "")),
+			str(pending.get("attacker_party_id", "")),
+			str(pending.get("target_party_id", ""))
+		)
+	var pending_interaction: Dictionary = (
+		_context.encounter_manager.get_pending_battle_interaction()
+	)
+	if not pending_interaction.is_empty():
+		call_deferred(
+			"_on_player_battle_interaction_requested",
+			str(pending_interaction.get("interaction_id", "")),
+			str(pending_interaction.get("battle_id", ""))
+		)
+
+
+func _exit_tree() -> void:
+	# 场景异常退出时清理本次交互暂停，避免世界永久暂停。
+	if _encounter_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_ENCOUNTER_DIALOGUE)
+		_encounter_pause_active = false
+	if _battle_interaction_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_BATTLE_INTERACTION)
+		_battle_interaction_pause_active = false
+	if _context != null:
+		_context.encounter_manager.clear_pending_player_encounter()
+		_context.encounter_manager.clear_pending_battle_interaction()
+		_context.encounter_manager.clear_battle_interaction_latch()
 
 
 func _process(delta: float) -> void:
@@ -87,21 +190,49 @@ func _process(delta: float) -> void:
 
 	_update_camera(delta)
 	_update_player_info()
+	_update_battle_display()
+	_update_focus_state()
+	_validate_battle_interaction()
 	_check_settlement_interaction()
 	_check_party_interaction()
+	_update_party_hover()
 	_last_player_position = _player_party.world_position
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if _context == null or _player_party == null or _is_input_blocked():
+	if _context == null or _player_party == null \
+			or _battle_transition_started or _is_input_blocked():
 		return
+
+	if event is InputEventKey:
+		var key_event := event as InputEventKey
+		if key_event.pressed and not key_event.echo:
+			match key_event.keycode:
+				KEY_1:
+					_set_world_speed(TimeManager.SPEED_PAUSED)
+					get_viewport().set_input_as_handled()
+					return
+				KEY_2:
+					_set_world_speed(TimeManager.SPEED_NORMAL)
+					get_viewport().set_input_as_handled()
+					return
+				KEY_3:
+					_set_world_speed(TimeManager.SPEED_DOUBLE)
+					get_viewport().set_input_as_handled()
+					return
+				_:
+					pass
 
 	if event is InputEventMouseButton:
 		var mouse_event := event as InputEventMouseButton
 		if mouse_event.pressed and mouse_event.button_index == MOUSE_BUTTON_LEFT:
-			var target := get_global_mouse_position()
-			if _context.world_map_manager.set_party_target(_context.player_party_id, target):
-				_camera_offset = Vector2.ZERO
+			var clicked_party := _find_party_at(get_global_mouse_position())
+			if clicked_party != null \
+					and clicked_party.party_id != _context.player_party_id \
+					and request_party_command(clicked_party.party_id):
+				get_viewport().set_input_as_handled()
+				return
+			request_player_move(get_global_mouse_position())
 			get_viewport().set_input_as_handled()
 			return
 
@@ -116,16 +247,118 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 
 
+## 设置玩家移动目标；成功时把基础倍率切回 1x。
+## 只改基础倍率，不清除任何暂停原因；失败时完全不改变时间状态。
+func request_player_move(target: Vector2) -> bool:
+	if _context == null or _player_party == null \
+			or _battle_transition_started or _is_input_blocked():
+		return false
+	if not Rect2(Vector2.ZERO, _context.world_size).has_point(target):
+		return false
+	if not _context.world_map_manager.set_party_target(_context.player_party_id, target):
+		return false
+
+	# 普通地图移动取消“主动追逐”语义；村庄/部队自动交互恢复。
+	_player_party.focus_party_id = ""
+	_camera_offset = Vector2.ZERO
+	_set_world_speed(TimeManager.SPEED_NORMAL)
+	return true
+
+
+## 让玩家部队持续跟随目标部队；失败时不改变当前指令。
+func request_player_follow(target_party_id: String) -> bool:
+	if _context == null or _player_party == null \
+			or _battle_transition_started or _is_input_blocked():
+		return false
+	if not _context.world_map_manager.set_party_follow(
+		_context.player_party_id, target_party_id
+	):
+		return false
+
+	_player_party.focus_party_id = target_party_id
+	_camera_offset = Vector2.ZERO
+	_set_world_speed(TimeManager.SPEED_NORMAL)
+	return true
+
+
+## 点击部队时：移动中的有效部队进入跟随，静止部队只前往当前位置。
+func request_party_command(target_party_id: String) -> bool:
+	if _context == null or _player_party == null or target_party_id.is_empty():
+		return false
+	if target_party_id == _context.player_party_id:
+		return false
+	var target := _context.party_manager.get_party(target_party_id)
+	if target == null:
+		return false
+
+	var can_follow: bool = (
+		target.movement_state == PartyData.MovementState.MOVING
+		and target.is_available_for_world()
+		and not target.member_unit_ids.is_empty()
+	)
+	if can_follow and request_player_follow(target_party_id):
+		return true
+	if request_player_move(target.world_position):
+		# 接近静止部队同样属于主动追逐目标，暂停无关自动交互。
+		_player_party.focus_party_id = target_party_id
+		return true
+	return false
+
+
+## 清理已失效或已到达的追逐焦点。
+## 焦点存在时，村庄与其他部队的自动交互不会打断玩家当前行动。
+func _update_focus_state() -> void:
+	if _player_party.focus_party_id.is_empty():
+		return
+	var focus := _context.party_manager.get_party(_player_party.focus_party_id)
+	if focus == null \
+			or focus.party_id == _context.player_party_id \
+			or focus.member_unit_ids.is_empty() \
+			or not focus.is_available_for_world():
+		_player_party.focus_party_id = ""
+		return
+	# 到达目标、被遭遇/界面停止或追击失效后，结束追逐语义；
+	# 下一帧允许正常部队对话/村庄交互。
+	if _battle_transition_started \
+			or _player_party.movement_state != PartyData.MovementState.MOVING:
+		_player_party.focus_party_id = ""
+
+
+func _is_focusing_party() -> bool:
+	return _player_party != null and not _player_party.focus_party_id.is_empty()
+
+
+func _find_party_at(world_position: Vector2) -> PartyData:
+	return _find_party_within(world_position, PARTY_CLICK_RADIUS)
+
+
+func _find_party_within(world_position: Vector2, radius: float) -> PartyData:
+	if _context == null or radius <= 0.0:
+		return null
+	var nearest: PartyData = null
+	var nearest_distance: float = radius
+	for party: PartyData in _context.party_manager.get_all_parties():
+		if party == null:
+			continue
+		var distance := party.world_position.distance_to(world_position)
+		if distance <= nearest_distance:
+			nearest_distance = distance
+			nearest = party
+	return nearest
+
+
 func _build_world_entities() -> void:
 	for child: Node in world_entities.get_children():
 		world_entities.remove_child(child)
 		child.queue_free()
+	_party_icons.clear()
 
 	for party: PartyData in _context.party_manager.get_all_parties():
 		var party_icon: PartyIcon = PartyIcon.new()
 		party_icon.name = "PartyIcon_%s" % party.party_id
 		world_entities.add_child(party_icon)
 		party_icon.setup(party, party.party_id == _context.player_party_id)
+		_party_icons[party.party_id] = party_icon
 		if party.party_id == _context.player_party_id:
 			_player_icon = party_icon
 
@@ -154,6 +387,11 @@ func _build_ui() -> void:
 	_build_bottom_bar()
 	_build_settlement_panel()
 	_build_party_dialogue_panel()
+	_build_player_encounter_panel()
+	_build_battle_interaction_panel()
+	_build_party_manage_panel()
+	_build_party_hover_panel()
+	_build_battle_summary_panel()
 	_build_save_panel()
 
 
@@ -176,7 +414,7 @@ func _build_top_bar() -> void:
 	margin.add_child(row)
 
 	_world_time_label = _make_label("世界时间", 15)
-	_world_time_label.custom_minimum_size = Vector2(320.0, 0.0)
+	_world_time_label.custom_minimum_size = Vector2(400.0, 0.0)
 	row.add_child(_world_time_label)
 
 	var spacer := Control.new()
@@ -184,22 +422,30 @@ func _build_top_bar() -> void:
 	row.add_child(spacer)
 
 	_pause_button = _make_button("暂停", "PauseButton")
+	_pause_button.tooltip_text = "暂停（快捷键 1）"
 	_pause_button.toggle_mode = true
 	_pause_button.pressed.connect(_on_pause_pressed)
 	row.add_child(_pause_button)
 	_time_buttons.append(_pause_button)
 
 	_speed_one_button = _make_button("1x", "SpeedOneButton")
+	_speed_one_button.tooltip_text = "1 倍速（快捷键 2）"
 	_speed_one_button.toggle_mode = true
 	_speed_one_button.pressed.connect(_on_speed_one_pressed)
 	row.add_child(_speed_one_button)
 	_time_buttons.append(_speed_one_button)
 
 	_speed_two_button = _make_button("2x", "SpeedTwoButton")
+	_speed_two_button.tooltip_text = "2 倍速（快捷键 3）"
 	_speed_two_button.toggle_mode = true
 	_speed_two_button.pressed.connect(_on_speed_two_pressed)
 	row.add_child(_speed_two_button)
 	_time_buttons.append(_speed_two_button)
+
+	var party_button := _make_button("部队", "PartyButton")
+	party_button.tooltip_text = "查看玩家部队与士兵详情"
+	party_button.pressed.connect(_on_party_manage_pressed)
+	row.add_child(party_button)
 
 	var save_button := _make_button("保存", "SaveButton")
 	save_button.pressed.connect(_on_save_pressed)
@@ -264,6 +510,12 @@ func _build_settlement_panel() -> void:
 	var spacer := Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	column.add_child(spacer)
+
+	_settlement_enter_button = _make_button("进入村庄", "SettlementEnterButton")
+	_settlement_enter_button.custom_minimum_size = Vector2(0.0, 36.0)
+	_settlement_enter_button.visible = false
+	_settlement_enter_button.pressed.connect(_on_settlement_enter_pressed)
+	column.add_child(_settlement_enter_button)
 
 	var leave_button := _make_button("离开地点", "SettlementLeaveButton")
 	leave_button.custom_minimum_size = Vector2(0.0, 36.0)
@@ -337,6 +589,759 @@ func _build_party_dialogue_panel() -> void:
 	leave_button.custom_minimum_size = Vector2(0.0, 38.0)
 	leave_button.pressed.connect(_on_party_leave_pressed)
 	buttons.add_child(leave_button)
+
+
+func _build_battle_interaction_panel() -> void:
+	_battle_interaction_panel = PanelContainer.new()
+	_battle_interaction_panel.name = "BattleInteractionPanel"
+	_battle_interaction_panel.visible = false
+	_battle_interaction_panel.anchor_top = 0.5
+	_battle_interaction_panel.anchor_bottom = 0.5
+	_battle_interaction_panel.offset_left = 20.0
+	_battle_interaction_panel.offset_top = -150.0
+	_battle_interaction_panel.offset_right = 400.0
+	_battle_interaction_panel.offset_bottom = 150.0
+	_ui_root.add_child(_battle_interaction_panel)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 20)
+	margin.add_theme_constant_override("margin_right", 20)
+	margin.add_theme_constant_override("margin_top", 18)
+	margin.add_theme_constant_override("margin_bottom", 18)
+	_battle_interaction_panel.add_child(margin)
+
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 10)
+	margin.add_child(column)
+
+	var title := _make_label("遭遇战", 24)
+	title.name = "BattleInteractionTitleLabel"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(title)
+
+	_battle_interaction_summary_label = _make_label("", 15)
+	_battle_interaction_summary_label.name = "BattleInteractionSummaryLabel"
+	_battle_interaction_summary_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_battle_interaction_summary_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_battle_interaction_summary_label.custom_minimum_size = Vector2(0.0, 86.0)
+	column.add_child(_battle_interaction_summary_label)
+
+	_battle_interaction_status_label = _make_label("", 13)
+	_battle_interaction_status_label.name = "BattleInteractionStatusLabel"
+	_battle_interaction_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_battle_interaction_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_battle_interaction_status_label.custom_minimum_size = Vector2(0.0, 32.0)
+	column.add_child(_battle_interaction_status_label)
+
+	var spacer := Control.new()
+	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	column.add_child(spacer)
+
+	var buttons := HBoxContainer.new()
+	buttons.add_theme_constant_override("separation", 10)
+	column.add_child(buttons)
+
+	_battle_join_button = _make_button("加入战斗", "BattleJoinButton")
+	_battle_join_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_battle_join_button.custom_minimum_size = Vector2(0.0, 42.0)
+	_battle_join_button.pressed.connect(_on_battle_join_pressed)
+	buttons.add_child(_battle_join_button)
+
+	_battle_leave_button = _make_button("离开", "BattleLeaveButton")
+	_battle_leave_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_battle_leave_button.custom_minimum_size = Vector2(0.0, 42.0)
+	_battle_leave_button.pressed.connect(_on_battle_leave_pressed)
+	buttons.add_child(_battle_leave_button)
+
+
+func _build_player_encounter_panel() -> void:
+	_encounter_panel = PanelContainer.new()
+	_encounter_panel.name = "PlayerEncounterPanel"
+	_encounter_panel.visible = false
+	_encounter_panel.anchor_left = 1.0
+	_encounter_panel.anchor_top = 0.5
+	_encounter_panel.anchor_right = 1.0
+	_encounter_panel.anchor_bottom = 0.5
+	_encounter_panel.offset_left = -390.0
+	_encounter_panel.offset_top = -190.0
+	_encounter_panel.offset_right = -20.0
+	_encounter_panel.offset_bottom = 190.0
+	_ui_root.add_child(_encounter_panel)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 20)
+	margin.add_theme_constant_override("margin_right", 20)
+	margin.add_theme_constant_override("margin_top", 18)
+	margin.add_theme_constant_override("margin_bottom", 18)
+	_encounter_panel.add_child(margin)
+
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 10)
+	margin.add_child(column)
+
+	var title := _make_label("遭遇", 22)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(title)
+
+	_encounter_name_label = _make_label("", 22)
+	_encounter_name_label.name = "EncounterPartyNameLabel"
+	_encounter_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(_encounter_name_label)
+
+	_encounter_faction_label = _make_label("", 15)
+	_encounter_faction_label.name = "EncounterFactionLabel"
+	_encounter_faction_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(_encounter_faction_label)
+
+	_encounter_troop_label = _make_label("", 15)
+	_encounter_troop_label.name = "EncounterTroopLabel"
+	_encounter_troop_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(_encounter_troop_label)
+
+	_encounter_description_label = _make_label("", 16)
+	_encounter_description_label.name = "EncounterDescriptionLabel"
+	_encounter_description_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_encounter_description_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_encounter_description_label.custom_minimum_size = Vector2(0.0, 54.0)
+	column.add_child(_encounter_description_label)
+
+	_encounter_status_label = _make_label("", 13)
+	_encounter_status_label.name = "EncounterStatusLabel"
+	_encounter_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_encounter_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_encounter_status_label.custom_minimum_size = Vector2(0.0, 30.0)
+	column.add_child(_encounter_status_label)
+
+	var spacer := Control.new()
+	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	column.add_child(spacer)
+
+	var buttons := HBoxContainer.new()
+	buttons.add_theme_constant_override("separation", 10)
+	column.add_child(buttons)
+
+	_encounter_fight_button = _make_button("战斗", "EncounterFightButton")
+	_encounter_fight_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_encounter_fight_button.custom_minimum_size = Vector2(0.0, 44.0)
+	_encounter_fight_button.pressed.connect(_on_encounter_fight_pressed)
+	buttons.add_child(_encounter_fight_button)
+
+	_encounter_leave_button = _make_button("撤退", "EncounterLeaveButton")
+	_encounter_leave_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_encounter_leave_button.custom_minimum_size = Vector2(0.0, 44.0)
+	_encounter_leave_button.pressed.connect(_on_encounter_leave_pressed)
+	buttons.add_child(_encounter_leave_button)
+
+
+func _on_player_encounter_requested(
+	encounter_id: String, attacker_party_id: String, target_party_id: String
+) -> void:
+	if _context == null or _player_party == null or _encounter_panel == null:
+		if _context != null:
+			_context.encounter_manager.clear_pending_player_encounter()
+		return
+	if target_party_id != _context.player_party_id:
+		_context.encounter_manager.clear_pending_player_encounter()
+		return
+	if _battle_transition_started or _encounter_panel.visible:
+		return
+	var pending_encounter: Dictionary = (
+		_context.encounter_manager.get_pending_player_encounter()
+	)
+	if pending_encounter.is_empty() \
+			or str(pending_encounter.get("encounter_id", "")) != encounter_id:
+		return
+	if _context.battle_manager.current_battle != null:
+		_context.encounter_manager.clear_pending_player_encounter()
+		return
+	if _save_panel.visible or _settlement_panel.visible \
+			or _party_panel.visible or _party_manage_panel.visible \
+			or _battle_interaction_panel.visible:
+		_context.encounter_manager.clear_pending_player_encounter()
+		return
+
+	var attacker := _context.party_manager.get_party(attacker_party_id)
+	if attacker == null or attacker.member_unit_ids.is_empty():
+		_context.encounter_manager.clear_pending_player_encounter()
+		return
+
+	_encounter_id = encounter_id
+	# 双方在 WorldMapManager 中已停止；这里再确保一次，并清除攻击意图。
+	_context.world_map_manager.stop_party(_context.player_party_id)
+	_context.world_map_manager.stop_party(attacker_party_id)
+	attacker.attack_intent = false
+
+	_encounter_name_label.text = attacker.party_name
+	_encounter_faction_label.text = "阵营：%s" % _faction_display_name(attacker.faction_id)
+	_encounter_troop_label.text = "兵力：%d" % attacker.member_unit_ids.size()
+	_encounter_description_label.text = _encounter_description(attacker)
+	_encounter_status_label.text = ""
+	_encounter_panel.visible = true
+
+	if not _encounter_pause_active:
+		TimeManager.push_pause(GameManager.PAUSE_REASON_ENCOUNTER_DIALOGUE)
+		_encounter_pause_active = true
+	_set_time_buttons_enabled(false)
+	_update_time_ui()
+
+
+## 清理异常关闭的遭遇对话；不改变基础世界倍率。
+func cancel_player_encounter() -> void:
+	if _encounter_panel != null:
+		_encounter_panel.visible = false
+	if _encounter_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_ENCOUNTER_DIALOGUE)
+		_encounter_pause_active = false
+	if _context != null:
+		_context.encounter_manager.clear_pending_player_encounter()
+	_encounter_id = ""
+	_set_time_buttons_enabled(true)
+	_update_time_ui()
+
+
+func _on_encounter_fight_pressed() -> void:
+	if _context == null or _player_party == null or _encounter_panel == null:
+		return
+	if not _encounter_panel.visible:
+		return
+
+	var pending: Dictionary = _context.encounter_manager.get_pending_player_encounter()
+	if pending.is_empty() or str(pending.get("encounter_id", "")) != _encounter_id:
+		cancel_player_encounter()
+		return
+	var attacker := _context.party_manager.get_party(
+		str(pending.get("attacker_party_id", ""))
+	)
+	if attacker == null or not attacker.is_available_for_world() \
+			or attacker.member_unit_ids.is_empty():
+		_encounter_status_label.text = "对方已经离开"
+		cancel_player_encounter()
+		return
+	if _player_party.member_unit_ids.is_empty():
+		_encounter_status_label.text = "玩家部队没有可战士兵"
+		cancel_player_encounter()
+		return
+
+	var midpoint := (_player_party.world_position + attacker.world_position) * 0.5
+	# 先置位，避免 battle_started 信号重复触发场景切换。
+	_battle_transition_started = true
+	var session := _context.battle_manager.start_battle(
+		[_context.player_party_id], [attacker.party_id], midpoint, false
+	)
+	if session == null:
+		_battle_transition_started = false
+		_encounter_status_label.text = "无法开始战斗"
+		return
+
+	var error: Error = SceneManager.change_scene(SceneManager.BATTLE_SCENE)
+	if error != OK:
+		# 战斗场景加载失败：中止战斗，保留遭遇对话与暂停，允许玩家重试。
+		_context.battle_manager.abort_battle(session.battle_id)
+		_battle_transition_started = false
+		_encounter_status_label.text = "战斗场景加载失败"
+		return
+
+	_context.encounter_manager.clear_pending_player_encounter()
+	_encounter_id = ""
+	_encounter_panel.visible = false
+	if _encounter_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_ENCOUNTER_DIALOGUE)
+		_encounter_pause_active = false
+
+
+## 玩家选择撤退：清理待处理遭遇与暂停，记录拒绝触发范围；
+## 双方保持当前停止位置，世界恢复原基础倍率，AI 可在下一次决策继续行动。
+func _on_encounter_leave_pressed() -> void:
+	if _context == null or _encounter_panel == null or not _encounter_panel.visible:
+		return
+	var pending: Dictionary = _context.encounter_manager.get_pending_player_encounter()
+	var attacker_id: String = str(pending.get("attacker_party_id", ""))
+	_encounter_panel.visible = false
+	_encounter_id = ""
+	if _encounter_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_ENCOUNTER_DIALOGUE)
+		_encounter_pause_active = false
+	_context.encounter_manager.decline_player_encounter(attacker_id)
+	_set_time_buttons_enabled(true)
+	_update_time_ui()
+
+
+func _encounter_description(attacker: PartyData) -> String:
+	if attacker != null and attacker.faction_id == FactionManager.BANDIT_FACTION_ID:
+		return "前面的家伙，留下你的财物！"
+	return "敌军拦住了你的去路！"
+
+
+func _build_party_manage_panel() -> void:
+	_party_manage_panel = PartyPanel.new()
+	_party_manage_panel.name = "PartyPanel"
+	_party_manage_panel.visible = false
+	_party_manage_panel.closed.connect(_on_party_manage_closed)
+	_ui_root.add_child(_party_manage_panel)
+	_party_manage_panel.setup(_context)
+
+
+## 打开玩家部队管理面板；失败返回 false 且不改变时间状态。
+func open_party_panel() -> bool:
+	if _context == null or _player_party == null:
+		return false
+	if _battle_transition_started or _party_manage_panel == null:
+		return false
+	if _party_manage_panel.visible:
+		return false
+	if _save_panel.visible or _settlement_panel.visible or _party_panel.visible:
+		return false
+	if not _player_party.is_available_for_world():
+		push_warning("当前部队状态不可用，无法打开部队面板")
+		return false
+
+	TimeManager.push_pause(GameManager.PAUSE_REASON_UI_PANEL)
+	_party_manage_pause_active = true
+	_party_manage_panel.open()
+	_set_time_buttons_enabled(false)
+	_update_time_ui()
+	return true
+
+
+func close_party_panel() -> void:
+	if _party_manage_panel == null or not _party_manage_panel.visible:
+		return
+	_party_manage_panel.close()
+
+
+func _on_party_manage_pressed() -> void:
+	open_party_panel()
+
+
+func _on_party_manage_closed() -> void:
+	if _party_manage_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_party_manage_pause_active = false
+	_set_time_buttons_enabled(true)
+	_update_time_ui()
+
+
+# ---------------------------------------------------------------------------
+# 部队悬浮信息
+# ---------------------------------------------------------------------------
+
+
+func _build_party_hover_panel() -> void:
+	_hover_panel = PanelContainer.new()
+	_hover_panel.name = "PartyHoverPanel"
+	_hover_panel.visible = false
+	_hover_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hover_panel.custom_minimum_size = Vector2(HOVER_PANEL_WIDTH, 0.0)
+	_ui_root.add_child(_hover_panel)
+
+	var margin := MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_theme_constant_override("margin_left", 14)
+	margin.add_theme_constant_override("margin_right", 14)
+	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_bottom", 10)
+	_hover_panel.add_child(margin)
+
+	_hover_content = VBoxContainer.new()
+	_hover_content.name = "PartyHoverContent"
+	_hover_content.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hover_content.add_theme_constant_override("separation", 2)
+	margin.add_child(_hover_content)
+
+
+## 同场战斗的唯一汇总面板：按战斗侧分组，同侧多支部队并列展示。
+func _build_battle_summary_panel() -> void:
+	_battle_summary_panel = PanelContainer.new()
+	_battle_summary_panel.name = "BattleSummaryPanel"
+	_battle_summary_panel.visible = false
+	_battle_summary_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_battle_summary_panel.custom_minimum_size = Vector2(BATTLE_SUMMARY_WIDTH, 0.0)
+	_ui_root.add_child(_battle_summary_panel)
+
+	var margin := MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_theme_constant_override("margin_left", 14)
+	margin.add_theme_constant_override("margin_right", 14)
+	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_bottom", 10)
+	_battle_summary_panel.add_child(margin)
+
+	var column := VBoxContainer.new()
+	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_theme_constant_override("separation", 4)
+	margin.add_child(column)
+
+	_battle_summary_title = _make_label("战斗", 17)
+	_battle_summary_title.name = "BattleSummaryTitle"
+	_battle_summary_title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_child(_battle_summary_title)
+
+	var separator := HSeparator.new()
+	separator.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_child(separator)
+
+	_battle_summary_content = VBoxContainer.new()
+	_battle_summary_content.name = "BattleSummaryContent"
+	_battle_summary_content.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_battle_summary_content.add_theme_constant_override("separation", 1)
+	column.add_child(_battle_summary_content)
+
+
+func _update_party_hover() -> void:
+	if _hover_panel == null:
+		return
+	if _context == null or _player_party == null or _battle_transition_started \
+			or _is_input_blocked():
+		_hide_party_hover()
+		return
+	_apply_party_hover(get_global_mouse_position())
+
+
+## 供输入与自动化测试共用：在给定世界坐标上显示对应部队的悬浮面板。
+func _apply_party_hover(world_position: Vector2) -> void:
+	var party := _find_party_within(world_position, PARTY_HOVER_RADIUS)
+	if party == null:
+		_hide_party_hover()
+		return
+	# 参战部队已经合并到战斗标记，不再显示原图标悬浮信息。
+	var active_battle := _context.battle_manager.current_battle
+	if active_battle != null and active_battle.is_party_involved(party.party_id):
+		_hide_party_hover()
+		return
+	var signature: String = _party_composition_signature(party)
+	if party.party_id != _hover_party_id or signature != _hover_signature:
+		_hover_party_id = party.party_id
+		_hover_signature = signature
+		_rebuild_party_hover(party)
+	_position_party_hover(get_viewport().get_mouse_position())
+
+
+func _hide_party_hover() -> void:
+	_hover_party_id = ""
+	_hover_signature = ""
+	if _hover_panel != null:
+		_hover_panel.visible = false
+
+
+## 成员构成变化时刷新悬浮面板；只比较兵种/骑乘/身份，不读取完整属性。
+func _party_composition_signature(party: PartyData) -> String:
+	var parts: Array[String] = []
+	for unit_id: String in party.member_unit_ids:
+		var unit := _context.unit_manager.get_unit(unit_id)
+		if unit == null:
+			parts.append("%s:missing" % unit_id)
+			continue
+		parts.append("%s:%s:%s" % [
+			unit.config_id,
+			"m" if unit.is_mounted else "f",
+			"p" if unit.is_player_character else "n",
+		])
+	return "|".join(parts)
+
+
+func _rebuild_party_hover(party: PartyData) -> void:
+	if _hover_panel == null or _hover_content == null or party == null:
+		return
+	for child: Node in _hover_content.get_children():
+		_hover_content.remove_child(child)
+		child.queue_free()
+
+	var title := _make_label(party.party_name, 17)
+	title.name = "PartyHoverName"
+	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hover_content.add_child(title)
+	var separator := HSeparator.new()
+	separator.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hover_content.add_child(separator)
+
+	var lines: Array[String] = _party_composition_lines(party)
+	if lines.is_empty():
+		lines.append("无成员")
+	for line: String in lines:
+		var label := _make_label(line, 14)
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_hover_content.add_child(label)
+
+	var height: float = 58.0 + float(lines.size()) * HOVER_PANEL_LINE_HEIGHT
+	_hover_panel.custom_minimum_size = Vector2(HOVER_PANEL_WIDTH, height)
+	_hover_panel.size = Vector2(HOVER_PANEL_WIDTH, height)
+	_hover_panel.visible = true
+
+
+## 按兵种与骑乘状态合并成员构成；玩家角色单独显示。
+func _party_composition_lines(party: PartyData) -> Array[String]:
+	var groups: Dictionary = {}
+	var player_count: int = 0
+	for unit_id: String in party.member_unit_ids:
+		var unit := _context.unit_manager.get_unit(unit_id)
+		if unit == null:
+			continue
+		if unit.is_player_character:
+			player_count += 1
+			continue
+		var config := _context.unit_manager.get_unit_config(unit.config_id)
+		var unit_class_name: String = (
+			config.display_name if config != null else unit.config_id
+		)
+		var label: String = ("骑马" if unit.is_mounted else "") + unit_class_name
+		groups[label] = int(groups.get(label, 0)) + 1
+
+	var keys: Array[String] = []
+	for key: Variant in groups.keys():
+		keys.append(str(key))
+	keys.sort()
+	var lines: Array[String] = []
+	for key: String in keys:
+		lines.append("• %s（%d）" % [key, int(groups[key])])
+	if player_count > 0:
+		lines.append("• 玩家角色（%d）" % player_count)
+	return lines
+
+
+# ---------------------------------------------------------------------------
+# 大地图战斗标记与汇总 UI
+# ---------------------------------------------------------------------------
+
+
+func _update_battle_display() -> void:
+	if _context == null:
+		return
+	var battle := _context.battle_manager.current_battle
+	if battle == null:
+		_clear_battle_display()
+		return
+	_ensure_battle_marker(battle)
+	_update_battle_participant_icons(battle)
+	_refresh_battle_summary(battle)
+
+
+func _ensure_battle_marker(battle: BattleSession) -> void:
+	if _battle_marker == null or _battle_marker_id != battle.battle_id:
+		if _battle_marker != null and is_instance_valid(_battle_marker):
+			_battle_marker.queue_free()
+		_battle_marker = BattleMarker.new()
+		world_entities.add_child(_battle_marker)
+		_battle_marker.setup(battle.battle_id, battle.world_position)
+		_battle_marker_id = battle.battle_id
+	else:
+		_battle_marker.set_battle_position(battle.world_position)
+	_battle_marker.set_alive_count(_count_battle_alive(battle))
+
+
+## 同一场战斗的参战部队只保留战斗标记，不再显示各自的部队图标。
+func _update_battle_participant_icons(battle: BattleSession) -> void:
+	for party_id_value: Variant in _party_icons.keys():
+		var party_id: String = str(party_id_value)
+		var icon := _party_icons.get(party_id) as PartyIcon
+		if icon == null or not is_instance_valid(icon):
+			continue
+		icon.visible = not battle.is_party_involved(party_id)
+
+
+func _clear_battle_display() -> void:
+	if _battle_marker != null and is_instance_valid(_battle_marker):
+		_battle_marker.queue_free()
+	_battle_marker = null
+	_battle_marker_id = ""
+	for party_id_value: Variant in _party_icons.keys():
+		var icon := _party_icons.get(party_id_value) as PartyIcon
+		if icon != null and is_instance_valid(icon):
+			icon.visible = true
+	if _battle_summary_panel != null:
+		_battle_summary_panel.visible = false
+	_battle_summary_signature = ""
+	_battle_summary_text = ""
+
+
+func _refresh_battle_summary(battle: BattleSession) -> void:
+	if _battle_summary_panel == null:
+		return
+	var lines := _build_battle_summary_lines(battle)
+	var text: String = "\n".join(lines)
+	if text != _battle_summary_signature:
+		_battle_summary_signature = text
+		_battle_summary_text = text
+		_rebuild_battle_summary(lines)
+	_battle_summary_title.text = "战斗 · 已交战 %d 小时 · 存活 %d" % [
+		battle.offscreen_settlements_done,
+		_count_battle_alive(battle),
+	]
+
+	var show_panel: bool = not _is_input_blocked() and not _battle_transition_started
+	if show_panel:
+		show_panel = _position_battle_summary()
+	_battle_summary_panel.visible = show_panel
+
+
+func _rebuild_battle_summary(lines: Array[String]) -> void:
+	if _battle_summary_content == null:
+		return
+	for child: Node in _battle_summary_content.get_children():
+		_battle_summary_content.remove_child(child)
+		child.queue_free()
+
+	for line: String in lines:
+		if line == BATTLE_SUMMARY_SEPARATOR:
+			var separator := HSeparator.new()
+			separator.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			_battle_summary_content.add_child(separator)
+			continue
+		var is_composition: bool = line.begins_with("  ")
+		var label := _make_label(line, 14 if is_composition else 15)
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		if not is_composition:
+			label.add_theme_color_override("font_color", Color("#f0d8a0"))
+		_battle_summary_content.add_child(label)
+
+	var height: float = 66.0 + float(lines.size()) * 20.0
+	_battle_summary_panel.custom_minimum_size = Vector2(BATTLE_SUMMARY_WIDTH, height)
+
+
+## 按 BattleSession 的 side_index 分组，不使用阵营代替战斗侧。
+func _build_battle_summary_lines(battle: BattleSession) -> Array[String]:
+	var lines: Array[String] = []
+	var sides := battle.get_side_indices()
+	for side_position: int in range(sides.size()):
+		var side_index: int = sides[side_position]
+		for party_id: String in battle.get_side_party_ids(side_index):
+			var party := _context.party_manager.get_party(party_id)
+			lines.append(party.party_name if party != null else party_id)
+			var composition := _battle_party_composition(battle, party_id)
+			if composition.is_empty():
+				lines.append("  无存活人员")
+			else:
+				for entry: String in composition:
+					lines.append("  • %s" % entry)
+		if side_position < sides.size() - 1:
+			lines.append(BATTLE_SUMMARY_SEPARATOR)
+	return lines
+
+
+## 只统计 BattleUnitState 中仍存活的人员；UI 不修改战斗数据。
+func _battle_party_composition(
+	battle: BattleSession, party_id: String
+) -> Array[String]:
+	var groups: Dictionary = {}
+	var player_count: int = 0
+	for unit_id: String in battle.get_party_unit_ids(party_id):
+		var state := battle.get_unit_state(unit_id)
+		if state == null or not state.alive or state.battle_hp <= 0:
+			continue
+		var unit := _context.unit_manager.get_unit(unit_id)
+		if unit == null:
+			continue
+		if unit.is_player_character:
+			player_count += 1
+			continue
+		var config := _context.unit_manager.get_unit_config(unit.config_id)
+		var unit_name: String = config.display_name if config != null else unit.config_id
+		var label: String = ("骑马" if unit.is_mounted else "") + unit_name
+		groups[label] = int(groups.get(label, 0)) + 1
+
+	var keys: Array[String] = []
+	for key: Variant in groups.keys():
+		keys.append(str(key))
+	keys.sort()
+	var result: Array[String] = []
+	for key: String in keys:
+		result.append("%s（%d）" % [key, int(groups[key])])
+	if player_count > 0:
+		result.append("玩家角色（%d）" % player_count)
+	return result
+
+
+func _count_battle_alive(battle: BattleSession) -> int:
+	if battle == null:
+		return 0
+	var count: int = 0
+	for side_index: int in battle.get_side_indices():
+		for unit_id: String in battle.get_side_unit_ids(side_index):
+			var state := battle.get_unit_state(unit_id)
+			if state != null and state.alive and state.battle_hp > 0:
+				count += 1
+	return count
+
+
+func _position_battle_summary() -> bool:
+	if _battle_marker == null or not is_instance_valid(_battle_marker) \
+			or _battle_summary_panel == null:
+		return false
+	var screen_position: Vector2 = (
+		_battle_marker.get_global_transform_with_canvas().origin
+	)
+	var viewport_size := get_viewport_rect().size
+	var offscreen_margin: float = 60.0
+	if screen_position.x < -offscreen_margin \
+			or screen_position.y < -offscreen_margin \
+			or screen_position.x > viewport_size.x + offscreen_margin \
+			or screen_position.y > viewport_size.y + offscreen_margin:
+		return false
+	var panel_size := Vector2(
+		BATTLE_SUMMARY_WIDTH,
+		maxf(_battle_summary_panel.custom_minimum_size.y, 60.0)
+	)
+	var desired := screen_position + Vector2(26.0, 26.0)
+	desired.x = clampf(desired.x, 8.0, maxf(8.0, viewport_size.x - panel_size.x - 8.0))
+	desired.y = clampf(desired.y, 56.0, maxf(56.0, viewport_size.y - panel_size.y - 8.0))
+	_battle_summary_panel.position = desired
+	return true
+
+
+func get_battle_marker() -> BattleMarker:
+	return _battle_marker
+
+
+func get_battle_summary_text() -> String:
+	return _battle_summary_text
+
+
+func is_battle_summary_visible() -> bool:
+	return _battle_summary_panel != null and _battle_summary_panel.visible
+
+
+func _position_party_hover(screen_position: Vector2) -> void:
+	if _hover_panel == null:
+		return
+	var viewport_size := get_viewport_rect().size
+	var panel_size := Vector2(
+		HOVER_PANEL_WIDTH, maxf(_hover_panel.custom_minimum_size.y, 60.0)
+	)
+	var desired := screen_position + Vector2(20.0, 20.0)
+	desired.x = clampf(desired.x, 8.0, maxf(8.0, viewport_size.x - panel_size.x - 8.0))
+	desired.y = clampf(desired.y, 8.0, maxf(8.0, viewport_size.y - panel_size.y - 8.0))
+	_hover_panel.position = desired
+
+
+## 测试接口：返回悬浮面板当前文本。
+func get_hover_panel_text() -> String:
+	if _hover_content == null:
+		return ""
+	var lines: Array[String] = []
+	for child: Node in _hover_content.get_children():
+		var label := child as Label
+		if label != null:
+			lines.append(label.text)
+	return "\n".join(lines)
+
+
+func get_hover_party_id() -> String:
+	return _hover_party_id
+
+
+func get_settlement_latch_id() -> String:
+	return _settlement_latch_id
+
+
+func apply_hover_for_test(world_position: Vector2) -> void:
+	_apply_party_hover(world_position)
+
+
+func clear_hover_for_test() -> void:
+	_hide_party_hover()
+
+
+func is_hover_panel_visible() -> bool:
+	return _hover_panel != null and _hover_panel.visible
 
 
 func _build_save_panel() -> void:
@@ -450,10 +1455,15 @@ func _set_camera_zoom(value: float) -> void:
 func _check_settlement_interaction() -> void:
 	if _battle_transition_started:
 		return
-	if _save_panel.visible or _settlement_panel.visible or _party_panel.visible:
+	if _save_panel.visible or _settlement_panel.visible or _party_panel.visible \
+			or _party_manage_panel.visible or _encounter_panel.visible \
+			or _battle_interaction_panel.visible:
 		return
 
 	if _settlement_latch_id.is_empty():
+		# 玩家正在主动追逐/接近部队时，路过村庄不打断当前行动。
+		if _is_focusing_party():
+			return
 		for settlement: SettlementData in _context.settlement_manager.get_all_settlements():
 			var closest := Geometry2D.get_closest_point_to_segment(
 				settlement.world_position, _last_player_position, _player_party.world_position
@@ -470,6 +1480,7 @@ func _check_settlement_interaction() -> void:
 
 func _open_settlement(settlement: SettlementData) -> void:
 	_settlement_latch_id = settlement.settlement_id
+	_player_party.focus_party_id = ""
 	_context.world_map_manager.stop_party(_context.player_party_id)
 	TimeManager.set_base_world_speed(TimeManager.SPEED_PAUSED)
 	TimeManager.push_pause(GameManager.PAUSE_REASON_UI_PANEL)
@@ -477,6 +1488,11 @@ func _open_settlement(settlement: SettlementData) -> void:
 
 	_settlement_name_label.text = settlement.display_name
 	_settlement_type_label.text = _settlement_type_text(settlement.settlement_type)
+	var is_village: bool = (
+		settlement.settlement_type == SettlementData.SettlementType.VILLAGE
+	)
+	_settlement_enter_button.visible = is_village
+	_settlement_enter_button.disabled = not is_village
 	_settlement_panel.visible = true
 	_set_time_buttons_enabled(false)
 	_update_time_ui()
@@ -492,18 +1508,77 @@ func _on_settlement_leave_pressed() -> void:
 	_update_time_ui()
 
 
+func _on_settlement_enter_pressed() -> void:
+	if _settlement_latch_id.is_empty():
+		return
+	enter_village(_settlement_latch_id)
+
+
+## 进入村庄小场景。只切换表现场景，不复制或修改玩家部队权威数据。
+func enter_village(settlement_id: String) -> bool:
+	if _context == null or _settlement_entry_pending:
+		return false
+	var settlement := _context.settlement_manager.get_settlement(settlement_id)
+	if settlement == null \
+			or settlement.settlement_type != SettlementData.SettlementType.VILLAGE:
+		return false
+	var scene_path: String = settlement.scene_path
+	if scene_path.is_empty():
+		scene_path = SceneManager.VILLAGE_SCENE
+	if not ResourceLoader.exists(scene_path):
+		push_error("村庄场景不存在: %s" % scene_path)
+		return false
+
+	_settlement_entry_pending = true
+	GameManager.current_settlement_id = settlement_id
+	GameManager.small_scene_return_base_speed = TimeManager.get_base_world_speed()
+
+	# 先压入 small_scene 暂停，再释放地点面板暂停，保证切换期间世界不恢复运行。
+	TimeManager.set_base_world_speed(TimeManager.SPEED_PAUSED)
+	TimeManager.push_pause(GameManager.PAUSE_REASON_SMALL_SCENE)
+	_settlement_panel.visible = false
+	if _settlement_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_settlement_pause_active = false
+
+	var error: Error = SceneManager.change_scene(scene_path)
+	if error != OK:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_SMALL_SCENE)
+		TimeManager.push_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_settlement_pause_active = true
+		_settlement_panel.visible = true
+		_settlement_entry_pending = false
+		push_error("无法进入村庄场景（错误码 %s）" % error)
+		return false
+
+	_settlement_entry_pending = false
+	return true
+
+
 func _check_party_interaction() -> void:
 	if _battle_transition_started or _context == null or _player_party == null:
 		return
-	if _save_panel.visible or _settlement_panel.visible or _party_panel.visible:
+	if _save_panel.visible or _settlement_panel.visible or _party_panel.visible \
+			or _party_manage_panel.visible or _encounter_panel.visible \
+			or _battle_interaction_panel.visible:
 		return
 
 	if _party_latch_id.is_empty():
+		# 玩家追逐/接近目标期间，路过其他部队不打开对话、不打断追逐。
+		if _is_focusing_party():
+			return
 		for party: PartyData in _context.party_manager.get_all_parties():
 			if party.party_id == _context.player_party_id:
 				continue
 			# 已被击溃的空部队不再触发交互。
 			if party.member_unit_ids.is_empty():
+				continue
+			# 战斗中的部队不弹对话；敌对部队由 AI 直接发起战斗。
+			if not party.is_available_for_world():
+				continue
+			if _context.faction_manager.is_hostile(
+				_player_party.faction_id, party.faction_id
+			):
 				continue
 			var closest := Geometry2D.get_closest_point_to_segment(
 				party.world_position, _last_player_position, _player_party.world_position
@@ -519,6 +1594,204 @@ func _check_party_interaction() -> void:
 			_party_latch_id = ""
 
 
+## 离屏战斗期间玩家接近战场时，按阵营关系自动加入并切换到战斗场景。
+## 玩家接近进行中的离屏战斗交互面板。
+func _on_player_battle_interaction_requested(
+	interaction_id: String, battle_id: String
+) -> void:
+	if _context == null or _player_party == null or _battle_interaction_panel == null:
+		if _context != null:
+			_context.encounter_manager.clear_pending_battle_interaction()
+		return
+	if _battle_interaction_panel.visible:
+		return
+	var pending_interaction: Dictionary = (
+		_context.encounter_manager.get_pending_battle_interaction()
+	)
+	if pending_interaction.is_empty() \
+			or str(pending_interaction.get("interaction_id", "")) != interaction_id:
+		return
+	if _battle_transition_started or _encounter_panel.visible \
+			or _save_panel.visible or _settlement_panel.visible \
+			or _party_panel.visible or _party_manage_panel.visible:
+		_context.encounter_manager.clear_pending_battle_interaction()
+		return
+
+	var battle := _context.battle_manager.current_battle
+	if battle == null or battle.battle_id != battle_id or not battle.offscreen \
+			or battle.is_party_involved(_context.player_party_id):
+		_context.encounter_manager.clear_pending_battle_interaction()
+		return
+	if not _player_party.is_available_for_world() \
+			or _player_party.member_unit_ids.is_empty():
+		_context.encounter_manager.clear_pending_battle_interaction()
+		return
+	if _context.battle_manager.get_join_side(_context.player_party_id) < 0:
+		_context.encounter_manager.clear_pending_battle_interaction()
+		return
+
+	_battle_interaction_id = interaction_id
+	_battle_interaction_battle_id = battle_id
+	_context.world_map_manager.stop_party(_context.player_party_id)
+	_battle_interaction_summary_label.text = _battle_interaction_summary(battle)
+	_battle_interaction_status_label.text = ""
+	_battle_interaction_panel.visible = true
+
+	if not _battle_interaction_pause_active:
+		TimeManager.push_pause(GameManager.PAUSE_REASON_BATTLE_INTERACTION)
+		_battle_interaction_pause_active = true
+	_set_time_buttons_enabled(false)
+	_update_time_ui()
+
+
+func _on_battle_join_pressed() -> void:
+	if _context == null or _player_party == null or _battle_interaction_panel == null:
+		return
+	if not _battle_interaction_panel.visible:
+		return
+	var pending: Dictionary = _context.encounter_manager.get_pending_battle_interaction()
+	if pending.is_empty() \
+			or str(pending.get("interaction_id", "")) != _battle_interaction_id:
+		cancel_battle_interaction()
+		return
+
+	var battle_id: String = str(pending.get("battle_id", ""))
+	var battle := _context.battle_manager.current_battle
+	if battle == null or battle.battle_id != battle_id or not battle.offscreen \
+			or battle.is_party_involved(_context.player_party_id):
+		_battle_interaction_status_label.text = "战斗已经结束"
+		cancel_battle_interaction()
+		return
+	if not _player_party.is_available_for_world() \
+			or _player_party.member_unit_ids.is_empty():
+		_battle_interaction_status_label.text = "玩家部队无法参战"
+		cancel_battle_interaction()
+		return
+
+	_context.world_map_manager.stop_party(_context.player_party_id)
+	# 先置位，避免其他流程在场景切换前重复触发。
+	_battle_transition_started = true
+	if not _context.battle_manager.try_join_battle(_context.player_party_id):
+		_battle_transition_started = false
+		_battle_interaction_status_label.text = "无法加入该战斗"
+		return
+
+	var error: Error = SceneManager.change_scene(SceneManager.BATTLE_SCENE)
+	if error != OK:
+		_context.battle_manager.abort_battle(battle_id)
+		_battle_transition_started = false
+		_battle_interaction_status_label.text = "战斗场景加载失败"
+		cancel_battle_interaction()
+		return
+
+	_context.encounter_manager.clear_pending_battle_interaction()
+	_battle_interaction_id = ""
+	_battle_interaction_battle_id = ""
+	_battle_interaction_panel.visible = false
+	if _battle_interaction_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_BATTLE_INTERACTION)
+		_battle_interaction_pause_active = false
+
+
+func _on_battle_leave_pressed() -> void:
+	if _context == null or _battle_interaction_panel == null:
+		return
+	if not _battle_interaction_panel.visible:
+		return
+	var pending: Dictionary = _context.encounter_manager.get_pending_battle_interaction()
+	var battle_id: String = str(pending.get("battle_id", _battle_interaction_battle_id))
+
+	_battle_interaction_panel.visible = false
+	if _battle_interaction_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_BATTLE_INTERACTION)
+		_battle_interaction_pause_active = false
+	if not battle_id.is_empty():
+		# 记录拒绝，避免玩家停留在交互范围内时反复弹出。
+		_context.encounter_manager.decline_battle_interaction(battle_id)
+	else:
+		_context.encounter_manager.clear_pending_battle_interaction()
+	_battle_interaction_id = ""
+	_battle_interaction_battle_id = ""
+	_set_time_buttons_enabled(true)
+	_update_time_ui()
+
+
+## 对话/战斗状态变化时关闭面板，清理本次交互暂停与待处理请求。
+func cancel_battle_interaction() -> void:
+	if _battle_interaction_panel != null:
+		_battle_interaction_panel.visible = false
+	if _battle_interaction_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_BATTLE_INTERACTION)
+		_battle_interaction_pause_active = false
+	if _context != null:
+		_context.encounter_manager.clear_pending_battle_interaction()
+	_battle_interaction_id = ""
+	_battle_interaction_battle_id = ""
+	_set_time_buttons_enabled(true)
+	_update_time_ui()
+
+
+## 面板打开期间检查战斗是否仍然有效；无效时关闭并清理暂停。
+func _validate_battle_interaction() -> void:
+	if _battle_interaction_panel == null or not _battle_interaction_panel.visible:
+		return
+	if _context == null:
+		return
+	var pending: Dictionary = _context.encounter_manager.get_pending_battle_interaction()
+	if pending.is_empty():
+		cancel_battle_interaction()
+		return
+	var battle := _context.battle_manager.current_battle
+	if battle == null or battle.battle_id != str(pending.get("battle_id", "")) \
+			or not battle.offscreen:
+		cancel_battle_interaction()
+		return
+	if battle.is_party_involved(_context.player_party_id):
+		cancel_battle_interaction()
+
+
+func _battle_interaction_summary(battle: BattleSession) -> String:
+	if battle == null:
+		return "战斗信息不可用"
+	var side_texts: Array[String] = []
+	for side_index: int in battle.get_side_indices():
+		var names: Array[String] = []
+		for party_id: String in battle.get_side_party_ids(side_index):
+			var party := _context.party_manager.get_party(party_id)
+			if party != null:
+				names.append(party.party_name)
+		if names.is_empty():
+			names.append("未知部队")
+		side_texts.append("、".join(names))
+	return "交战方：%s\n已持续：%.1f 秒" % [
+		"  VS  ".join(side_texts), battle.elapsed_world_seconds
+	]
+
+
+func _on_battle_participants_updated(_battle_id: String) -> void:
+	_update_battle_display()
+
+
+func _on_battle_started(_battle_id: String) -> void:
+	if _battle_transition_started or _context == null:
+		return
+	var battle := _context.battle_manager.current_battle
+	if battle == null or battle.offscreen or not battle.player_involved:
+		return
+	_battle_transition_started = true
+	call_deferred("_enter_battle_scene")
+
+
+func _enter_battle_scene() -> void:
+	var error: Error = SceneManager.change_scene(SceneManager.BATTLE_SCENE)
+	if error == OK:
+		return
+	if _context != null and _context.battle_manager.current_battle != null:
+		_context.battle_manager.abort_battle(_context.battle_manager.current_battle.battle_id)
+	_battle_transition_started = false
+	push_error("无法进入战斗场景（错误码 %s）" % error)
+
+
 func _open_party_dialogue(party: PartyData) -> void:
 	if _party_panel.visible or party == null:
 		return
@@ -527,6 +1800,7 @@ func _open_party_dialogue(party: PartyData) -> void:
 
 	_party_latch_id = party.party_id
 	_battle_transition_started = false
+	_player_party.focus_party_id = ""
 	_context.world_map_manager.stop_party(_context.player_party_id)
 
 	if not _party_pause_active:
@@ -582,14 +1856,16 @@ func begin_battle_with_party() -> BattleSession:
 
 	var attacker_ids: Array[String] = [_context.player_party_id]
 	var defender_ids: Array[String] = [enemy.party_id]
+	# 先置位，避免 battle_started 信号再次触发场景切换。
+	_battle_transition_started = true
 	var session := _context.battle_manager.start_battle(
 		attacker_ids, defender_ids, enemy.world_position
 	)
 	if session == null:
+		_battle_transition_started = false
 		_party_status_label.text = "无法开始战斗"
 		return null
 
-	_battle_transition_started = true
 	# 先由 start_battle 压入战斗暂停，再释放对话暂停，避免中间帧恢复世界时间。
 	if _party_pause_active:
 		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
@@ -617,19 +1893,21 @@ func _on_party_fight_pressed() -> void:
 		_update_time_ui()
 
 
-func _on_pause_pressed() -> void:
-	TimeManager.set_base_world_speed(TimeManager.SPEED_PAUSED)
+func _set_world_speed(speed: float) -> void:
+	TimeManager.set_base_world_speed(speed)
 	_update_time_ui()
+
+
+func _on_pause_pressed() -> void:
+	_set_world_speed(TimeManager.SPEED_PAUSED)
 
 
 func _on_speed_one_pressed() -> void:
-	TimeManager.set_base_world_speed(TimeManager.SPEED_NORMAL)
-	_update_time_ui()
+	_set_world_speed(TimeManager.SPEED_NORMAL)
 
 
 func _on_speed_two_pressed() -> void:
-	TimeManager.set_base_world_speed(TimeManager.SPEED_DOUBLE)
-	_update_time_ui()
+	_set_world_speed(TimeManager.SPEED_DOUBLE)
 
 
 func _on_save_pressed() -> void:
@@ -709,7 +1987,7 @@ func _update_time_ui() -> void:
 		speed_text = "2x"
 
 	_world_time_label.text = "世界时间：%s    倍率：%s" % [
-		_format_world_time(TimeManager.world_elapsed_seconds), speed_text
+		TimeManager.get_world_time_text(), speed_text
 	]
 
 	if _pause_button != null:
@@ -721,11 +1999,17 @@ func _update_time_ui() -> void:
 func _update_player_info() -> void:
 	if _player_info_label == null or _player_party == null:
 		return
+	var state_text: String = "待命"
+	if _player_party.current_order == PartyData.OrderType.FOLLOW_PARTY:
+		var target := _context.party_manager.get_party(_player_party.current_target_id)
+		state_text = "跟随中：%s" % (target.party_name if target != null else "目标消失")
+	elif _player_party.movement_state == PartyData.MovementState.MOVING:
+		state_text = "移动中"
 	_player_info_label.text = "%s    坐标 (%d, %d)    状态：%s" % [
 		_player_party.party_name,
 		int(round(_player_party.world_position.x)),
 		int(round(_player_party.world_position.y)),
-		"移动中" if _player_party.movement_state == PartyData.MovementState.MOVING else "待命",
+		state_text,
 	]
 
 
@@ -736,7 +2020,12 @@ func _set_time_buttons_enabled(enabled: bool) -> void:
 
 func _is_input_blocked() -> bool:
 	return _save_panel != null and (
-		_save_panel.visible or _settlement_panel.visible or _party_panel.visible
+		_save_panel.visible
+		or _settlement_panel.visible
+		or _party_panel.visible
+		or (_party_manage_panel != null and _party_manage_panel.visible)
+		or (_encounter_panel != null and _encounter_panel.visible)
+		or (_battle_interaction_panel != null and _battle_interaction_panel.visible)
 	)
 
 
@@ -767,16 +2056,6 @@ func _make_button(text: String, node_name: String) -> Button:
 	return button
 
 
-func _format_world_time(total_seconds: float) -> String:
-	var total: int = maxi(0, int(total_seconds))
-	var days: int = floori(float(total) / 86400.0) + 1
-	var remainder: int = total % 86400
-	var hours: int = floori(float(remainder) / 3600.0)
-	var minutes: int = floori(float(remainder % 3600) / 60.0)
-	var seconds: int = remainder % 60
-	return "第 %d 天 %02d:%02d:%02d" % [days, hours, minutes, seconds]
-
-
 func _settlement_type_text(type: SettlementData.SettlementType) -> String:
 	match type:
 		SettlementData.SettlementType.CASTLE:
@@ -788,13 +2067,9 @@ func _settlement_type_text(type: SettlementData.SettlementType) -> String:
 
 
 func _faction_display_name(faction_id: String) -> String:
-	match faction_id:
-		WorldInitializer.PLAYER_FACTION_ID:
-			return "玩家"
-		WorldInitializer.LOCAL_FACTION_ID:
-			return "本地势力"
-		_:
-			return faction_id if not faction_id.is_empty() else "未知"
+	if _context != null:
+		return _context.faction_manager.get_display_name(faction_id)
+	return faction_id if not faction_id.is_empty() else "未知"
 
 
 func _default_slot_name() -> String:

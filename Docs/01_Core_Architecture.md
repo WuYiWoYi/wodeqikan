@@ -43,12 +43,17 @@ GameManager (Autoload)
 └── WorldContext (Node，会话级，跨场景常驻)         │
     ├── IdGenerator                               │
     ├── UnitManager                               │
+    ├── ItemManager（消耗品静态配置）             │
     ├── PartyManager                              │
     ├── SettlementManager                         │
-    ├── WorldMapManager                           │
+    ├── FactionManager（阵营关系）                 │
+    ├── VisionManager（视野查询）                  │
+    ├── WorldMapManager（移动/跟随）               │
+    ├── EncounterManager（统一遭遇/中途参战）      │
     ├── AIManager                                 │
     ├── BattleManager                             │
     ├── DialogueManager                           │
+    ├── PlayerProfile（金币/物品，随存档）         │
     └── WorldSimulation ←──────────────────────────┘
 ```
 
@@ -59,7 +64,7 @@ GameManager (Autoload)
 - `WorldContext`：数据与管理器的生命周期容器，不写玩法逻辑；
 - `WorldSimulation`：只消费 `world_tick`，按固定顺序推进世界数据。
 
-这样大地图场景未加载时，只要世界时间未被暂停，`WorldSimulation` 仍可运行。当前屏幕内战斗会压入 `battle` 暂停原因冻结世界；未来的离屏 AI 战斗可改用 0.5 倍速覆盖。
+这样大地图场景未加载时，只要世界时间未被暂停，`WorldSimulation` 仍可运行。屏幕内战斗会压入 `battle` 暂停原因冻结世界；NPC 对 NPC 的离屏战斗保持世界正常运行，由 `BattleManager.tick()` 每游戏小时结算一次伤亡，期间允许第三方加入。
 
 ### 3.2 全局单例约束
 
@@ -86,9 +91,12 @@ GameManager (Autoload)
 | `EventBus` | 事实通知 | 请求-响应、业务决策 |
 | `WorldContext` | 装配并持有管理器 | 帧循环、玩法决策 |
 | `WorldSimulation` | 固定顺序推进世界 | 渲染、UI |
-| `UnitManager` | `UnitData` 增删查、按配置生成单位 | 单位 AI、场景表现 |
-| `PartyManager` | `PartyData` 增删查、成员关系维护 | 部队 AI |
-| `SettlementManager` | `SettlementData` 增删查、序列化 | 地点图标、交互面板 |
+| `UnitManager` | `UnitData` 增删查、按配置生成单位、等级/装备/坐骑/晋升/属性重算 | 单位 AI、场景表现 |
+| `ItemManager` | `ItemConfig` 静态注册与查询（消耗品/杂物） | 持有数量、玩家背包写操作 |
+| `PartyManager` | `PartyData` 增删查、成员关系维护、工资汇总 | 部队 AI |
+| `SettlementManager` | `SettlementData` 增删查、场景路径与序列化 | 地点图标、交互面板 |
+| `DialogueManager` | `DialogueData` 会话与节点跳转 | UI 排版、条件/效果 |
+| `PlayerProfile` | 金币、物品数量（玩家部队共享背包） | 场景节点、装备槽位；装备写操作仍经 `UnitManager` |
 | `WorldMapManager` | 部队坐标、目标、移动、视野 | 图标节点、UI |
 | `AIManager` | 三层决策调度 | 直接改场景、UI |
 | `BattleManager` | `BattleSession`、部队锁定、结算 | 直接修改大地图节点 |
@@ -126,8 +134,9 @@ Manager → EventBus（只发事实）
 │   └── 累积 WorldTime，每满 0.1 秒发出 world_tick
 │       └── WorldSimulation.on_world_tick
 │           ├── WorldMapManager.update_party_movement
-│           ├── WorldMapManager.update_visibility / 遭遇检测
-│           └── AIManager.tick（按内部分频）
+│           ├── WorldMapManager.update_visibility（视野由 VisionManager 提供）
+│           ├── EncounterManager 遭遇检测 / 中途参战
+│           └── AIManager.tick（按内部分频；待处理遭遇/交互时跳过）
 │
 ├── WorldMapScene._process
 │   └── 读取 PartyData，插值更新图标位置（只写表现）
@@ -155,11 +164,15 @@ Manager → EventBus（只发事实）
 
 | 数据 | 唯一写入者 | 备注 |
 |---|---|---|
-| `UnitData` 身份、等级、经验、装备、归属 | `UnitManager` / `PartyManager` | 招募、升级、转队都走管理器 |
+| `UnitData` 身份、等级、经验、工资、装备、归属 | `UnitManager` / `PartyManager` | 招募、升级、晋升、转队、上下马都走管理器 |
 | `UnitData.current_hp`（非战斗） | `UnitManager`（战斗结算时由 `BattleManager`） | 战斗期间不得由世界侧修改 |
+| 玩家金币 / 物品数量 | `PlayerProfile`（经 `UnitManager` 装备/晋升接口配合扣减） | 场景与 UI 不得直接改字段 |
+| `SettlementData.scene_path` | `WorldInitializer` / 存档恢复 | 场景只读取，不修改地点数据 |
 | `PartyData.world_position`、`target_position`、移动状态 | `WorldMapManager` | 其他系统只读 |
 | `PartyData.member_unit_ids` | `PartyManager` | 与 `UnitData.current_party_id` 双向一致 |
-| `PartyData.battle_state` | `BattleManager` | 锁定/解锁 |
+| `PartyData.battle_state` | `BattleManager` | 锁定/解锁；全员阵亡→DISABLED |
+| `PartyData.ai_type` / `ai_route_settlement_ids` | `WorldInitializer` | 运行时只读，不靠部队名称判断行为 |
+| `PartyData.ai_route_index` | `AIManager` | 到达路线点后推进下一步索引 |
 | `LordData` 目标与状态 | `AIManager` / 领主 AI | 通过明确方法 |
 | `SettlementData` 归属、驻军 | `SettlementManager` / 未来的战斗系统 | 地点交互只读 |
 | 世界时间、倍率 | `TimeManager` | 其他系统只能请求 |
@@ -258,8 +271,12 @@ Continue / Load Game
 | `party_position_changed` | `party_id` | `WorldMapManager` | 大地图图标 |
 | `party_battle_state_changed` | `party_id`, `battle_state` | `BattleManager` | 大地图图标、UI |
 | `settlement_interaction_requested` | `settlement_id` | 大地图输入/交互 | 地点面板 |
-| `battle_started` | `battle_id` | `BattleManager` | UI、音频 |
+| `battle_started` | `battle_id` | `BattleManager` | UI、场景控制器、音频 |
 | `battle_finished` | `battle_id`, `result` | `BattleManager` | UI、世界模拟 |
+| `battle_participant_joined` | `battle_id`, `party_id`, `side_index` | `BattleManager` | UI、统计、后续战斗场景 |
+| `battle_participants_updated` | `battle_id` | `BattleManager` | 大地图战斗标记/汇总 UI |
+| `player_encounter_requested` | `encounter_id`, `attacker_party_id`, `target_party_id` | `EncounterManager` | WorldMap 强制遭遇对话 |
+| `player_battle_interaction_requested` | `interaction_id`, `battle_id` | `EncounterManager` | WorldMap 加入/离开面板 |
 | `unit_died` | `unit_id`, `party_id` | `BattleManager` / `UnitManager` | UI、统计 |
 
 规则：

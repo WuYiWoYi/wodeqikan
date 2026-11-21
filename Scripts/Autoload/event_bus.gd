@@ -18,4 +18,11 @@ signal settlement_interaction_requested(settlement_id: String)
 
 signal battle_started(battle_id: String)
 signal battle_finished(battle_id: String, result: int)
+signal battle_participant_joined(battle_id: String, party_id: String, side_index: int)
+## 离屏战斗完成一次小时结算后广播，供大地图战斗面板刷新存活人数。
+signal battle_participants_updated(battle_id: String)
+signal player_encounter_requested(
+	encounter_id: String, attacker_party_id: String, target_party_id: String
+)
+signal player_battle_interaction_requested(interaction_id: String, battle_id: String)
 signal unit_died(unit_id: String, party_id: String)

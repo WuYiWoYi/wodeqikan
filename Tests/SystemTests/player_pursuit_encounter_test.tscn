@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Tests/SystemTests/player_pursuit_encounter_test.gd" id="1_pursuit_encounter"]
+
+[node name="PlayerPursuitEncounterTest" type="Node"]
+script = ExtResource("1_pursuit_encounter")

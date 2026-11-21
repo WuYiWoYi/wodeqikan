@@ -23,6 +23,15 @@ enum OrderType {
 	HOLD,
 	INTERACT,
 	BATTLE,
+	FOLLOW_PARTY,
+}
+
+enum PartyAIType {
+	NONE,
+	TRADE_ROUTE,
+	PATROL,
+	BANDIT,
+	GUARD,
 }
 
 var party_id: String = ""
@@ -40,6 +49,19 @@ var current_order: OrderType = OrderType.NONE
 var current_target_id: String = ""
 var movement_state: MovementState = MovementState.IDLE
 var battle_state: BattleState = BattleState.AVAILABLE
+
+## 大地图 AI 行为。ai_route_index 表示下一步要前往的路线点索引。
+## 商队路线使用 stable settlement_id；巡逻路线点由 AIManager 按类型提供。
+var ai_type: PartyAIType = PartyAIType.NONE
+var ai_route_index: int = 0
+var ai_route_settlement_ids: Array[String] = []
+
+## 运行时攻击/拦截意图，不进入存档；由 AIManager 维护，供大地图遭遇判定使用。
+var attack_intent: bool = false
+
+## 玩家主动追逐/接近的目标部队 ID，仅运行时使用，不进入存档。
+## 非空时大地图不自动弹出村庄信息或无关部队对话，避免打断玩家追逐。
+var focus_party_id: String = ""
 
 
 func has_member(unit_id: String) -> bool:
@@ -65,6 +87,9 @@ func to_dict() -> Dictionary:
 		"current_target_id": current_target_id,
 		"movement_state": int(movement_state),
 		"battle_state": int(battle_state),
+		"ai_type": int(ai_type),
+		"ai_route_index": ai_route_index,
+		"ai_route_settlement_ids": ai_route_settlement_ids.duplicate(),
 	}
 
 
@@ -89,6 +114,17 @@ static func from_dict(data: Dictionary) -> PartyData:
 	if member_values is Array:
 		for value: Variant in member_values:
 			party.member_unit_ids.append(str(value))
+
+	var ai_value: int = int(data.get("ai_type", PartyAIType.NONE))
+	if ai_value < PartyAIType.NONE or ai_value > PartyAIType.GUARD:
+		ai_value = PartyAIType.NONE
+	party.ai_type = ai_value as PartyAIType
+	party.ai_route_index = maxi(0, int(data.get("ai_route_index", 0)))
+
+	var route_values: Variant = data.get("ai_route_settlement_ids", [])
+	if route_values is Array:
+		for value: Variant in route_values:
+			party.ai_route_settlement_ids.append(str(value))
 
 	return party
 

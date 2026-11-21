@@ -1,7 +1,8 @@
 # 对话系统
 
 **核心逻辑：** `Scripts/Systems/Dialogue/dialogue_manager.gd`
-**状态：** 会话骨架完成，数据与 UI 未实现
+**数据配置：** `Scripts/Systems/Dialogue/dialogue_data.gd`、`Data/Dialogues/*.tres`
+**状态：** 数据驱动单节点对话、村庄对话框与选项跳转已实现；条件/效果、复杂对话树与大地图通用对话 UI 未实现
 
 ---
 
@@ -16,35 +17,32 @@
 | 大地图 | 接近 NPC、接近其他部队、地点交互 |
 | 小场景 | 角色接近 NPC、点击交互 |
 
-## 2. 数据模型
+## 2. 数据模型（当前实现）
 
-对话是由节点组成的图：
+对话由节点组成，节点可包含多个选项：
 
 ```text
-DialogueGraph
+DialogueData (Resource)
 ├── dialogue_id
-├── entry_node_id
-└── nodes: { node_id: DialogueNode }
+├── speaker_name
+├── start_node_id
+└── nodes: { node_id: { "text": String, "choices": Array[Dictionary] } }
 ```
 
-单个节点：
+单个选项：
 
 | 字段 | 说明 |
 |---|---|
-| `node_id` | 节点 ID |
-| `speaker_id` | 说话者 ID（领主/单位/地点） |
-| `text` | 对话文本 |
-| `choices` | 选项列表 |
-| `next_node_id` | 无选项时的下一节点 |
-| `conditions` | 显示/跳转条件 |
-| `effects` | 选择后执行的效果 |
+| `text` | 显示文本 |
+| `next_node_id` | 下一个节点；空字符串表示结束对话 |
 
-选项：
+当前规则：
 
-- `text`
-- `next_node_id`
-- `conditions`
-- `effects`
+- 对话配置使用 `DialogueData` 资源，放在 `Data/Dialogues/`。
+- 每个节点保存完整文本与选项列表；UI 只渲染 `DialogueManager` 提供的数据，不硬编码文本。
+- 文本支持由场景替换的占位符，例如 `{village_name}`。
+- 目标节点不存在时结束对话，避免 UI 卡死。
+- 条件、效果、好感度与任务跳转尚未接入；后续可在选项字典中扩展，而不改 UI 基本结构。
 
 ## 3. 条件与效果
 
@@ -76,20 +74,20 @@ DialogueGraph
 
 | 方法/字段 | 说明 |
 |---|---|
-| `start_dialogue(dialogue_id, start_node_id)` | 开始会话 |
-| `choose(choice_index)` | 选择选项并跳转 |
-| `end_dialogue()` | 结束会话 |
-| `active_dialogue_id` | 当前对话 |
-| `current_node_id` | 当前节点 |
+| `start_dialogue(data: DialogueData, start_node_id = "")` | 开始会话；校验资源与起始节点 |
+| `get_speaker_name()` / `get_current_text()` / `get_choices()` | 供 UI 读取当前节点 |
+| `choose(index) -> bool` | 选择选项；返回 true 表示仍在对话，false 表示结束或无效 |
+| `end_dialogue()` | 结束会话并清空当前节点 |
+| `is_active()` | 是否处于对话中 |
+| `active_dialogue_id` / `current_node_id` | 当前对话与节点 |
 
 职责：
 
-- 加载对话配置。
-- 计算当前可用选项。
-- 执行条件与效果。
-- 维护会话状态。
+- 校验并维护 `DialogueData` 会话状态。
+- 提供当前文本与选项。
+- 执行选项跳转；空目标或缺失目标结束对话。
 
-不负责：UI 排版、字体、立绘。
+不负责：UI 排版、字体、立绘、条件/效果计算（尚未实现）。
 
 ## 5. 时间规则
 
@@ -105,9 +103,10 @@ DialogueGraph
 
 ## 6. 数据存储
 
-- 静态对话图使用 `Resource`：后续增加 `DialogueGraphConfig` 与 `DialogueNodeConfig`，放在 `Data/Dialogues/`。
-- 对话进度与已选分支属于运行时状态，保存在 `SaveData.world_state` 或任务数据中。
+- 静态对话使用 `DialogueData` `Resource`，放在 `Data/Dialogues/`；当前示例为 `village_elder.tres`。
+- 对话进度与已选分支属于运行时状态，不进入存档；本阶段的村庄对话每次从起始节点开始。
 - 对话节点不保存场景节点引用。
+- 后续若需要跨场景对话进度，再写入 `SaveData.world_state` 或任务数据。
 
 ## 7. UI
 
@@ -120,11 +119,13 @@ DialogueGraph
 
 | 项 | 状态 |
 |---|---|
-| `DialogueManager` 会话骨架 | 已实现 |
-| 对话数据 Resource | TODO(阶段5) |
-| 条件/效果命令表 | TODO(阶段5) |
-| 对话 UI | TODO(阶段5) |
-| 大地图/小场景触发 | TODO(阶段5) |
+| `DialogueManager` 会话与节点跳转 | 已实现 |
+| `DialogueData` 数据 Resource | 已实现 |
+| 村庄对话 UI（屏幕下方） | 已实现：NPC 名称、文本、数据驱动选项 |
+| 村庄头人触发与距离校验 | 已实现 |
+| 条件/效果命令表 | 未实现 |
+| 复杂对话树、多选项分支 | 数据结构可扩展，当前只有单选项 |
+| 大地图通用对话 UI | 未实现（大地图部队遭遇仍使用专用面板） |
 
 ## 9. 待确认
 

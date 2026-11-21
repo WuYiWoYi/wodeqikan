@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Tests/SystemTests/world_map_battle_marker_test.gd" id="1_battle_marker"]
+
+[node name="WorldMapBattleMarkerTest" type="Node"]
+script = ExtResource("1_battle_marker")

@@ -29,7 +29,7 @@ func _run() -> void:
 	if get_tree().current_scene != null:
 		_check(get_tree().current_scene.name == "WorldMap", "新游戏进入 WorldMap")
 		var entities := get_tree().current_scene.get_node_or_null("WorldEntities")
-		_check(entities != null and entities.get_child_count() == 7, "WorldMap 生成 7 个地图实体")
+		_check(entities != null and entities.get_child_count() == 8, "WorldMap 生成 8 个地图实体")
 
 	_check(GameManager.world_context != null, "GameManager 持有 WorldContext")
 	if GameManager.world_context == null:

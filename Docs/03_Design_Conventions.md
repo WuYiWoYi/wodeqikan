@@ -89,7 +89,7 @@ GameplayScene (Node2D)
 
 - 战斗场景中的单位按 `world_position.y` 做 Y 排序（`y_sort_enabled`）。
 - 单位内部部件用 `z_index` 调整前后关系：阴影 < 马/身体 < 武器 < 头盔装饰。
-- 单位默认朝左；目标在右侧时翻转 `UnitVisual.scale.x`，不复制一套美术资源。
+- 单位默认朝左；目标在右侧时对 `UnitVisual` 的 Sprite2D 设置 `flip_h`，不复制一套美术资源。
 - 相机跟随玩家单位，不直接修改世界数据。
 
 ### 4.3 大地图表现
@@ -102,13 +102,13 @@ GameplayScene (Node2D)
 
 | 时间域 | 驱动 | 倍率 |
 |---|---|---|
-| WorldTime | `TimeManager.world_tick`，0.1 秒固定步长 | 0 / 1 / 2，战斗覆盖 0.5 |
+| WorldTime | `TimeManager.world_tick`，0.1 秒固定步长 | 0 / 1 / 2；屏幕战斗为 0，离屏战斗保持原倍率 |
 | SceneTime | 场景 `_physics_process` | 固定 1.0 |
 | UITime | 真实帧时间 | 不受游戏暂停影响 |
 
 - 暂停必须通过 `TimeManager.push_pause/pop_pause`。
 - 大地图时间按钮只能调用 `TimeManager.set_base_world_speed`。
-- 屏幕内战斗由 `BattleManager` 压入 `battle` 暂停原因；0.5 倍速覆盖只能由 `BattleManager` 调用 `set_battle_mode`（预留给离屏战斗）。
+- 屏幕内战斗由 `BattleManager` 压入 `battle` 暂停原因；离屏 AI 战斗保持世界正常速度，由 `BattleManager.tick()` 每游戏小时结算，不使用 0.5 倍速覆盖。
 - UI 动画、加载动画使用真实时间，不读世界倍率。
 
 ## 6. UI 规范

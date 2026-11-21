@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="DialogueData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Systems/Dialogue/dialogue_data.gd" id="1_dialogue"]
+
+[resource]
+script = ExtResource("1_dialogue")
+dialogue_id = "village_elder"
+speaker_name = "村庄头人"
+start_node_id = "start"
+nodes = {
+"start": {
+"text": "旅人，欢迎来到{village_name}。山道上有强盗出没，路上务必小心。",
+"choices": [{
+"text": "谢谢你，我要走了",
+"next_node_id": ""
+}]
+}
+}

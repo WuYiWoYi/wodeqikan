@@ -1,7 +1,7 @@
 # 时间系统
 
 **核心脚本：** `Scripts/Autoload/time_manager.gd`
-**状态：** 核心循环、暂停栈、时间 UI、读档时间恢复、战斗暂停已实现
+**状态：** 核心循环、暂停栈、统一游戏日历（1103-01-01 起，6 秒 = 1 小时）、日期/时间段 UI、读档时间恢复、战斗暂停已实现
 
 ---
 
@@ -40,7 +40,7 @@ TimeManager.push_pause(GameManager.PAUSE_REASON_BATTLE)  # 战斗开始
 TimeManager.pop_pause(GameManager.PAUSE_REASON_BATTLE)   # 战斗结束
 ```
 
-`TimeManager.set_battle_mode(true/false)` 仍保留 0.5 倍速覆盖能力，预留给未来的离屏 AI 战斗；当前屏幕内战斗不使用它。
+`TimeManager.set_battle_mode(true/false)` 仍保留 0.5 倍速覆盖能力；当前屏幕内战斗与离屏战斗都不使用它。离屏战斗保持世界正常速度，只由 `BattleManager.tick()` 按累计世界时间触发小时结算。
 
 ### 2.3 暂停原因栈
 
@@ -89,12 +89,29 @@ else:                       基础倍率（1 或 2）
 - 渲染帧率与世界 tick 完全解耦。
 - 禁止在每个渲染帧执行全量 AI 决策。
 
-## 4. 游戏内时间
+## 4. 游戏内时间与日历
 
-- `world_elapsed_seconds` 保存世界累计游戏秒数。
-- 大地图 UI 目前显示为“第 N 天 HH:MM:SS”，以 86400 秒为一天换算。
-- 尚未实现年/月/日历系统；招募时间等仍统一使用世界累计秒数。
-- 读档通过 `restore_world_time(seconds, base_speed)` 恢复累计时间和基础倍率。
+- `world_elapsed_seconds` 仍是唯一权威时间；年月日、小时、时间段都由它换算，任何系统不得自行累计日期。
+- 1x 速度下：
+  - 现实 6 秒 = 1 游戏小时；
+  - 现实 144 秒 = 1 游戏日；
+  - 2x 时按倍率翻倍，暂停时停止。
+- 新游戏从 **公元 1103 年 1 月 1 日 00:00** 开始（显示时间段为“深夜”）。
+- 本阶段采用简化历法：每月 30 天、每年 12 个月，共 360 天。
+- 大地图只显示年月日与时间段，不显示小时/分钟：
+  - 时间段集中配置在 `TimeManager.TIME_PERIODS`；
+  - 未命中区间时使用 `DEFAULT_TIME_PERIOD = "深夜"`。
+
+| 时间段 | 小时区间 |
+|---|---|
+| 清晨 | 05:00–07:00 |
+| 上午 | 07:00–12:00 |
+| 下午 | 12:00–17:00 |
+| 黄昏 | 17:00–19:00 |
+| 夜晚 | 19:00–23:00 |
+| 深夜 | 23:00–05:00 |
+
+- 读档通过 `restore_world_time(seconds, base_speed)` 恢复累计时间和基础倍率；日期自动由累计时间换算。
 
 ### 4.1 新游戏与读档的初始时间状态
 
@@ -118,6 +135,7 @@ else:                       基础倍率（1 或 2）
 | 小场景普通探索 | 0 | 1.0 | `small_scene` 暂停 |
 | 小场景对话 | 0 | 1.0 | 保持 `small_scene` |
 | 屏幕内战斗 | 0 | 1.0 | `battle` 暂停；战斗场景使用物理帧推进 |
+| 离屏 AI 对 AI 战斗 | 正常 | 无 | 世界继续运行；每游戏小时结算一次伤亡 |
 
 注意：源规划中“小场景对话时世界仍以 0.5 倍速运行”的描述与上表不一致。当前采用上表（小场景探索/对话 WorldTime = 0），后续若需要修改，必须同步更新本表与 `Technical_Decisions.md`。
 
@@ -131,10 +149,15 @@ else:                       基础倍率（1 或 2）
 | `set_base_world_speed(speed)` | 0 / 1 / 2 |
 | `get_base_world_speed()` | 当前基础倍率（不受暂停原因影响） |
 | `restore_world_time(seconds, base_speed)` | 读档恢复累计时间与基础倍率 |
-| `set_battle_mode(active)` | 战斗 0.5 倍速覆盖（预留给离屏战斗） |
+| `set_battle_mode(active)` | 历史 0.5 倍速覆盖接口，当前屏幕/离屏战斗均未使用 |
 | `push_pause(reason)` / `pop_pause(reason)` | 暂停原因栈 |
 | `clear_pauses()` | 清理所有暂停 |
+| `has_pause_reason(reason)` | 查询某暂停原因是否存在 |
 | `get_effective_world_scale()` | 当前有效倍率 |
+| `get_date_parts(total_seconds = -1)` | 返回 year/month/day/hour/minute/total_hours/total_days |
+| `get_date_text(total_seconds = -1)` | “1103 年 1 月 1 日” |
+| `get_time_period(total_seconds = -1)` | “清晨 / 上午 / … / 深夜” |
+| `get_world_time_text(total_seconds = -1)` | 日期 + 时间段 |
 | `world_elapsed_seconds` | 世界累计秒数 |
 | `world_tick` 信号 | 固定步长 tick |
 | `world_time_changed` 信号 | 世界累计时间变化 |
@@ -153,14 +176,17 @@ else:                       基础倍率（1 或 2）
 | 固定步长累积 | 已实现 |
 | 暂停原因栈 | 已实现 |
 | 战斗暂停（`battle`） | 已实现，屏幕内战斗 WorldTime = 0 |
-| 战斗 0.5 倍速覆盖 | 接口保留，未使用 |
+| 离屏战斗小时结算 | 已实现，世界继续运行；每 6 世界秒 = 1 游戏小时 |
+| 战斗 0.5 倍速覆盖 | 接口保留，未使用；离屏战斗保持正常世界倍率 |
 | 读档时间恢复 | 已实现 |
 | UI 时间显示/按钮 | 已实现（暂停 / 1x / 2x） |
-| 游戏内日期 | 部分实现（第 N 天 HH:MM:SS，无年月） |
+| 游戏内日期 | 已实现：1103-01-01 起、30 天/月、12 月/年；大地图显示年月日 + 时间段 |
+| 时间段 | 已实现：清晨 / 上午 / 下午 / 黄昏 / 夜晚 / 深夜，集中配置 |
+| 日期驱动 | 统一由 `world_elapsed_seconds` 换算；没有系统自行累计日期 |
 
 ## 9. 待确认
 
 - 屏幕内战斗是否应改为 0.5 倍速（当前按 0 处理，见 D028）。
 - 小场景对话期间世界是否应保持 0.5 倍速（当前按 0 处理）。
 - 是否需要“快进到指定时间”功能（等待、训练）。
-- 完整日历（年/月/日）与季节系统。
+- 真实月历/闰年与季节系统；当前为每月 30 天的简化日历。

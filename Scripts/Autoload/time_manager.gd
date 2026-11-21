@@ -15,6 +15,32 @@ signal world_time_changed(total_game_seconds: float)
 const WORLD_TICK_INTERVAL: float = 0.1
 const MAX_TICKS_PER_FRAME: int = 10
 
+## ---------------------------------------------------------------------------
+## 游戏日历
+## ---------------------------------------------------------------------------
+## 世界累计秒数是唯一权威时间；年月日与时间段全部由它换算，各系统不得自行累计。
+## 1x 速度下：现实 6 秒 = 1 游戏小时，144 秒 = 1 游戏日。
+const START_YEAR: int = 1103
+const START_MONTH: int = 1
+const START_DAY: int = 1
+const REAL_SECONDS_PER_GAME_HOUR: float = 6.0
+## 每 1 世界累计秒 = 10 游戏分钟（60 / 6）。
+const GAME_MINUTES_PER_ELAPSED_SECOND: float = 10.0
+const HOURS_PER_DAY: int = 24
+## 本阶段采用简化历法：每月 30 天、每年 12 个月，便于后续统一调整。
+const DAYS_PER_MONTH: int = 30
+const MONTHS_PER_YEAR: int = 12
+
+## 时间段集中配置；未命中任何区间时使用 DEFAULT_TIME_PERIOD。
+const TIME_PERIODS: Array[Dictionary] = [
+	{"start_hour": 5, "end_hour": 7, "name": "清晨"},
+	{"start_hour": 7, "end_hour": 12, "name": "上午"},
+	{"start_hour": 12, "end_hour": 17, "name": "下午"},
+	{"start_hour": 17, "end_hour": 19, "name": "黄昏"},
+	{"start_hour": 19, "end_hour": 23, "name": "夜晚"},
+]
+const DEFAULT_TIME_PERIOD: String = "深夜"
+
 const SPEED_PAUSED: float = 0.0
 const SPEED_NORMAL: float = 1.0
 const SPEED_DOUBLE: float = 2.0
@@ -122,6 +148,10 @@ func clear_pauses() -> void:
 	_emit_speed_changed()
 
 
+func has_pause_reason(reason: StringName) -> bool:
+	return _pause_reasons.has(reason)
+
+
 ## 开始一个新的游戏会话（新游戏或读档）。
 func start_session() -> void:
 	reset_session()
@@ -141,6 +171,71 @@ func reset_session() -> void:
 	_battle_mode_active = false
 	_pause_reasons.clear()
 	_emit_speed_changed()
+
+
+# ---------------------------------------------------------------------------
+# 日历换算
+# ---------------------------------------------------------------------------
+
+
+## 世界累计秒数 → 游戏总分钟数。
+func get_game_total_minutes(total_seconds: float = -1.0) -> int:
+	var seconds: float = (
+		world_elapsed_seconds if total_seconds < 0.0 else total_seconds
+	)
+	return maxi(0, int(floor(seconds * GAME_MINUTES_PER_ELAPSED_SECOND)))
+
+
+## 世界累计秒数 → { year, month, day, hour, minute, total_hours, total_days }。
+## 新游戏从 START_YEAR 年 START_MONTH 月 START_DAY 日 00:00 开始。
+@warning_ignore("integer_division")
+func get_date_parts(total_seconds: float = -1.0) -> Dictionary:
+	var total_minutes: int = get_game_total_minutes(total_seconds)
+	var total_hours: int = total_minutes / 60
+	var total_days: int = total_hours / HOURS_PER_DAY
+	var hour: int = total_hours % HOURS_PER_DAY
+
+	var days_per_year: int = DAYS_PER_MONTH * MONTHS_PER_YEAR
+	var year_offset: int = int(floor(float(total_days) / float(days_per_year)))
+	var day_of_year: int = total_days % days_per_year
+	var month_offset: int = int(floor(float(day_of_year) / float(DAYS_PER_MONTH)))
+	var month_index: int = (START_MONTH - 1) + month_offset
+	var year: int = START_YEAR + year_offset
+	var month: int = month_index % MONTHS_PER_YEAR + 1
+	var day: int = day_of_year % DAYS_PER_MONTH + START_DAY
+
+	return {
+		"year": year,
+		"month": month,
+		"day": day,
+		"hour": hour,
+		"minute": total_minutes % 60,
+		"total_hours": total_hours,
+		"total_days": total_days,
+	}
+
+
+## 仅年月日，例如“1103 年 1 月 1 日”。
+func get_date_text(total_seconds: float = -1.0) -> String:
+	var parts := get_date_parts(total_seconds)
+	return "%d 年 %d 月 %d 日" % [parts["year"], parts["month"], parts["day"]]
+
+
+## 根据当前小时返回时间段名称。
+func get_time_period(total_seconds: float = -1.0) -> String:
+	var parts := get_date_parts(total_seconds)
+	var hour: int = int(parts["hour"])
+	for period: Dictionary in TIME_PERIODS:
+		var start_hour: int = int(period["start_hour"])
+		var end_hour: int = int(period["end_hour"])
+		if hour >= start_hour and hour < end_hour:
+			return str(period["name"])
+	return DEFAULT_TIME_PERIOD
+
+
+## 大地图时间显示：只展示年月日与时间段，不显示小时和分钟。
+func get_world_time_text(total_seconds: float = -1.0) -> String:
+	return "%s %s" % [get_date_text(total_seconds), get_time_period(total_seconds)]
 
 
 func _emit_speed_changed() -> void:

@@ -17,10 +17,19 @@ const PAUSE_REASON_UI_PANEL: StringName = &"ui_panel"
 const PAUSE_REASON_WORLD_DIALOGUE: StringName = &"world_dialogue"
 const PAUSE_REASON_SMALL_SCENE: StringName = &"small_scene"
 const PAUSE_REASON_BATTLE: StringName = &"battle"
+const PAUSE_REASON_ENCOUNTER_DIALOGUE: StringName = &"encounter_dialogue"
+const PAUSE_REASON_BATTLE_INTERACTION: StringName = &"battle_encounter_dialogue"
 
 var game_state: GameState = GameState.BOOT
 var world_context: WorldContext = null
 var player_party_id: String = ""
+
+## 小场景（村庄）运行时状态，不进入存档。
+var current_settlement_id: String = ""
+## 返回大地图后用于抑制一次地点自动交互，避免玩家站在村口时面板立刻重开。
+var pending_settlement_latch_id: String = ""
+## 进入小场景前的大地图基础倍率，返回时恢复。
+var small_scene_return_base_speed: float = 0.0
 
 
 func _ready() -> void:
@@ -155,6 +164,9 @@ func _destroy_world_context() -> void:
 		world_context.free()
 	world_context = null
 	player_party_id = ""
+	current_settlement_id = ""
+	pending_settlement_latch_id = ""
+	small_scene_return_base_speed = 0.0
 
 
 func _set_game_state(new_state: GameState) -> void:

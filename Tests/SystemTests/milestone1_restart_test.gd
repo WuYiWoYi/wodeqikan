@@ -67,7 +67,7 @@ func _load_phase() -> void:
 	context.name = "RestartLoadContext"
 	add_child(context)
 	_check(context.load_from_save_data(save), "读取阶段：恢复 WorldContext")
-	_check(context.party_manager.get_all_parties().size() == 3, "读取阶段：3 支部队")
+	_check(context.party_manager.get_all_parties().size() == 4, "读取阶段：4 支部队")
 	_check(
 		context.settlement_manager.get_all_settlements().size() == 4,
 		"读取阶段：4 个地点"

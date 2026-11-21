@@ -44,7 +44,7 @@ func _build_ui() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(title)
 
-	var subtitle := _make_label("Milestone 1 · 大地图原型", 16)
+	var subtitle := _make_label("阶段 5 · 战斗与大地图原型", 16)
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	subtitle.add_theme_color_override("font_color", Color("#9fb0c2"))
 	column.add_child(subtitle)

@@ -36,8 +36,13 @@ func _run() -> void:
 	_check(player != null and enemy != null, "玩家与敌方部队存在")
 	if player == null or enemy == null:
 		return
-	_check(player.member_unit_ids.size() == 5, "玩家测试兵力为 5")
+	_check(player.member_unit_ids.size() == 7, "玩家测试兵力为 7")
 	_check(enemy.member_unit_ids.size() == 5, "敌方测试兵力为 5")
+
+	# 商队初始位于橡木村；把它移到远离地点的空地，避免地点面板抢占对话。
+	enemy.world_position = Vector2(900.0, 1500.0)
+	enemy.target_position = enemy.world_position
+	enemy.movement_state = PartyData.MovementState.IDLE
 
 	# 在创建大地图前把玩家放到敌方附近，_last_player_position 会以该位置初始化。
 	player.world_position = enemy.world_position + Vector2(-20.0, 0.0)
@@ -65,7 +70,7 @@ func _run() -> void:
 	var troop_label := _map.find_child("PartyTroopLabel", true, false) as Label
 	_check(name_label != null and name_label.text == enemy.party_name, "显示敌方部队名称")
 	_check(
-		faction_label != null and faction_label.text.contains("本地势力"),
+		faction_label != null and faction_label.text.contains("商队"),
 		"显示敌方阵营"
 	)
 	_check(
@@ -112,7 +117,7 @@ func _run() -> void:
 	if session == null:
 		return
 	_check(_context.battle_manager.current_battle == session, "BattleManager 持有战斗会话")
-	_check(session.attacker_unit_ids.size() == 5, "玩家 5 名士兵进入会话")
+	_check(session.attacker_unit_ids.size() == 7, "玩家 7 名士兵进入会话")
 	_check(session.defender_unit_ids.size() == 5, "敌方 5 名士兵进入会话")
 	_check(player.battle_state == PartyData.BattleState.IN_BATTLE, "玩家部队已锁定")
 	_check(enemy.battle_state == PartyData.BattleState.IN_BATTLE, "敌方部队已锁定")

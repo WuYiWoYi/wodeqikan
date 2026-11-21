@@ -16,6 +16,10 @@ var world_position: Vector2 = Vector2.ZERO
 var faction_id: String = ""
 var owner_lord_id: String = ""
 
+## 该地点对应的小场景路径。空字符串表示使用村庄/城镇/城堡的默认模板。
+## 初期所有村庄共用同一个基础场景，后续可逐村替换。
+var scene_path: String = ""
+
 var population: int = 0
 var prosperity: int = 0
 var garrison_unit_ids: Array[String] = []
@@ -30,6 +34,7 @@ func to_dict() -> Dictionary:
 		"world_position": [world_position.x, world_position.y],
 		"faction_id": faction_id,
 		"owner_lord_id": owner_lord_id,
+		"scene_path": scene_path,
 		"population": population,
 		"prosperity": prosperity,
 		"garrison_unit_ids": garrison_unit_ids.duplicate(),
@@ -47,6 +52,7 @@ static func from_dict(data: Dictionary) -> SettlementData:
 	settlement.world_position = _read_vector2(data.get("world_position", []))
 	settlement.faction_id = str(data.get("faction_id", ""))
 	settlement.owner_lord_id = str(data.get("owner_lord_id", ""))
+	settlement.scene_path = str(data.get("scene_path", ""))
 	settlement.population = int(data.get("population", 0))
 	settlement.prosperity = int(data.get("prosperity", 0))
 	settlement.is_under_siege = bool(data.get("is_under_siege", false))

@@ -3,16 +3,34 @@ extends Node2D
 ## 战斗场景中的单个士兵表现节点。
 ##
 ## 只读取 UnitData 的静态属性与 BattleUnitState 的战斗状态，不修改 UnitData。
+## 士兵外观由 UnitVisual 组合临时素材；本节点只负责选中圈、血条与名称。
 ## 死亡后由战斗场景移除本节点；权威状态仍保留在 BattleSession 中等待结算。
 
-const BODY_RADIUS: float = 13.0
+const UnitVisualScript = preload("res://Scripts/Systems/Combat/unit_visual.gd")
+
+const SELECTION_RADIUS: float = 20.0
+const SELECTION_RADIUS_MOUNTED: float = 27.0
+const HP_BAR_TOP: float = -50.0
+
+## 整个 UnitActor 必须高于战场背景（BattleScene 根节点 z_index = 0）。
+## UnitVisual 的部件使用相对负 z_index，因此实际 canvas z = 本值 + 部件 z。
+const ACTOR_Z_INDEX: int = 200
+
+## 实际位移速度高于阈值视为跑动；停止后保留短暂缓冲，避免待机/跑动抖动。
+const MOVE_SPEED_THRESHOLD: float = 8.0
+const MOVE_STATE_BUFFER: float = 0.12
 
 var unit_data: UnitData = null
 var battle_state: BattleUnitState = null
 var is_player_side: bool = false
+var is_controlled: bool = false
+var visual: Node2D = null
 
 var _facing: float = -1.0
 var _name_label: Label = null
+var _attack_flash: float = 0.0
+var _visual_moving: bool = false
+var _move_buffer: float = 0.0
 
 
 func setup(data: UnitData, state: BattleUnitState, player_side: bool) -> void:
@@ -21,15 +39,74 @@ func setup(data: UnitData, state: BattleUnitState, player_side: bool) -> void:
 	is_player_side = player_side
 	name = "UnitActor_%s" % data.unit_id
 	position = state.battle_position
+	z_index = ACTOR_Z_INDEX
+
+	visual = UnitVisualScript.new()
+	visual.name = "Visual"
+	add_child(visual)
+	visual.setup(data)
+
 	_create_label()
 	queue_redraw()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if battle_state == null:
 		return
-	position = battle_state.battle_position
+
+	var new_position: Vector2 = battle_state.battle_position
+	var moved_distance: float = position.distance_to(new_position)
+	var speed: float = moved_distance / maxf(delta, 0.0001)
+	position = new_position
+
+	if speed >= MOVE_SPEED_THRESHOLD:
+		_visual_moving = true
+		_move_buffer = MOVE_STATE_BUFFER
+	else:
+		_move_buffer = maxf(0.0, _move_buffer - delta)
+		if _move_buffer <= 0.0:
+			_visual_moving = false
+
+	if is_instance_valid(visual):
+		# 支持战斗中装备/卸下马匹后立即切换步兵/骑兵表现，不重建节点。
+		if unit_data != null and visual.is_mounted_visual() != unit_data.is_mounted:
+			visual.set_mounted(unit_data.is_mounted)
+		visual.update_locomotion(delta, _visual_moving)
+
+	if _attack_flash > 0.0:
+		_attack_flash = maxf(0.0, _attack_flash - delta)
+		if _attack_flash <= 0.0 and is_instance_valid(visual):
+			visual.set_attack_flash(false)
 	queue_redraw()
+
+
+func set_controlled(value: bool) -> void:
+	if is_controlled == value:
+		return
+	is_controlled = value
+	queue_redraw()
+
+
+func play_attack(direction: Vector2 = Vector2.LEFT) -> void:
+	_attack_flash = 0.18
+	if is_instance_valid(visual):
+		visual.set_attack_flash(true)
+		# 长矛动画纯表现；伤害/冷却已在 UnitController 中即时结算。
+		visual.play_attack_animation(direction)
+	queue_redraw()
+
+
+func is_attack_animating() -> bool:
+	return is_instance_valid(visual) and visual.is_attack_animating()
+
+
+## 仅挥动/刺出阶段锁定朝向，攻击后的长矛保持姿态不阻止移动转身。
+func is_attack_pose_locked() -> bool:
+	return is_instance_valid(visual) and visual.is_attack_pose_locked()
+
+
+func is_visual_moving() -> bool:
+	return _visual_moving
 
 
 func set_facing(direction_x: float) -> void:
@@ -38,6 +115,8 @@ func set_facing(direction_x: float) -> void:
 	var new_facing: float = 1.0 if direction_x > 0.0 else -1.0
 	if not is_equal_approx(new_facing, _facing):
 		_facing = new_facing
+		if is_instance_valid(visual):
+			visual.set_facing(_facing)
 		queue_redraw()
 
 
@@ -49,28 +128,30 @@ func _draw() -> void:
 	if unit_data == null or battle_state == null:
 		return
 
-	var body_color := Color("#2f6fd0") if is_player_side else Color("#b83b35")
-	var outline_color := Color("#d8ecff") if is_player_side else Color("#ffd2cc")
-
-	draw_circle(Vector2(0.0, 10.0), BODY_RADIUS, Color(0.0, 0.0, 0.0, 0.25))
-	draw_circle(Vector2.ZERO, BODY_RADIUS, outline_color)
-	draw_circle(Vector2.ZERO, BODY_RADIUS - 2.0, body_color)
-	draw_circle(Vector2(0.0, -15.0), 6.5, Color("#e6c39a"))
-
-	# 武器朝向：默认朝左。
-	draw_line(
-		Vector2(-4.0 * _facing, -2.0),
-		Vector2(18.0 * _facing, -8.0),
-		Color("#d9d9d9"),
-		2.5,
-		true
-	)
+	if is_controlled:
+		var radius: float = (
+			SELECTION_RADIUS_MOUNTED if unit_data.is_mounted else SELECTION_RADIUS
+		)
+		draw_arc(
+			Vector2.ZERO,
+			radius,
+			0.0,
+			TAU,
+			32,
+			Color("#ffd75e"),
+			2.5,
+			true
+		)
 
 	var max_hp: int = maxi(unit_data.max_hp, 1)
 	var ratio: float = clampf(float(battle_state.battle_hp) / float(max_hp), 0.0, 1.0)
-	draw_rect(Rect2(-16.0, -34.0, 32.0, 5.0), Color(0.0, 0.0, 0.0, 0.7), true)
+	draw_rect(
+		Rect2(-16.0, HP_BAR_TOP, 32.0, 5.0),
+		Color(0.0, 0.0, 0.0, 0.7),
+		true
+	)
 	var hp_color := Color("#6fdc6f") if ratio > 0.35 else Color("#e05a4f")
-	draw_rect(Rect2(-16.0, -34.0, 32.0 * ratio, 5.0), hp_color, true)
+	draw_rect(Rect2(-16.0, HP_BAR_TOP, 32.0 * ratio, 5.0), hp_color, true)
 
 	if not battle_state.alive:
 		draw_line(Vector2(-10.0, -10.0), Vector2(10.0, 10.0), Color(0.0, 0.0, 0.0, 0.7), 2.5)
@@ -80,7 +161,7 @@ func _create_label() -> void:
 	_name_label = Label.new()
 	_name_label.name = "NameLabel"
 	_name_label.text = unit_data.display_name
-	_name_label.position = Vector2(-50.0, -58.0)
+	_name_label.position = Vector2(-50.0, -70.0)
 	_name_label.size = Vector2(100.0, 18.0)
 	_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE

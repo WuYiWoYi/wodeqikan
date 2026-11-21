@@ -3,7 +3,7 @@
 **核心数据：** `Scripts/Systems/Combat/battle_session.gd`、`battle_unit_state.gd`
 **核心逻辑：** `Scripts/Systems/Combat/battle_manager.gd`
 **场景与表现：** `Scripts/UI/Battle/battle_scene.gd`、`Scripts/Systems/Combat/unit_actor.gd`、`unit_controller.gd`
-**状态：** 最小实时战斗闭环已实现（大地图遭遇 → 对话 → 战斗 → 结算 → 返回）；援军、离屏结算与复杂战术未实现
+**状态：** 双方/多方实时战斗、按游戏小时结算的离屏战斗、360°定向矩形攻击、玩家自由攻击、武器决定攻击距离、实体碰撞、统一攻击规则、多人围攻、控制权转移与观战、基础队形/避让、克制步态/待机动画、跃马式马腿动画、长矛前后摇与攻击后保持、骑乘战斗加速、1920×1080 显示、统一 BattleResult、经验/奖励与撤退已实现；复杂战术指挥、受击动画与士气未实现
 
 > 本文是项目实际的战斗系统文档。任务书中提到的 `Battle_System.md` 与本文对应，未另建重复文档。
 
@@ -16,6 +16,9 @@
 - 战斗期间 HP 以 `BattleUnitState` 为唯一权威，结束时统一写回 `UnitData`。
 - 战斗场景只读取 `UnitData` 静态属性，不修改部队成员关系。
 - 结算由 `BattleManager` 统一执行，场景控制器不得直接改世界数据。
+- 玩家角色就是普通 `Unit`，玩家控制只是 `UnitController` 的一种运行模式。
+- 部队是战斗集群的组织单位：队形槽位由场景按部队分配，单位只负责局部移动与避让。
+- 屏幕战斗、离屏战斗与中途加入共用 `BattleResultData`、伤亡、经验与奖励结算。
 
 ## 2. 数据模型
 
@@ -25,15 +28,38 @@
 |---|---|
 | `battle_id` | 战斗 ID，`BATTLE_000001` |
 | `world_position` | 战斗发生位置 |
-| `attacker_party_ids` / `defender_party_ids` | 进攻方 / 防守方部队 ID |
-| `reinforcement_party_ids` | 援军部队 ID（阶段 6） |
-| `attacker_unit_ids` / `defender_unit_ids` | 双方参战单位 ID，顺序与生成顺序一致 |
-| `attacker_faction_id` / `defender_faction_id` | 双方阵营 |
+| `participants` | `party_id → BattleParticipant` |
+| `side_party_ids` / `side_unit_ids` | `side_index → 部队/单位 ID` |
+| `attacker_party_ids` / `defender_party_ids` | 兼容字段：side 0 / side 1 |
+| `attacker_unit_ids` / `defender_unit_ids` | 兼容字段：side 0 / side 1 的单位 |
+| `attacker_faction_id` / `defender_faction_id` | 兼容字段：前两个战斗侧的阵营 |
 | `unit_states` | `unit_id → BattleUnitState` |
 | `status` | PREPARING / ACTIVE / ENDED |
-| `result` | UNDECIDED / 攻击方胜 / 防守方胜 / 平局 / 中止 |
+| `result` | UNDECIDED / 攻击方胜 / 防守方胜 / 平局 / 中止 / 其他侧胜利 / 撤退 |
+| `winning_side_index` | 获胜战斗侧；-1 表示平局/撤退/未定 |
+| `final_result` | 结算后的 `BattleResultData`；非 null 表示已结算且不可再次修改 |
+| `retreated_side_indices` | 主动撤退的战斗侧 |
+| `offscreen` | 是否为离屏自动结算战斗 |
+| `paused_world` | 本场战斗是否压入了 `battle` 暂停 |
+| `player_involved` | 玩家是否为参战方 |
+| `elapsed_world_seconds` | 离屏战斗已持续的世界时间 |
+| `offscreen_settlement_accumulator` | 距离下一次整小时结算的累计世界秒 |
+| `offscreen_settlements_done` | 已完成的离屏小时结算次数 |
+| `offscreen_casualty_credit` | `side_index → 小数伤亡累计`，用于避免固定人数损失 |
 
-辅助方法：`get_unit_state()`、`is_party_involved()`、`is_attacker_party()`、`get_party_unit_ids()`、`get_all_unit_ids()`。
+辅助方法：`get_unit_state()`、`is_party_involved()`、`is_attacker_party()`、`get_party_unit_ids()`、`get_all_unit_ids()`、`get_side_of_party()`、`get_side_indices()`、`get_side_party_ids()`、`get_side_unit_ids()`、`get_opposing_party_ids()`。
+
+### BattleParticipant
+
+| 字段 | 说明 |
+|---|---|
+| `party_id` | 参战部队 ID |
+| `faction_id` | 参战时的阵营 |
+| `side_index` | 所属战斗侧；同侧为友军 |
+| `joined_at_world_seconds` | 加入时的战斗计时 |
+| `status` | ACTIVE / DEFEATED / WITHDRAWN |
+
+`side_index` 相同的部队不会互相攻击；不同战斗侧互为敌人。旧双方流程固定 side 0 = attacker、side 1 = defender，因此原有 API 与测试保持兼容。
 
 ### BattleUnitState
 
@@ -45,25 +71,69 @@
 | `alive` | 是否存活 |
 | `battle_position` | 战斗场景内位置 |
 
+### BattleResultData
+
+`Scripts/Systems/Combat/battle_result_data.gd`，屏幕/离屏/中途加入共用的最终（或结果面板预览）结果：
+
+| 字段 | 说明 |
+|---|---|
+| `battle_id` | 战斗 ID |
+| `result_code` | 对应 `BattleSession.BattleResult` 的整数值 |
+| `winning_side_index` / `losing_side_indices` | 获胜/失败战斗侧 |
+| `retreated_side_indices` | 主动撤退侧 |
+| `player_side_index` / `player_won` | 玩家所在侧与是否获胜 |
+| `participants` | 参战部队快照（party/faction/side/status） |
+| `casualties` / `survivors` | 各部队阵亡/存活人数 |
+| `exp_gained_by_unit` / `exp_gained_by_party` / `player_exp_gained` | 经验结算明细 |
+| `reward_gold` / `reward_items` | 金币与装备战利品 |
+| `end_reason` | ANNIHILATION / RETREAT / DRAW / ABORTED |
+| `player_involved` / `result_time` / `finalized` | 参与标记、结算时间与最终标记 |
+
+- `finalized` 只在 `finish_battle()` 中置为 true；之后不得修改。
+- 结果面板使用 `apply = false` 的预览；点击返回大地图时执行最终结算。
+
 ## 3. 进入战斗
 
 ```text
-大地图接近 AI 部队
+大地图接近中立/友好 AI 部队
   → 部队对话面板（push_pause ui_panel）
   → 玩家选择“发起战斗”
       → BattleManager.start_battle(attacker_ids, defender_ids, position)
-          ├── 校验双方部队存在、ID 不重复、阵营不同
-          ├── 校验部队 battle_state == AVAILABLE
+          ├── 校验部队存在、ID 不重复
+          ├── 校验每个战斗侧的部队可用且阵营不敌对
           ├── 为每个存活成员创建 BattleUnitState（battle_hp = current_hp）
-          ├── 双方都没有存活士兵则失败
+          ├── 任一方没有存活士兵则失败
           ├── 参战部队 battle_state = IN_BATTLE
           ├── 停止参战部队大地图移动
-          ├── push_pause(battle)
+          ├── 玩家参与：push_pause(battle)
           └── EventBus.battle_started
       → 场景控制器 SceneManager.change_scene(BattleScene)
 ```
 
-`start_battle()` 不切换场景、不修改单位 HP 与成员关系；失败时返回 `null`，不改变任何部队或时间状态。
+`start_battle()` 保留双方兼容签名；`start_battle_by_sides(sides, position, offscreen)` 支持任意数量的战斗侧。失败时返回 `null`，不改变任何部队或时间状态。
+
+### 3.0 玩家被敌对 AI 主动拦截
+
+```text
+敌对 AI 追击玩家（攻击意图明确指向玩家）
+  → EncounterManager 判定距离 <= 50
+  → 停止双方、记录待处理遭遇
+  → WorldMap 压入 encounter_dialogue 暂停并显示遭遇对话
+  → 玩家选择“战斗”
+  → BattleManager.start_battle([玩家], [敌对部队], 位置, offscreen = false)
+  → 移除 encounter_dialogue；保留 battle 暂停
+  → EventBus.battle_started → WorldMap 切换 BattleScene
+```
+
+- 遭遇对话提供“战斗/撤退”；撤退后记录 90 世界单位拒绝锁，双方保留停止位置（D080）。
+- 对话打开时不改变基础倍率，关闭或进入战斗时只移除 `encounter_dialogue`。
+- 同一待处理遭遇不会重复触发；对话期间 WorldSimulation 跳过 AI。
+- 玩家主动接近敌对 AI 不会触发该对话；只有 AI 的攻击目标明确是玩家时才触发。
+
+- `offscreen = false`：屏幕战斗，暂停世界，等待 `BattleScene`。
+- `offscreen = true`：NPC 对 NPC 的离屏战斗，不暂停世界，每游戏小时结算一次伤亡。
+- 玩家参与的离屏战斗会被强制转换为屏幕战斗。
+- 同一时间只允许一场战斗；已参战部队不能再加入其他战斗。
 
 ### 3.1 大地图交互
 
@@ -88,25 +158,143 @@ BattleScene (Node2D)
     └── BattleResultPanel（结果 + 返回大地图）
 ```
 
-### 4.1 士兵生成
+### 4.1 士兵生成与控制
 
-- 从 `BattleSession.attacker_unit_ids` / `defender_unit_ids` 读取单位。
+- 按 `BattleSession.get_side_indices()` 读取全部战斗侧及其单位。
 - 每个幸存单位创建一个 `UnitActor`，节点名 `UnitActor_<unit_id>`，并关联对应 `BattleUnitState`。
-- 进攻方在左侧、防守方在右侧，2 列纵深，横向 54 / 纵向 64 像素间距，避免重叠。
-- 视觉用程序绘制占位图形：玩家蓝色、敌方红色，包含血条与单位名称。
-- 战斗场景不直接修改 `PartyData.member_unit_ids` 或 `UnitData.current_hp`。
+- 双方战斗保持进攻方左侧、防守方右侧；多方战斗把额外战斗侧放在战场上下区域，避免重叠。
+- 每个 `UnitController` 只接收其他战斗侧的控制器作为敌人；同侧单位不会互相攻击。
+- 战斗开始后，玩家侧优先选择 `UnitData.is_player_character == true` 的单位作为当前控制对象；旧存档没有玩家角色时退化到第一名存活友军。
+- 只有当前控制单位使用玩家输入；其他友军继续 AI。
+- 玩家角色被击败后弹出控制权转移面板，可接管任意存活友军或进入观战。
+- `command_player_units()` 保留为旧测试/调试用的整队移动入口，正式输入不再调用它。
+- 表现由 `UnitActor` + `UnitVisual` 组成；`UnitVisual` 统一组合 `HumanVisual`（人物）与 `HorseVisual`（马匹），两类贴图分别管理。
+- 最终层级集中在 `VisualLayers`，前→后为：武器 → 马头 → 缨饰 → 人头 → 人身体/罩袍 → 人右腿 → 马鞍 → 四条独立马腿 → 马身体 → 人左腿 → 影子。本阶段把四条马腿移到马身体之前。血条/名称/选中圈由 `UnitActor` 绘制在部件之上。
+- 人体双腿始终创建，骑乘时不隐藏；四个马腿是独立 Sprite2D。
+- 人物影子与骑马影子互斥：步行显示人物影子，骑乘显示骑马影子；马匹表现组整体按骑乘状态显隐。
+- 骑乘时 `HumanVisual.position.y = -15`，人物整体上移 15 像素；`HorseVisual` 与 `UnitActor` 世界坐标不变，碰撞/攻击/移动/队形不受影响。
+- 步兵/骑兵拥有独立待机与移动动画：
+  - 步兵双腿挂载在人物身体变换节点下，先继承身体整体位移/旋转，再叠加极小的局部步态（`RUN_LEG_SWING_X=0.2`、`RUN_LEG_LIFT_Y=0`、`RUN_LEG_ROTATION=0.005`）；身体起伏/倾斜是主要动态。
+  - 待机时身体轻微起伏、头部独立微摆、武器轻微晃动；影子保持稳定。
+  - 马匹移动改为跃马式：两只前腿成组向前伸、两只后腿成组向后伸，随后两组同步收缩；组内只保留 `0.12 rad` 的极小错位，不再使用人类式左右交替步态。
+  - 四条马腿挂载在马身 rig 下，先继承马身整体跃动/俯仰/缩放，再叠加 `0.6 px` 伸展与 `0.02 rad` 局部旋转；上下位移为 `0`。
+  - 马身随伸展/收缩上下起伏、前后俯仰并轻微拉伸/压缩；马头独立摆动；马身整体跃动仍是主要动态，跑动起伏已下调到 `4.2`。
+  - 骑马影子位置与层级不变；马匹抬高时按比例轻微缩小（最多 4%）并变淡（最多 15%），回落时恢复。
+  - 人物与马匹周期同步（待机 2.4s、跑动 0.50s），影子稳定。动画由实际位移速度驱动（8 px/s 阈值、0.12s 缓冲、0.18s 混合），攻击动画优先。
+- 长矛攻击阶段：前摇 `0.14s`（沿攻击反方向后移 `2.5 px` 并旋转到攻击方向）→ 戳击 `0.14s`（沿攻击方向前伸 `6.0 px`）→ 保持 `4.0s`（`SPEAR_POST_ATTACK_HOLD_TIME`，可按 3–5 秒调整）→ 平滑恢复 `0.35s`。连续攻击会立即重新开始并重置保持时间；保持期间移动/待机不会覆盖长矛角度或前伸位置。
+- 伤害仍在攻击触发时即时结算，动画只影响表现；前摇/戳击不改变攻击方向、距离、冷却或目标有效性。
+- 阵营外观通过独立罩袍层区分：现有占位身体贴图的蓝色罩袍区域由 `Shaders/faction_tabard.gdshader` 按阵营着色，黑色描边与白色十字保留；没有为每个阵营复制整套士兵贴图。
+- 长矛使用独立枢轴（48×96 素材，左下角 `(24,18)`；当前 48×96 身体映射到画布 `(9,-14)`）。攻击方向由攻击逻辑给出，长矛旋转到对应世界方向；朝右时由人物整体镜像指向目标。动画只影响表现，伤害仍即时结算。
+- `UnitActor.z_index` 必须高于战场背景（`BattleScene` 根节点在 z=0 绘制背景）；否则部件的相对负 z 会全部落到背景后面，出现“只有血条/名称/选中圈、没有士兵本体”的问题。
+- 当前 `art/` 没有独立缨饰素材，`UnitVisual` 保留 `Plume` 部件插槽，素材缺失时直接跳过。
+- 缺少任何素材时只跳过对应部件，单位仍会正常生成，不影响属性、碰撞、攻击范围与移动。
 
 ### 4.2 UnitController
 
 每个 `UnitActor` 配套一个 `UnitController`（RefCounted，由场景逐帧驱动）：
 
 - 属性全部来自 `UnitData`：`move_speed`、`attack_range`、`attack`、`attack_interval`。
-- 自动索敌：在 1000 像素内选择最近的存活敌人，目标死亡后重新选择。
-- 目标在攻击范围（`attack_range + 8` 容差）内时按 `attack_interval` 攻击。
-- 玩家左键点击地面：所有存活己方士兵移动到目标点附近；手动移动期间不主动攻击，到达后恢复自动索敌。
-- 敌方没有手动命令，始终自动接近并攻击。
-- 伤害只写 `BattleUnitState.battle_hp`；HP 归零后 `alive = false`，停止移动、攻击和受伤。
-- 死亡表现节点由场景移除，`BattleUnitState` 保留到结算。
+- 阶段 6 起兵种基础属性按三级体系配置（10/50、20/100、25/180），战斗代码不硬编码数值；骑马不改变 tier 或基础属性。
+- 攻击冷却 `_attack_cooldown`、当前目标 `_target`、移动状态 `_is_moving` 都属于攻击者自身；不存在目标级全局攻击锁。
+- AI 模式：搜索目标 → 接近 → 攻击 → 目标失效后重新搜索。AI 状态枚举 `AIState.SEEK / APPROACH / ATTACK` 对外可查询。
+  - 目标超出有效攻击区域时沿目标外围持续接近，不会在远距离执行攻击。
+  - 进入区域且冷却结束时攻击；冷却未结束时保持位置。
+  - 目标离开区域重新追击；目标死亡或失效后重新选择。
+- 玩家模式（`player_tick`）：
+  - WASD 方向移动，斜向输入归一化；
+  - 不执行 AI 索敌与自主移动；
+  - 鼠标左键 `player_attack_at()` 用鼠标世界坐标确定 360°攻击方向，只选择该方向矩形内的一个敌人；
+  - 自由攻击：没有有效目标时也会播放完整攻击动画并进入 `attack_interval` 冷却，只是不造成伤害；返回值表示“攻击动作是否释放”，命中情况由 `get_last_attack_target_id()` 区分；
+  - 冷却期间点击不释放动作；无敌人时仍按正常攻击间隔出手。
+- 一次攻击只命中一个目标；伤害只写选中目标 `BattleUnitState.battle_hp`；HP 归零后 `alive = false`。
+- 攻击开始后锁定本次方向与目标；只有前摇/戳击阶段锁定人物朝向，攻击后保持阶段允许移动与转身。
+- 受击表现与伤害结算分离：当前没有受击硬直/受击锁，多个攻击者可以在同一帧内分别对同一目标造成伤害。
+- 玩家控制权切换只改变 `is_player_controlled` 与当前控制 ID，不复制单位、不重置 HP/经验/装备/冷却。
+- 战斗移动速度：步兵 = `UnitData.move_speed × 0.6`；骑乘 = `UnitData.move_speed × 0.84`，集中在 `UnitController` 的两个常量中。玩家/AI 共用，大地图部队速度与 UnitData 本身不受影响。
+- 实体碰撞与局部避让共同解决重叠：最小中心间距 `28`，死亡单位不参与。
+
+### 4.2.1 统一攻击有效性（`CombatRules`）
+
+玩家与 AI 必须共用 `Scripts/Systems/Combat/combat_rules.gd`，不得各自硬编码距离：
+
+```text
+攻击有效 ⇔ 攻击者存活
+        ∧ 目标存活
+        ∧ 双方属于不同战斗侧
+        ∧ 攻击者冷却结束
+        ∧ 目标在沿攻击方向旋转的矩形内
+
+矩形长度 = 最终 attack_range + 2 × BODY_RADIUS(26) + WEAPON_FORWARD_BONUS(6)
+矩形横向半宽 = 22
+前向投影 < 0 的目标（背后）永远排除
+```
+
+- `attack_range` 使用 `UnitData` 的最终属性；如果装备了 `weapon_attack_range > 0` 的 WEAPON，则以武器距离覆盖单位基础距离，其他装备的 `attack_range_bonus` 继续叠加。
+- 默认长矛/空手使用 UnitConfig 的 `attack_range`；`weapon_sword_01` 当前配置为 14。
+- 攻击矩形按方向旋转，不是完整圆形；一次攻击最多命中一个目标。
+- `CombatRules` 只决定“是否命中/造成伤害”，不阻止玩家释放攻击动作：玩家空挥仍然播放动画与冷却。
+- 玩家方向来自鼠标世界坐标；AI 方向来自攻击者→目标。背向矩形/横向宽度外/前向长度外的目标不会被命中。
+- 玩家与 AI 的武器动画使用同一锁定方向；动画只影响表现，伤害仍即时结算。
+- 多名友军可以同时攻击同一敌人；攻击冷却只属于攻击者，不存在目标级锁。
+- 骑乘移动攻击加成由 `StatCalculator.compute_effective_attack()` 统一提供。
+
+### 4.3 队形与局部避让
+
+- `FormationManager` 负责局部坐标队形槽位：
+  - `INFANTRY_LINE`：横向展开，超过 5 列自动增加纵深层数；
+  - `DEPTH`：单列纵深；
+  - `LOOSE`：更大间距的松散网格；
+  - `INFANTRY_SQUARE` / `ARCHER_LINE` / `CAVALRY_WEDGE` 保留扩展。
+- `BattleScene` 每 0.4 世界/物理秒刷新队形：
+  - 按战斗侧计算最近敌方侧与双方质心；
+  - 两军在中点附近列阵，避免阵型中心互换；
+  - 同一侧的多支部队使用 `PARTY_LANE_SPACING` 分配独立 lane；
+  - 为每个单位写入 `UnitController.formation_slot`。
+- `BattleScene` 每 0.3 秒构建局部邻居缓存（`NEIGHBOR_RADIUS`），避免每个单位逐帧遍历全场。
+- 队形间距按部队内是否有骑乘单位选择：步行 `34`，存在骑乘单位时 `46`，避免马匹部件明显重叠。
+- `UnitController` 移动时叠加分离力（Separation），并保持向队形槽位的凝聚力。
+- 进入射程后停止推进并攻击；未进入射程时，进攻点取“目标外围 + 自身队形槽位方向”，让多名单位分散在目标周围，而不是全部挤向同一个中心坐标。
+- 目标周围位置不足时，局部避让会让单位互相推开；当前没有显式的“攻击槽位等待/重新分配”，也没有寻路、地形阻挡与复杂包围/冲锋战术。
+- 未来键盘部队指令接口：`set_party_move_order()` / `clear_party_move_order()` / `set_party_formation()`。
+
+### 4.3.1 移动速度、初始部署与实体碰撞
+
+- 战斗移动速度系数集中在 `UnitController`：
+  - 步兵 `BATTLE_MOVE_SPEED_MULTIPLIER = 0.6`：民兵 60→36；职业步兵 55→33；玩家角色 75→45（保持不变）；
+  - 骑乘 `BATTLE_MOUNTED_MOVE_SPEED_MULTIPLIER = 0.84`：民兵 85→71.4；职业步兵 80→67.2；玩家角色 100→84；
+  - 只影响战斗场景，不修改 UnitConfig 或 `UnitData.move_speed`，也不影响大地图 `PartyData.movement_speed`。
+- 初始部署边距集中在 `BattleScene.SPAWN_MARGIN_X = 160`（上一版 220）；双方质心间距约 906（上一版约 786）。所有单位仍在 1280×720 战场边界内，多侧部署复用同一常量，不改变双方内部阵型与 Party Lane。
+- 实体碰撞：
+  - `UnitController.MIN_BODY_DISTANCE = 28`，在 tick/player_tick 开始处执行 2 次最小间距推开；
+  - 与局部避让（Separation）协同；局部避让负责提前调整方向，硬间距作为最后空间约束；
+  - 死亡单位跳过，不阻挡其他单位；碰撞不改变伤害、攻击范围或队形目标。
+- 屏幕显示：项目窗口/Viewport 1920×1080，Stretch 关闭（原生像素）；战斗相机通过 `SceneCameraRig` 使用统一视野基准 `960×540`（1920×1080 下为 2 倍缩放），并向下偏移 30；大地图相机默认 1.5 倍。
+- 战斗摄像机默认平滑跟随当前玩家控制单位；切换控制权后自动跟随新单位；观战时保持当前位置。`F` 切换自由视角，WASD/方向键移动镜头，自由视角不移动角色；镜头受战场 `1280×720` 边界限制。
+
+### 4.4 玩家角色与当前控制权
+
+区分两个概念：
+
+- **玩家角色身份**：`UnitData.is_player_character`，持久化，表示新游戏创建的主角 Unit。
+- **当前控制权**：`BattleScene._controlled_unit_id`，运行时状态，可切换到任意存活友军。
+
+初始控制：
+
+1. 在玩家侧寻找存活且 `is_player_character == true` 的单位。
+2. 找不到时退化到玩家侧第一名存活单位（兼容旧存档）。
+
+玩家角色被击败：
+
+1. 停止玩家输入与自主攻击/移动。
+2. 战斗场景本地暂停（`_scene_paused`），不触碰 TimeManager。
+3. 若同侧还有存活友军，弹出控制权转移面板：
+   - 显示姓名 / 兵种 / 等级 / 剩余 HP；
+   - 选择一名友军接管，或进入观战。
+4. 接管只切换 `is_player_controlled` 与当前控制 ID；不复制数据、不重置 HP/经验/装备/冷却。
+5. 若没有存活友军，进入观战/战败流程，由战斗侧胜负判定结算。
+6. 观战模式下所有单位由 AI 控制，WASD 与左键不再生效。
+
+控制权不改变阵营、所属部队与 UnitData 身份；同一时间只有一个 `is_player_controlled` 单位。
 
 ## 5. 数据权威
 
@@ -125,76 +313,206 @@ BattleScene (Node2D)
 
 ### 6.1 胜负条件
 
-- 防守方全部死亡 → `ATTACKER_VICTORY`（玩家胜利）。
-- 进攻方全部死亡 → `DEFENDER_VICTORY`（玩家失败）。
-- 双方同时为 0 → `DRAW`。
-- 场景显示结果面板；玩家点击“返回大地图”后才执行结算。
+- 按战斗侧统计存活单位：只剩 side 0 → `ATTACKER_VICTORY`，只剩 side 1 → `DEFENDER_VICTORY`。
+- 只剩其他战斗侧 → `SIDE_VICTORY`，`winning_side_index` 记录实际获胜侧。
+- 所有侧都无存活单位 → `DRAW`。
+- 玩家主动撤退 → `RETREATED`，不视为全员阵亡。
+- 玩家角色被击败但同侧仍有友军时，战斗继续；只有玩家所在侧全部失去战斗能力才判定失败。
+- 场景根据玩家所在侧显示“胜利/失败/平局/已撤退”，不假设玩家固定为 attacker。
+- 场景显示结果面板；玩家点击“返回大地图”时执行最终结算。
 
 ### 6.2 结算顺序
 
 1. 校验 `current_battle` 与 `battle_id`，防止重复结算。
-2. 对每个 `BattleUnitState`：
+2. 根据结果确定获胜/失败侧，生成 `BattleResultData`（预览或最终）。
+3. 基于战斗中的 `BattleUnitState` 统计各部队阵亡/存活。
+4. 结算经验：存活单位基础经验 + 获胜侧额外经验；通过 `UnitManager.add_exp()` 升级。
+5. 结算奖励：仅玩家参与且玩家所在侧获胜时，生成金币/装备战利品并写入 `PlayerProfile`。
+6. 对每个 `BattleUnitState`：
    - 存活：`UnitData.current_hp = battle_hp`（clamp 到 `[0, max_hp]`）。
    - 阵亡：`current_hp = 0`，经 `PartyManager.remove_member()` 清空归属，再 `UnitManager.remove_unit()` 删除数据，广播 `unit_died`。
-3. 解锁双方部队，清空当前命令。
-4. 清理 `BattleSession`（`current_battle = null`）。
-5. 移除 `battle` 暂停原因，恢复此前世界时间状态。
-6. 广播 `battle_finished`。
-7. 场景控制器切换回大地图。
+7. 解锁部队：有存活成员的恢复为 `AVAILABLE`，全员阵亡的置为 `DISABLED`；清空当前命令与移动目标。
+8. 将 `BattleResultData` 标记为 finalized，保存到 `session.final_result`；清理 `current_battle`。
+9. 移除 `battle` 暂停原因，恢复此前世界时间状态；广播 `battle_finished`。
+10. 场景控制器切换回大地图。
 
 阵亡单位不会以“0 HP 但仍属于部队”的形式残留；存活单位保留原 `unit_id` 与成员关系。
+同一场战斗只能结算一次，重复调用不会再次发经验或奖励。
 
-### 6.3 防守方全灭后的部队
+### 6.3 经验与奖励规则
 
-- 部队本身保留在大地图，但成员为空。
-- 空部队不再触发交互，避免战斗结束后立即重复弹出对话。
-- 战利品、俘虏与部队解散规则留待后续阶段。
+| 项目 | 规则 |
+|---|---|
+| 存活经验 | 参战且存活：+10 |
+| 获胜额外经验 | 获胜侧存活单位再 +20 |
+| 阵亡经验 | 0 |
+| 中止战斗 | 不发放经验 |
+| 撤退 | 存活单位仅获得基础经验，无获胜奖励 |
+| 金币 | 玩家参与且获胜：50 + 敌方阵亡人数 × 5 |
+| 战利品 | 从阵亡敌方单位装备中取最多 3 件唯一装备 ID |
+| 玩家未参与 | NPC 对 NPC 战斗只发经验，不发玩家奖励 |
+
+经验与奖励集中配置在 `BattleManager` 常量中；同一场战斗只应用一次。
+
+### 6.4 防守方全灭后的部队
+
+- 部队本身保留在大地图，但成员为空，`battle_state = DISABLED`。
+- 空部队不再触发交互，也不执行大地图 AI，避免战斗结束后重复弹出对话或继续巡逻。
+- 玩家部队若全员阵亡同样变为 `DISABLED`，目前尚无逃脱/被俘/重开流程（KI122）。
+- 撤退单位不会从部队中移除；其 `BattleParticipant.status = WITHDRAWN`，结算后仍为存活成员。
+
+### 6.5 撤退与结果面板
+
+- `BattleScene` 为玩家提供“撤退”按钮：标记玩家侧撤退、停止战斗推进、显示“已撤退”结果。
+- 返回大地图时调用 `finish_battle(RETREATED)`：存活单位写回 HP，不产生阵亡，不发胜利奖励。
+- `BattleManager.retreat_side(side_index)` 供未来 AI/指令复用；离屏战斗会立即结算为 RETREATED。
+- 结果面板显示：胜利/失败/平局/已撤退、各战斗侧名称、我方与敌方存活/阵亡、玩家经验、金币与战利品。
+- 结果面板适配多方战斗，按战斗侧逐行展示。
+- 玩家角色被击败但友军存活时先进入控制权转移/观战，不会直接判负。
 
 ## 7. 战斗期间的世界与存档
 
 - 屏幕内战斗压入 `battle` 暂停原因，WorldTime = 0；战斗场景用物理帧独立推进。
+- 玩家遭遇对话使用独立的 `encounter_dialogue` 暂停原因；进入战斗后移除，战斗暂停接管。
 - `WorldContext` 在战斗期间保持存在，参战部队锁定。
 - `GameManager.save_game()` 在 `current_battle != null` 时返回 `ERR_BUSY`，禁止战斗中存档。
 - `BattleSession` 不进入存档；不改变存档 Schema。
 
-## 8. 援军（TODO 阶段 6）
+## 8. 中途加入
 
 ```text
 其他部队进入战斗区域
-  → 检查距离 / 阵营 / 支援条件
-  → BattleManager.add_reinforcement(party_id, battle_id)
-      ├── 部队锁定
-      ├── 生成 BattleUnitState
-      ├── 加入 session
-      └── 通知 BattleScene 生成援军单位
+  → 检查距离 <= JOIN_RADIUS(60) 且部队可用、未参战、有存活士兵
+  → get_join_side(party_id) 根据 FactionManager 关系选择战斗侧
+      ├── 对某侧所有成员均无敌对关系，且对另一侧存在敌对 → 加入该侧
+      ├── 对现有所有侧都敌对 → 新建独立战斗侧
+      └── 与任何一方都没有敌对关系 → 不加入
+  → try_join_battle(party_id)
+      ├── 部队锁定为 IN_BATTLE
+      ├── 为存活成员创建 BattleUnitState
+      ├── 加入 participants / side_unit_ids
+      ├── 玩家加入时转换为屏幕战斗（暂停世界；由加入/离开交互面板触发）
+      └── EventBus.battle_participant_joined
 ```
 
-当前 `add_reinforcement()` 返回 `false`。
+- `BattleManager.add_reinforcement(party_id, battle_id)` 复用 `try_join_battle()`。
+- 同一部队不能同时参与两场战斗；`current_battle` 全局只允许一个会话。
+- AI 的 `_try_respond_to_battle()` 会先接近附近可加入的离屏战斗，再执行自身追击/巡逻逻辑。
 
-## 9. 离屏战斗（待确认）
+## 9. 离屏战斗（按游戏小时结算）
 
-玩家未参与的 AI 对 AI 战斗尚未实现。建议后续自动结算，不加载 `BattleScene`，使用 `TimeManager.set_battle_mode(true)` 的 0.5 倍速覆盖继续推进世界；该方案仍待确认。
+玩家未参与的 NPC 对 NPC 战斗不创建小地图场景，使用 `BattleSession` + `BattleUnitState` 数据模拟：
+
+- `start_battle(..., offscreen = true)` 不压入 `battle` 暂停，世界继续推进。
+- `WorldSimulation.on_world_tick` 调用 `BattleManager.tick(delta)`；累计满 1 个游戏小时
+  （`OffscreenBattleConfig.settlement_interval_world_seconds = 6` 世界秒）后执行一次伤亡结算。
+- 只有 `offscreen == true` 的战斗会推进小时结算；屏幕战斗期间世界暂停，两者互斥。
+- 每次结算都写入 `BattleUnitState`；阵亡单位立即从 `PartyData.member_unit_ids` 移除，但 `UnitData` 保留到最终结算，避免提前丢失战利品与阵亡事件；最终统一走 `finish_battle()` 写回、删除阵亡单位、发放经验/奖励并解锁部队。
+- 同一场战斗只结算一次；达到一方全灭、平局或 48 小时安全上限时结束。
+- 战斗期间参战部队锁定在大地图上，第三方可以接近并中途加入。
+- 玩家靠近可加入的离屏战斗时，先弹出“加入/离开”交互面板：
+  - 加入：`try_join_battle()` 加入已有战斗，`offscreen` 切换为 false，保留已发生的伤亡与剩余 HP，进入 `BattleScene`；
+  - 离开：不参战，NPC 战斗继续，玩家停留在当前位置。
+- 玩家加入后 `BattleManager.tick()` 立即跳过该会话，不会重复结算当前小时。
+- 玩家被主动拦截时先进入强制遭遇对话；选择战斗后创建屏幕战斗并由 WorldMap 切换场景。
+- `battle_started` 信号仍用于其他屏幕战斗入口的自动场景切换；`battle_participants_updated` 在每次小时结算后广播，供大地图战斗面板刷新人数。
+
+### 9.1 小时伤亡公式
+
+公式集中在 `Scripts/Systems/Combat/offscreen_battle_resolver.gd`，参数在
+`Scripts/Config/offscreen_battle_config.gd` 与 `Data/Combat/offscreen_battle_default.tres`：
+
+```text
+单兵战力 = (攻击 × attack_power_weight + 最大生命 × hp_power_weight)
+          × (1 + (tier - 1) × tier_power_bonus_per_level)
+          × (骑乘 ? 1 + mounted_power_bonus : 1)
+          × 剩余生命比例
+
+战斗侧战力 = 该侧全部存活单位战力之和
+敌方压力比 = 敌方总战力 / (己方总战力 + 敌方总战力)
+
+每小时伤亡比例 = 基础伤亡比例 × clamp(敌方压力比 × pressure_scale,
+                                        min_pressure_factor,
+                                        max_pressure_factor)
+                 × 随机波动
+```
+
+- 伤亡按小数累计（`offscreen_casualty_credit`），小部队不会每小时固定损失同一数量。
+- 战力较低的单位更可能被选中阵亡；等级、生命、骑乘状态与剩余战力都会影响结果。
+- 随机波动默认 ±30%；相同配置可以通过 `random_seed` 复现。
+- 多战斗侧时，敌方压力来自所有其他战斗侧的战力之和。
+- 伤亡数不会超过该侧当前存活人数，HP 不会降为负数。
+
+### 9.2 结束与结果
+
+- 每次小时结算后检查存活战斗侧：
+  - 只剩一个侧 → 该侧获胜；
+  - 所有侧均无存活单位 → 平局；
+  - 达到 `max_settlement_hours`（默认 48）仍有多侧存活 → 比较剩余总战力，最高者获胜；并列则平局。
+- 结束统一调用 `finish_battle()`，生成 `BattleResultData`，写回存活 HP、移除阵亡单位、发放经验与玩家奖励（仅玩家参与且获胜）。
+- 离屏战斗的胜负侧索引仍然写入 `winning_side_index`；0/1 使用旧 `ATTACKER_VICTORY` / `DEFENDER_VICTORY`，其他侧使用 `SIDE_VICTORY`。
 
 ## 10. 实现状态
 
 | 项 | 状态 |
 |---|---|
 | `BattleSession` / `BattleUnitState` | 已实现 |
-| `BattleManager.start_battle` | 已实现（校验、锁定、会话） |
-| `BattleManager.finish_battle` | 已实现（HP 写回、阵亡移除、解锁、防重复） |
-| 大地图部队对话 UI | 已实现 |
-| 战斗场景与士兵生成 | 已实现（占位图形） |
-| 玩家点击移动命令 | 已实现 |
+| `BattleParticipant` / 多战斗侧数据 | 已实现 |
+| `BattleManager.start_battle` | 已实现（校验、锁定、会话，支持 offscreen） |
+| `BattleManager.start_battle_by_sides` | 已实现（任意战斗侧） |
+| `BattleManager.finish_battle` | 已实现（BattleResult、HP 写回、阵亡移除、经验/奖励、解锁、防重复） |
+| `BattleResultData` 统一结果 | 已实现（胜负/伤亡/经验/奖励/结束原因/finalized） |
+| 玩家角色 Unit | 已实现（`player_hero`，普通 UnitData/StatCalculator/装备） |
+| 统一攻击有效性 `CombatRules` | 已实现（存活/敌对/冷却/射程统一判断） |
+| 多人围攻同一目标 | 已实现（攻击冷却属于攻击者，无目标级攻击锁） |
+| WASD 移动 / 鼠标攻击 | 已实现（斜向归一化、自由空挥、攻击间隔、360°方向矩形与阵营校验） |
+| AI 搜索/接近/攻击/重新索敌 | 已实现（`AIState`，方向矩形外不攻击，外围进攻点分散站位） |
+| 武器攻击距离 | 已实现（WEAPON.weapon_attack_range 覆盖单位基础射程；长矛前向 +6） |
+| 单次攻击单目标 | 已实现（矩形内只选一个；其他目标不受伤） |
+| 实体碰撞 | 已实现（最小中心间距 28 + 局部避让；死亡单位不阻挡） |
+| 战斗降速 / 初始部署 | 已实现（步兵 0.6、骑乘 0.84；部署边距 160 / 质心间距约 906） |
+| 1920×1080 / 战斗相机 | 已实现（原生 Viewport；战斗相机 2 倍缩放） |
+| 步兵/骑兵待机/移动动画 | 已实现（腿部挂载身体并继承整体变换；马身整体跃动为主且幅度下调、马腿辅助动作适度增大；骑马影子随抬升轻微缩小/变淡） |
+| 控制权转移 / 观战 | 已实现（存活友军列表、本地 SceneTime 暂停；列表区分骑乘） |
+| 基础队形 / 局部避让 | 已实现（LINE/DEPTH/LOOSE，队形槽位 + separation + 周期邻居缓存；骑乘加宽间距） |
+| 临时部件美术 / 阵营罩袍 | 已实现（`UnitVisual` + 实际 PNG；罩袍着色器；缺少缨饰素材时安全回退） |
+| 人物/马匹分组与最终层级 | 已实现（PartVisual/HumanVisual/HorseVisual + VisualLayers） |
+| 骑乘 15 像素偏移 | 已实现（仅 HumanVisual 上移；马匹与 UnitActor 不变） |
+| 长矛攻击/保持/恢复动画 | 已实现（0.14s 前摇后移、0.14s 方向戳击、360°方向、保持 4 秒、0.35 秒恢复；即时伤害不变） |
+| 人物/骑马影子互斥 | 已实现（按骑乘状态切换） |
+| 多支友军参战分区 | 已实现（party lane） |
+| 撤退 / 结果面板 | 已实现（撤退按钮、RETREATED、伤亡/经验/奖励展示） |
+| 战后经验 / 金币 / 战利品 | 已实现（仅玩家获胜；写入 PlayerProfile） |
+| 中途加入 / 独立第三方 | 已实现（关系判定 + 距离校验） |
+| 大地图部队对话 UI | 已实现（中立/友好部队） |
+| 玩家被主动拦截遭遇对话 | 已实现（双方遭遇，战斗/撤退） |
+| 统一大地图遭遇距离 | 已实现（50，`EncounterManager`） |
+| 玩家接近离屏战斗加入/离开 | 已实现（`battle_encounter_dialogue`） |
+| 战斗场景与士兵生成 | 已实现（UnitVisual 临时部件，支持多侧） |
+| 玩家单角色控制 | 已实现（其余友军 AI） |
+| 同侧不互相攻击 | 已实现（按战斗侧构建敌人列表） |
 | 自动索敌 / 移动 / 攻击 / 死亡 | 已实现 |
 | 单场战斗禁止存档 | 已实现 |
-| 援军 | TODO(阶段6) |
-| 离屏 AI 对 AI 结算 | 未实现 |
-| 阵型、骑兵冲锋、远程弹道、士气 | 未实现 |
+| 离屏 AI 对 AI 按小时结算 | 已实现（每游戏小时伤亡、战力/等级/骑乘/随机、48 小时上限） |
+| 战斗摄像机跟随/自由视角 | 已实现（共享 `SceneCameraRig`，F 切换，战场边界） |
+| 玩家中途加入离屏战斗 | 已实现 |
+| 复杂阵型、骑兵冲锋、远程弹道、士气 | 未实现 |
 
 ## 11. 待确认
 
 - 屏幕内战斗 WorldTime 采用 0（当前）还是 0.5（D008 初版方案）。
 - 玩家战败后的处理（逃脱 / 被俘 / 损失）。
 - 战斗胜负条件是否加入撤退与时间限制。
-- 援军加入距离与最大参战人数。
+- 离屏战斗的长期平衡、伤兵/俘虏与士气；当前只有阵亡，没有伤兵。
+- 最大参战部队/战斗侧数量与同屏单位上限。
+- 遭遇对话是否扩展谈判、逃跑、缴赎等选项（当前明确不做）。
+- 玩家角色永久阵亡后的复活/继承/重开流程尚未设计。
+- AI 主动撤退、追击撤退方与俘虏规则。
+- 队形参数（间距、lane、转向）的平衡与更复杂战术队形。
+- 目标周围攻击槽位的显式分配与“位置不足时等待”策略（当前靠外围进攻点 + 局部避让）。
+- 是否加入攻击前摇、受击硬直与正式攻击/受击动画；当前为即时命中，长矛动画是纯视觉表现，不是伤害前摇。
+- 长矛前摇/戳击/保持/恢复时长、待机/跑动幅度与最终美术的平衡；马腿已改为前后成组跃马，但仍为程序化 Sprite 动画，不是骨骼/逐帧动画。
+- 部队面板预览的尺寸、缩放与装备差异化外观。
+- `art/` 尚未提供独立缨饰与独立罩袍贴图；当前罩袍使用身体贴图蓝色区域着色，缨饰部件插槽为空。
+- 战利品/装备物品栏 UI 与经济系统。
 - 阵亡单位是否永久删除，或转为伤兵/俘虏数据。

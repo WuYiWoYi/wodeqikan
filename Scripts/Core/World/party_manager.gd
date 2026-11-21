@@ -140,6 +140,15 @@ func get_units_of_party(party_id: String) -> Array[UnitData]:
 	return _unit_manager.get_units_of_party(party)
 
 
+## 当前部队所有成员的每日工资总额。无效成员引用会被跳过。
+## 本阶段只统计与展示，不执行定期扣除。
+func get_total_wage(party_id: String) -> int:
+	var total: int = 0
+	for unit: UnitData in get_units_of_party(party_id):
+		total += maxi(0, unit.wage)
+	return total
+
+
 func get_all_parties() -> Array[PartyData]:
 	var result: Array[PartyData] = []
 	for value: Variant in _parties.values():

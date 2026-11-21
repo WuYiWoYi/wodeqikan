@@ -56,8 +56,8 @@ func _run() -> void:
 
 	var characters := _battle_scene.get_node("World/Characters") as Node2D
 	var actors := characters.get_children()
-	_check(_battle_scene.get_actor_count() == 10, "生成 10 个士兵表现实例")
-	_check(actors.size() == 10, "场景节点数量与参战单位一致")
+	_check(_battle_scene.get_actor_count() == 12, "生成 12 个士兵表现实例")
+	_check(actors.size() == 12, "场景节点数量与参战单位一致")
 
 	var seen_positions: Array[Vector2] = []
 	var seen_ids: Dictionary = {}
@@ -90,10 +90,74 @@ func _run() -> void:
 		seen_positions.append(position)
 
 	_check(correct_names, "每个实例关联唯一且正确的 unit_id")
-	_check(seen_ids.size() == 10, "10 个 unit_id 各不相同")
+	_check(seen_ids.size() == 12, "12 个 unit_id 各不相同")
 	_check(correct_sides, "玩家与敌方阵营识别正确")
-	_check(seen_positions.size() == 10, "生成位置互不重叠")
-	_check(player.member_unit_ids.size() == 5, "战斗不修改玩家成员关系")
+	_check(seen_positions.size() == 12, "生成位置互不重叠")
+
+	# 初始部署距离、边界与 1920×1080/2 倍相机。
+	var attacker_centroid := Vector2.ZERO
+	var defender_centroid := Vector2.ZERO
+	for unit_id: String in _session.attacker_unit_ids:
+		attacker_centroid += _session.get_unit_state(unit_id).battle_position
+	for unit_id: String in _session.defender_unit_ids:
+		defender_centroid += _session.get_unit_state(unit_id).battle_position
+	attacker_centroid /= float(_session.attacker_unit_ids.size())
+	defender_centroid /= float(_session.defender_unit_ids.size())
+	_check(
+		attacker_centroid.distance_to(defender_centroid) > 850.0,
+		"敌我初始部署距离进一步增加"
+	)
+	var all_inside: bool = true
+	for unit_id: String in _session.get_all_unit_ids():
+		var position := _session.get_unit_state(unit_id).battle_position
+		if not Rect2(Vector2.ZERO, Vector2(1280.0, 720.0)).has_point(position):
+			all_inside = false
+	_check(all_inside, "所有单位都在战场边界内")
+	var battle_camera := _battle_scene.get_node("Camera2D") as Camera2D
+	var expected_zoom: float = 1.0
+	if battle_camera != null:
+		expected_zoom = SceneCameraRig.compute_unified_zoom(
+			battle_camera.get_viewport().get_visible_rect().size
+		)
+	_check(
+		battle_camera != null and is_equal_approx(battle_camera.zoom.x, expected_zoom),
+		"战斗相机使用统一视野缩放"
+	)
+	_check(
+		is_equal_approx(SceneCameraRig.compute_unified_zoom(Vector2(1920.0, 1080.0)), 2.0),
+		"1920×1080 下统一视野为 2 倍（960×540）"
+	)
+	_check(
+		int(ProjectSettings.get_setting("display/window/size/viewport_width")) == 1920
+			and int(ProjectSettings.get_setting("display/window/size/viewport_height")) == 1080,
+		"项目目标分辨率为 1920×1080"
+	)
+	# headless 的根 Viewport 尺寸不保证等于窗口尺寸，实际分辨率由非 headless 探针截图验证。
+
+	var mounted_visual_found: bool = false
+	var all_visuals_above_background: bool = true
+	var all_bodies_loaded: bool = true
+	for child: Node in actors:
+		var actor := child as UnitActor
+		if actor == null or actor.visual == null:
+			continue
+		if actor.z_index <= 0:
+			all_visuals_above_background = false
+		if not actor.visual.has_part("Body") or not actor.visual.has_part("Head"):
+			all_bodies_loaded = false
+		for part_name: Variant in actor.visual.get_parts().keys():
+			var part := actor.visual.get_part(str(part_name)) as Sprite2D
+			if part == null or not part.is_visible_in_tree():
+				continue
+			if actor.z_index + actor.visual.get_part_effective_z(str(part_name)) <= 0:
+				all_visuals_above_background = false
+		if actor.unit_data != null and actor.unit_data.is_mounted:
+			if actor.visual.has_part("MountBody") and actor.visual.has_part("LegLeft"):
+				mounted_visual_found = true
+	_check(all_bodies_loaded, "每个士兵都加载了身体与头部贴图")
+	_check(all_visuals_above_background, "士兵部件实际 z 高于战场背景")
+	_check(mounted_visual_found, "骑乘士兵生成马匹部件并保留人体双腿")
+	_check(player.member_unit_ids.size() == 7, "战斗不修改玩家成员关系")
 	_check(enemy.member_unit_ids.size() == 5, "战斗不修改敌方成员关系")
 
 	for unit_id: String in _session.get_all_unit_ids():
@@ -156,7 +220,7 @@ func _run() -> void:
 	var result_label := _battle_scene.find_child("BattleResultLabel", true, false) as Label
 	_check(result_panel != null and result_panel.visible, "一方全灭后显示战斗结果")
 	_check(result_label != null and result_label.text == "战斗胜利", "敌方全灭判定为胜利")
-	_check(_battle_scene.get_actor_count() == 5, "死亡士兵表现实例已移除")
+	_check(_battle_scene.get_actor_count() == 7, "死亡士兵表现实例已移除")
 
 	var surviving_id: String = _session.attacker_unit_ids[0]
 	var surviving_state := _session.get_unit_state(surviving_id)
@@ -176,7 +240,7 @@ func _run() -> void:
 	_check(surviving_unit != null and surviving_unit.current_hp == 12, "存活士兵写回剩余 HP")
 	_check(player.member_unit_ids.has(surviving_id), "存活士兵保留成员关系")
 	_check(player.battle_state == PartyData.BattleState.AVAILABLE, "玩家部队解锁")
-	_check(enemy.battle_state == PartyData.BattleState.AVAILABLE, "敌方部队解锁")
+	_check(enemy.battle_state == PartyData.BattleState.DISABLED, "敌方全员阵亡后失效")
 	_check(enemy.member_unit_ids.is_empty(), "阵亡敌方成员全部移出部队")
 	for unit_id: String in _session.defender_unit_ids:
 		_check(_context.unit_manager.get_unit(unit_id) == null, "阵亡单位数据已清理")
@@ -190,10 +254,10 @@ func _run() -> void:
 	restored.name = "BattleSceneRestoredContext"
 	add_child(restored)
 	_check(restored.load_from_save_data(save), "战后存档可恢复")
-	_check(restored.unit_manager.get_all_units().size() == 5, "战后存档只剩 5 名存活士兵")
+	_check(restored.unit_manager.get_all_units().size() == 17, "战后存档只剩 17 名存活士兵")
 	var restored_player := restored.party_manager.get_party(player.party_id)
 	_check(
-		restored_player != null and restored_player.member_unit_ids.size() == 5,
+		restored_player != null and restored_player.member_unit_ids.size() == 7,
 		"战后存档成员关系正确"
 	)
 	var restored_unit := restored.unit_manager.get_unit(surviving_id)

@@ -2,7 +2,7 @@
 
 **核心数据：** `Scripts/Entities/Party/party_data.gd`
 **核心逻辑：** `Scripts/Core/World/party_manager.gd`
-**状态：** 数据、成员管理（含转队与读档校验）、初始部队、大地图移动、部队遭遇对话与战斗锁定已实现；部队 AI 未实现
+**状态：** 数据、成员管理（含转队与读档校验）、四方阵营初始部队、大地图移动/跟随、遭遇对话、战斗锁定、AI 行为、部队管理面板（查看/上马/下马/晋升）、金币与工资统计、士兵美术预览已实现
 
 ---
 
@@ -28,10 +28,23 @@
 | `movement_speed` | float | 像素 / 游戏秒 |
 | `sight_range` | float | 视野半径 |
 | `member_unit_ids` | Array[String] | 成员单位 ID |
-| `current_order` | enum | NONE / MOVE / HOLD / INTERACT / BATTLE |
-| `current_target_id` | String | 交互或战斗目标 ID |
+| `current_order` | enum | NONE / MOVE / HOLD / INTERACT / BATTLE / FOLLOW_PARTY |
+| `current_target_id` | String | 跟随/追击目标部队 ID；战斗中也会被清空 |
 | `movement_state` | enum | IDLE / MOVING |
 | `battle_state` | enum | AVAILABLE / IN_BATTLE / RETURNING / DISABLED |
+| `ai_type` | enum | NONE / TRADE_ROUTE / PATROL / BANDIT / GUARD |
+| `ai_route_index` | int | 下一步要前往的路线点索引 |
+| `ai_route_settlement_ids` | Array[String] | 商队路线 / 强盗游荡点的 stable `settlement_id` 列表 |
+| `sight_range` | float | 视野半径；AI 与跟随可见性统一由 `VisionManager` 使用 |
+| `attack_intent` | bool | 运行时攻击/拦截意图，不进入存档；由 AIManager 维护 |
+| `focus_party_id` | String | 玩家主动追逐/接近的目标部队；运行时，不进入存档 |
+
+AI 字段规则：
+
+- `ai_type` / `ai_route_settlement_ids` 由 `WorldInitializer` 初始化；`ai_route_index` 由 `AIManager` 在到达路线点后推进。
+- 三者参与 `to_dict()` / `from_dict()`；旧存档缺失时默认为 `NONE` / `0` / 空数组。
+- 巡逻点由 `AIManager.PATROL_POINTS` 提供，不写入每个 `PartyData`，只持久化巡逻进度。
+- 不允许通过 `party_name` 判断 AI 行为。
 
 ## 3. 成员关系不变量
 
@@ -57,7 +70,8 @@ party.member_unit_ids.has(unit.unit_id)
 - 读档后由 `validate_membership_consistency()` 校验双向归属，见第 4.1 节。
 - 战斗期间参战部队 `battle_state = IN_BATTLE`，并停止大地图移动；结算后解锁。
 - 阵亡单位由 `BattleManager` 经 `PartyManager.remove_member()` 移除，再从 `UnitManager` 删除；存活单位保留成员关系。
-- 部队全员阵亡后 `PartyData` 保留但成员为空；空部队不再触发大地图交互。
+- 部队全员阵亡后 `PartyData` 保留但成员为空，`battle_state = DISABLED`；空部队不再触发大地图交互，也不执行 AI。
+- 大地图 AI 只处理非玩家、`AVAILABLE` 且未在移动的部队；行为类型来自 `ai_type`。
 
 ## 4. PartyManager API
 
@@ -72,6 +86,7 @@ party.member_unit_ids.has(unit.unit_id)
 | `transfer_member(unit_id, target_party_id) -> bool` | 转队，内部复用 `add_member` |
 | `remove_member(party_id, unit_id) -> bool` | 移除成员并清空归属；单位保留 |
 | `get_member_ids(party_id)` / `get_units_of_party(party_id)` | 获取成员 ID / 数据 |
+| `get_total_wage(party_id) -> int` | 汇总成员每日工资；只统计与展示，不自动扣除 |
 | `validate_membership_consistency() -> Array[String]` | 双向归属校验，空列表表示通过 |
 | `to_dict()` / `load_from_dict()` | 存档序列化；读档重复 ID 报错并跳过 |
 
@@ -91,11 +106,24 @@ party.member_unit_ids.has(unit.unit_id)
 
 Milestone 1 使用简单固定值：
 
-| 部队 | 初始位置 | 速度（像素/游戏秒） |
-|---|---|---|
-| 玩家部队 | (760, 620) | 300 |
-| 河畔商队 | (900, 1500) | 220 |
-| 北境巡逻队 | (2350, 1100) | 220 |
+| 部队 | 阵营 | 初始位置 | 速度（像素/游戏秒） | AI |
+|---|---|---|---:|---|
+| 玩家部队 | 玩家 | (760, 620) | 150 | 玩家控制 |
+| 河畔商队 | 商队 | (900, 1500) | 80 | `TRADE_ROUTE` |
+| 北境巡逻队 | 治安队 | (2350, 1100) | 120 | `GUARD` |
+| 山道强盗 | 强盗 | (1650, 900) | 100 | `BANDIT` |
+
+速度关系：治安队（120）> 强盗（100）> 商队（80），玩家保持 150。
+旧存档通过 `PartyData.movement_speed` 保留原速度；新常量只用于新游戏初始化。
+
+战斗场景的 `UnitController.BATTLE_MOVE_SPEED_MULTIPLIER = 0.6` 只作用于士兵战斗移动，不修改 `PartyData.movement_speed`，因此大地图部队移动速度与本次战斗降速相互独立。
+
+玩家点击移动中的部队会进入 `FOLLOW_PARTY`，每 0.5 世界秒读取目标最新位置；
+目标离开视野、进入战斗或消失时自动取消跟随。
+
+`attack_intent` 只在强盗/治安队明确追击某个敌对目标时置为 true；
+普通巡逻、普通移动、玩家跟随都不会设置该字段。大地图遭遇判定使用
+`attack_intent + current_target_id` 确认攻击意图是否指向对方。
 
 后续考虑：
 
@@ -128,19 +156,65 @@ Milestone 1 使用简单固定值：
 - 离开范围（64 像素）后才会再次触发，避免关闭后立即重开。
 - 对方或玩家没有士兵时，“发起战斗”按钮禁用。
 - 被击溃的空部队不再触发交互。
+- 敌对阵营（如强盗）不打开普通对话；AI 主动追击玩家时使用独立的“遭遇对话”，只有战斗选项。
+- 玩家主动追逐/接近某支部队时，`focus_party_id` 非空：路过村庄和其他部队不会自动打开面板，避免打断追逐；到达目标或停止移动后清理，恢复原有交互。
+- 普通对话与遭遇对话使用不同的暂停原因（`ui_panel` / `encounter_dialogue`），互不清理。
+- 玩家接近离屏战斗时会先看到“加入/离开”面板，规则见 [World_Map_System.md](World_Map_System.md)。
 
-### 6.2 部队管理面板（TODO 阶段 3）
+### 6.2 部队管理面板（阶段 3 实现，阶段 6 扩展经济操作）
 
 ```text
-点击大地图部队按钮
-  → 压入 ui_panel 暂停
-  → 打开部队管理面板
-  → 显示全部成员、属性、编队
-  → 关闭面板时移除暂停原因
+点击大地图顶部“部队”按钮
+  → 校验 WorldContext / 玩家部队 / 战斗状态
+  → push_pause(ui_panel)
+  → 打开 PartyPanel（左侧成员列表 + 右侧士兵详情）
+  → 关闭：隐藏面板、pop_pause(ui_panel)，恢复此前基础倍率
 ```
 
-- 面板读取 `PartyManager`，不直接改数据。
-- 人员编队操作通过 `FormationManager` 或后续 `PartyManager` 接口执行。
+入口规则：
+
+- 按钮 `PartyButton` 始终显示在大地图顶部栏。
+- 只打开玩家自己的部队，不提供 NPC 部队入口。
+- 玩家部队不存在、世界无效或部队处于 `IN_BATTLE` 等不可用状态时拒绝打开。
+- 保存面板、地点面板或部队遭遇对话打开时不重复打开。
+
+数据来源（只读）：
+
+| UI 区域 | 数据来源 |
+|---|---|
+| 部队名称 / 阵营 / 人数 / 移速 / 状态 | `PartyData` |
+| 金币 / 每日工资总额 | `PlayerProfile.gold` / `PartyManager.get_total_wage()` |
+| 移动状态与目标 | `PartyData.movement_state` / `target_position` / `current_target_id` |
+| 成员列表 | `PartyData.member_unit_ids` 顺序，经 `UnitManager` 查询；跳过不存在与重复项 |
+| 士兵身份 / 等级 / 经验 | `UnitData` + `UnitConfig` |
+| 战斗属性 | `UnitData` 的最终属性缓存（不重新计算） |
+| 装备 | `UnitData.equipment` + `EquipmentConfig` |
+| 招募信息 | `UnitData.recruit_source` / `recruit_settlement_id` / `joined_at_game_time` |
+| 美术预览 | 选中 `UnitData` 的 `faction_id` / `is_mounted` / `equipment`，由 `UnitVisual` 在独立 `SubViewport` 中生成 |
+
+刷新规则：
+
+- 打开面板时刷新一次；点击不同士兵时只更新详情区域。
+- 默认选中第一名有效成员；选中项有明显高亮。
+- 不提供招募、解雇、转队写操作；所有数据修改仍走管理器接口。
+- 阶段 6 起提供两类有限写操作：
+  - 坐骑：从背包马匹中选择并装备，或卸下返还背包（`UnitManager.equip_mount/unequip_mount`）；
+  - 晋升：消耗晋升凭证提升兵种 tier（`UnitManager.promote_tier`）。
+- 士兵详情显示 tier、每日工资、金币与武器/装备槽位；完整装备更换 UI 仍未实现（KI327）。
+- 空部队显示空状态；无效成员引用被跳过，不导致 UI 崩溃。
+
+美术预览规则：
+
+- 详情顶部使用独立 `SubViewport` 显示选中士兵，复用战斗 `UnitVisual`，不创建真实 `UnitData` / `BattleScene` 单位。
+- 步兵显示人物影子与步行外观；骑兵显示骑马影子、四条马腿、马身/马鞍，并应用 15 像素人物上移。
+- 预览只读 `UnitData`，不参与 AI、碰撞、攻击、移动、装备或库存；不修改存档。
+- 切换成员时复用同一预览节点并重建部件，旧部件释放；不会累积显示节点。
+
+暂停规则：
+
+- 使用 `TimeManager.push_pause(GameManager.PAUSE_REASON_UI_PANEL)`，不修改基础倍率。
+- 关闭时只移除本面板压入的暂停原因，不清空其他原因。
+- 禁止使用 `get_tree().paused`、`Engine.time_scale` 或 `clear_pauses()`。
 
 ## 7. 编队接口
 
@@ -160,7 +234,7 @@ Milestone 1 使用简单固定值：
 | `AVAILABLE` | 可用 | 可移动、可被选为目标 |
 | `IN_BATTLE` | 战斗中 | 锁定，不移动 |
 | `RETURNING` | 战后返回 | 暂不接新命令 |
-| `DISABLED` | 失效 | 不参与世界模拟 |
+| `DISABLED` | 失效 | 不参与世界模拟，AI 停止；全员阵亡结算后进入该状态 |
 
 状态由 `BattleManager` 写入，其他系统只读。
 
@@ -181,21 +255,38 @@ Milestone 1 使用简单固定值：
 | 创建部队 | 已实现 |
 | 初始玩家/NPC 部队 | 已实现 |
 | 大地图直线移动 | 已实现 |
-| 移动速度公式 | 固定值（阶段 2 再扩展） |
+| 移动速度 | 玩家 150 / 商队 80 / 治安队 120 / 强盗 100（固定值，公式待扩展） |
 | 转队与重复成员防护 | 已实现（D024） |
 | 重复部队 ID 防护 | 已实现（D024） |
 | 读档成员关系校验 | 已实现（D025） |
 | 非跨阵营成员规则 | 已实现；跨阵营流程未实现（KI119） |
 | 大地图部队遭遇对话 | 已实现 |
 | 战斗锁定 / 解锁 | 已实现 |
-| 阵亡成员结算 | 已实现（移除归属并删除 UnitData） |
-| 初始测试兵力 | 玩家与河畔商队各 5 人（临时调试配置） |
-| 部队 AI | 未实现（阶段 2/5） |
-| 部队管理 UI | TODO(阶段3) |
+| 阵亡成员结算 | 已实现（移除归属并删除 UnitData；全员阵亡→DISABLED） |
+| 初始测试兵力 | 玩家 3 民兵 + 3 骑乘职业步兵 + 1 玩家角色（7 人）；其余三方各 3 民兵 + 2 职业步兵 |
+| 玩家角色 Unit | 已实现：属于玩家部队、普通 UnitData、可参与战斗 |
+| 骑乘成员 | 已实现：普通职业步兵装备马匹；成员关系不变，控制权转移列表显示“骑乘” |
+| AI 行为字段与序列化 | 已实现（`ai_type` / `ai_route_index` / 路线 ID） |
+| 商队往返 / 治安队巡逻 | 已实现（AIManager，D031） |
+| 强盗游荡 / 动态目标评分 / 追击 | 已实现（FactionManager + VisionManager） |
+| 治安队拦截 / 保护商队优先 | 已实现 |
+| AI 攻击意图 | 已实现（`attack_intent`，不持久化） |
+| 玩家部队跟随移动目标 | 已实现（`FOLLOW_PARTY` + 0.5 世界秒刷新） |
+| NPC 撤退 / 士气 / 长期情报 | 未实现 |
+| 部队管理 UI | 已实现查看（概览、金币/工资、成员列表、士兵详情、tier/工资、装备槽位、SubViewport 美术预览） |
+| 坐骑 UI | 已实现：背包马匹下拉、装备/卸下，库存与装备双向一致 |
+| 晋升 UI | 已实现：显示目标 tier、物品数量与消耗按钮 |
+| 工资统计 | 已实现：单兵工资 + 部队每日总额；不自动扣除 |
 | 编队 | TODO(阶段6) |
 | 拆分/合并 | TODO(阶段7) |
 
-新游戏会通过 `WorldInitializer.create_test_battle_forces()` 给玩家和“河畔商队”各配置 3 民兵 + 2 职业步兵，用于验证战斗闭环；单位标记 `recruit_source = "milestone2_test"`，后续由招募系统替换（KI121）。旧存档若没有士兵，读档后不会自动补兵。
+新游戏会通过 `WorldInitializer.create_test_battle_forces()` 配置临时兵力：
+- 玩家部队：3 民兵 + 3 名装备马匹的职业步兵 + 1 玩家角色（`player_hero`），共 7 人；
+- 商队、治安队、强盗：各 3 民兵 + 2 职业步兵，共 5 人。
+
+玩家部队在初始化时向 `PlayerProfile` 加入 4 匹测试马匹：3 匹由职业步兵装备，1 匹留在背包用于验收上马/下马（阶段 6 从 3 匹调整为 4 匹）。3 名骑乘单位仍是普通 `infantry_trained` 成员，只是 `equipment["MOUNT"]` 存在；不新增骑兵兵种、不改变部队成员关系。阶段 6 同时给予 2 个晋升凭证用于验证晋升流程。单位标记 `recruit_source = "milestone2_test"`，后续由招募系统替换（KI121）。玩家角色是普通 `UnitData`，使用 `is_player_character` 标记身份并属于玩家部队。旧存档若没有士兵，读档后不会自动补兵；没有玩家角色时战斗场景退化到第一名存活友军作为控制对象。
+
+阵营关系由 `FactionManager` 统一维护（玩家-商队中立、玩家-强盗敌对、玩家-治安队中立、商队-治安队友好、商队-强盗敌对、强盗-治安队敌对）；部队实例只保存 `faction_id`，不保存关系表。
 
 ## 11. 待确认
 
@@ -203,5 +294,6 @@ Milestone 1 使用简单固定值：
 - 跨阵营招募、俘虏、叛变与雇佣兵的归属变更流程（KI119）。
 - 军团系统是否在阶段 7 前提供最小接口。
 - 移动速度公式与负重/骑兵比例的关系。
-- 战败后玩家部队全灭的处理（逃跑 / 被俘 / 重新开局）。
-- 击败的敌方部队是否保留为空部队或转为已解散状态。
+- 战败后玩家部队全灭的处理（逃跑 / 被俘 / 重新开局）；当前会变为 DISABLED。
+- 击败的敌方部队当前保留为 DISABLED 空部队，是否解散或移除待定（KI126）。
+- 商队路线与巡逻点是否迁移到 `.tres` 配置资源（KI128）。

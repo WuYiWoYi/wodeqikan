@@ -36,6 +36,7 @@ func _run() -> void:
 		return
 
 	_test_approach()
+	_test_mounted_battle_speed()
 	_test_attack_interval()
 	_test_death_and_retarget()
 	_test_manual_move()
@@ -53,8 +54,46 @@ func _test_approach() -> void:
 	for i: int in range(10):
 		controller.tick(0.1, enemies)
 	_check(controller.get_position().x > start.x + 20.0, "自动向敌人接近")
+	_check(
+		controller.get_position().x < start.x + 45.0,
+		"战斗移动速度已降低到原速度的 60%"
+	)
 	_check(absf(controller.get_position().y - 100.0) < 1.0, "沿直线移动")
 	_check(controller.get_position().x < 400.0, "未穿过目标")
+
+
+func _test_mounted_battle_speed() -> void:
+	var foot_unit := _units.create_unit(_militia, FACTION_PLAYER)
+	var mounted_unit := _units.create_unit(_militia, FACTION_PLAYER)
+	mounted_unit.is_mounted = true
+	mounted_unit.move_speed = 85.0
+	var foot := _make_controller(foot_unit, Vector2(100.0, 100.0), true)
+	var mounted := _make_controller(mounted_unit, Vector2(100.0, 300.0), true)
+
+	_check(
+		is_equal_approx(foot.get_battle_move_speed(), 36.0),
+		"步兵战斗移速保持 60 × 0.6"
+	)
+	_check(
+		is_equal_approx(mounted.get_battle_move_speed(), 85.0 * 0.84),
+		"骑乘战斗移速使用独立系数"
+	)
+
+	var foot_start := foot.get_position()
+	var mounted_start := mounted.get_position()
+	foot.command_move(foot_start + Vector2(300.0, 0.0))
+	mounted.command_move(mounted_start + Vector2(300.0, 0.0))
+	for i: int in range(10):
+		foot.tick(0.1, [])
+		mounted.tick(0.1, [])
+	var foot_distance := foot_start.distance_to(foot.get_position())
+	var mounted_distance := mounted_start.distance_to(mounted.get_position())
+	_check(foot_distance > 0.0 and mounted_distance > 0.0, "双方直线移动")
+	_check(
+		mounted_distance > foot_distance * 1.8,
+		"同等条件下骑乘单位明显快于步兵"
+	)
+	_check(foot_unit.move_speed == 60.0, "战斗速度不修改 UnitData.move_speed")
 
 
 func _test_attack_interval() -> void:
@@ -64,14 +103,14 @@ func _test_attack_interval() -> void:
 	var target := _make_controller(target_unit, Vector2(120.0, 100.0), false)
 	var enemies: Array[UnitController] = [target]
 
-	_check(target.state.battle_hp == 30, "目标初始 HP 正确")
+	_check(target.state.battle_hp == 50, "目标初始 HP 正确")
 	attacker.tick(0.1, enemies)
-	_check(target.state.battle_hp == 22, "进入攻击范围后造成攻击力伤害")
+	_check(target.state.battle_hp == 30, "进入攻击范围后造成攻击力伤害")
 	attacker.tick(0.5, enemies)
-	_check(target.state.battle_hp == 22, "攻击间隔内不重复攻击")
+	_check(target.state.battle_hp == 30, "攻击间隔内不重复攻击")
 	attacker.tick(0.5, enemies)
-	_check(target.state.battle_hp == 14, "攻击间隔结束后再次攻击")
-	_check(attacker_unit.current_hp == 45, "攻击不修改 UnitData.current_hp")
+	_check(target.state.battle_hp == 10, "攻击间隔结束后再次攻击")
+	_check(attacker_unit.current_hp == 100, "攻击不修改 UnitData.current_hp")
 
 
 func _test_death_and_retarget() -> void:
@@ -87,11 +126,11 @@ func _test_death_and_retarget() -> void:
 	attacker.tick(0.1, enemies)
 	_check(not near_enemy.is_alive(), "HP 归零后单位死亡")
 	_check(near_enemy.state.alive == false, "死亡写入 BattleUnitState")
-	_check(far_enemy.state.battle_hp == 30, "首次攻击只命中最近目标")
+	_check(far_enemy.state.battle_hp == 50, "首次攻击只命中最近目标")
 
 	attacker.tick(1.1, enemies)
 	attacker.tick(0.1, enemies)
-	_check(far_enemy.state.battle_hp < 30, "目标死亡后重新索敌并攻击")
+	_check(far_enemy.state.battle_hp < 50, "目标死亡后重新索敌并攻击")
 
 	var dead_position := near_enemy.get_position()
 	attacker.tick(0.1, enemies)
@@ -112,7 +151,7 @@ func _test_manual_move() -> void:
 		controller.tick(0.1, [])
 	_check(controller.get_position().x > start.x + 20.0, "手动命令优先于索敌")
 
-	for i: int in range(20):
+	for i: int in range(45):
 		controller.tick(0.1, [])
 	_check(not controller.has_move_command(), "到达目标后清除移动命令")
 
@@ -183,6 +222,8 @@ func _make_controller(unit: UnitData, position: Vector2, player_side: bool) -> U
 	state.battle_position = position
 	var controller := UnitController.new()
 	controller.setup(unit, state, player_side, null, Rect2(0.0, 0.0, 1000.0, 600.0))
+	# 测试辅助：同一阵营参数映射到不同战斗侧，满足统一敌对判断。
+	controller.side_index = 0 if player_side else 1
 	return controller
 
 

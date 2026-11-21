@@ -1,18 +1,23 @@
 class_name PartyIcon
 extends Node2D
 ## 大地图部队图标。只读取 PartyData，不修改权威数据。
+##
+## 图标不再显示部队名称，只在旗帜下方显示当前人数；
+## 完整名称与成员构成由鼠标悬浮面板显示。
 
 var party: PartyData = null
 var is_player: bool = false
 
-var _name_label: Label = null
+var _count_label: Label = null
+var _last_count: int = -1
 
 
 func setup(data: PartyData, player_owned: bool) -> void:
 	party = data
 	is_player = player_owned
 	position = data.world_position
-	_create_label()
+	_create_count_label()
+	_refresh_count()
 	queue_redraw()
 
 
@@ -21,6 +26,7 @@ func _process(delta: float) -> void:
 		return
 	var weight: float = clampf(delta * 12.0, 0.0, 1.0)
 	position = position.lerp(party.world_position, weight)
+	_refresh_count()
 
 
 func _draw() -> void:
@@ -48,20 +54,36 @@ func _draw() -> void:
 	)
 
 
-func _create_label() -> void:
-	if _name_label != null:
-		_name_label.queue_free()
-	_name_label = Label.new()
-	_name_label.name = "NameLabel"
-	_name_label.text = party.party_name
-	_name_label.position = Vector2(-70.0, -56.0)
-	_name_label.size = Vector2(140.0, 20.0)
-	_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_name_label.theme = UiTheme.create()
-	_name_label.add_theme_font_size_override("font_size", 12)
-	_name_label.add_theme_color_override("font_color", Color.WHITE)
-	_name_label.add_theme_color_override("font_shadow_color", Color(0.0, 0.0, 0.0, 0.85))
-	_name_label.add_theme_constant_override("shadow_offset_x", 1)
-	_name_label.add_theme_constant_override("shadow_offset_y", 1)
-	add_child(_name_label)
+## 部队人数徽标；人数变化时同步更新。
+func _refresh_count() -> void:
+	if _count_label == null or party == null:
+		return
+	var count: int = party.member_unit_ids.size()
+	if count == _last_count:
+		return
+	_last_count = count
+	_count_label.text = str(count)
+
+
+func get_count_text() -> String:
+	return _count_label.text if _count_label != null else ""
+
+
+func _create_count_label() -> void:
+	if _count_label != null:
+		_count_label.queue_free()
+	_count_label = Label.new()
+	_count_label.name = "CountLabel"
+	_count_label.text = "0"
+	_count_label.position = Vector2(-24.0, 6.0)
+	_count_label.size = Vector2(48.0, 24.0)
+	_count_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_count_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_count_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_count_label.theme = UiTheme.create()
+	_count_label.add_theme_font_size_override("font_size", 16)
+	_count_label.add_theme_color_override("font_color", Color.WHITE)
+	_count_label.add_theme_color_override("font_shadow_color", Color(0.0, 0.0, 0.0, 0.9))
+	_count_label.add_theme_constant_override("shadow_offset_x", 1)
+	_count_label.add_theme_constant_override("shadow_offset_y", 1)
+	add_child(_count_label)

@@ -1,7 +1,7 @@
 # 场景系统
 
 **核心脚本：** `Scripts/Autoload/scene_manager.gd`
-**状态：** MainMenu 与 WorldMap 已实现；小场景仍为占位
+**状态：** MainMenu、WorldMap、Battle、Village 已实现；Town/Castle 仍为占位；村庄与战斗共用摄像机视野/跟随/自由视角
 
 ---
 
@@ -55,6 +55,22 @@ WorldMap (Node2D)
 
 大地图 UI 通过 `world_map.gd` 程序化构建，关键控件设置稳定名称以便测试。UI 根节点 `mouse_filter = IGNORE`，地图点击由 `_unhandled_input` 接收。
 
+阶段 6 村庄实际结构：
+
+```text
+Village (Node2D，village_scene.gd)
+├── Camera2D（SceneCameraRig：跟随玩家 / 自由视角）
+├── PlayerVisual (UnitVisual，复用玩家 UnitData)
+├── VillageElderVisual (UnitVisual，运行时 NPC 数据)
+├── VillageElderNameLabel
+└── UI (CanvasLayer，由脚本构建)
+    ├── 村庄名称/提示
+    ├── 越界倒计时
+    └── 数据驱动对话面板
+```
+
+村庄场景由 `WorldMap.enter_village()` 通过 `SettlementData.scene_path` 进入；离开时恢复大地图基础倍率并写入一次性地点交互锁。
+
 ## 4. 生命周期
 
 ### 4.1 进入小场景
@@ -100,6 +116,23 @@ Milestone 1 已验证：
 
 详见 [Combat_System.md](Combat_System.md)。
 
+### 5.1 小场景摄像机（`SceneCameraRig`）
+
+村庄与战斗共用 `Scripts/Systems/Scene/scene_camera_rig.gd`：
+
+| 项 | 规则 |
+|---|---|
+| 统一视野 | `VIEW_SIZE = 960×540` 世界单位；1920×1080 下缩放 2 倍 |
+| 其他分辨率 | `min(viewport.x / 960, viewport.y / 540)`，至少保留统一视野区域 |
+| 默认模式 | 平滑跟随当前玩家控制角色 |
+| 战斗控制权切换 | 自动跟随新控制单位；观战时保持当前位置 |
+| 自由视角 | `F` 切换；WASD / 方向键移动镜头，不移动角色 |
+| 切回跟随 | 立即重新定位到当前跟随目标 |
+| 边界 | 跟随与自由模式均限制在场景/战场边界内；场景小于视野时居中 |
+
+- 每个小场景只有一个 `Camera2D`；`SceneCameraRig` 只操作它，不创建额外摄像机。
+- 自由视角在战斗/村庄中只改变镜头位置，不写入 `UnitData`、`PartyData` 或战斗位置。
+
 ## 6. 时间规则
 
 | 场景 | WorldTime | SceneTime |
@@ -108,7 +141,7 @@ Milestone 1 已验证：
 | 大地图 | 由 `TimeManager` 基础倍率决定 | 无 |
 | 小场景探索 | 0 | 1.0 |
 | 小场景对话 | 0 | 1.0 |
-| 战斗 | 0.5 | 1.0 |
+| 屏幕内战斗 | 0（`battle` 暂停） | 1.0 |
 
 ## 7. 场景状态与存档
 
@@ -124,9 +157,11 @@ Milestone 1 已验证：
 | 场景路径常量 | 已实现 |
 | `change_scene` | 已实现（无过渡动画） |
 | MainMenu | 已实现（新游戏/继续/读取/设置/退出） |
-| WorldMap | 已实现（地图/图标/时间/交互/保存） |
-| Village / Town / Castle | 空场景占位 |
-| BattleScene | 空场景占位 |
+| WorldMap | 已实现（地图/图标/时间/交互/保存/追逐焦点/悬浮信息） |
+| Village | 已实现（玩家、村庄头人、对话、越界倒计时） |
+| Town / Castle | 空场景占位 |
+| BattleScene | 已实现 |
+| 小场景统一摄像机 | 已实现（跟随 / 自由视角 / 边界 / 统一视野） |
 | 加载画面/过渡 | TODO |
 | 异步加载 | TODO |
 

@@ -33,7 +33,7 @@ func _run() -> void:
 	_check(WorldInitializer.create_new_world(_context), "新世界初始化成功")
 	_check(_context.world_id.begins_with("WORLD_"), "世界 ID 使用 WORLD 前缀")
 	_check(_context.world_size == Vector2(3000.0, 2000.0), "世界尺寸为 3000x2000")
-	_check(_context.party_manager.get_all_parties().size() == 3, "生成 3 支部队")
+	_check(_context.party_manager.get_all_parties().size() == 4, "生成 4 支部队")
 	_check(_context.settlement_manager.get_all_settlements().size() == 4, "生成 4 个地点")
 	_check(_context.get_player_party() != null, "玩家部队存在")
 
@@ -42,7 +42,7 @@ func _run() -> void:
 		unique_ids[party.party_id] = true
 	for settlement: SettlementData in _context.settlement_manager.get_all_settlements():
 		unique_ids[settlement.settlement_id] = true
-	_check(unique_ids.size() == 7, "7 个实体 ID 全部唯一")
+	_check(unique_ids.size() == 8, "8 个实体 ID 全部唯一")
 
 	var player := _context.get_player_party()
 	var start_position := player.world_position
@@ -73,7 +73,7 @@ func _run() -> void:
 	var save := _context.to_save_data()
 	_check(save.world_id == _context.world_id, "存档包含世界 ID")
 	_check(save.player_party_id == _context.player_party_id, "存档包含玩家部队 ID")
-	_check(save.parties.size() == 3, "存档包含 3 支部队")
+	_check(save.parties.size() == 4, "存档包含 4 支部队")
 	_check(save.settlements.size() == 4, "存档包含 4 个地点")
 	_check(save.id_counters.size() > 0, "存档包含 ID 计数器")
 	_check(is_equal_approx(save.world_elapsed_seconds, 321.0), "存档包含世界时间")
@@ -92,7 +92,7 @@ func _run() -> void:
 	add_child(_second_context)
 	_check(_second_context.load_from_save_data(loaded), "WorldContext 从存档恢复")
 	_check(_second_context.world_id == _context.world_id, "世界 ID 恢复一致")
-	_check(_second_context.party_manager.get_all_parties().size() == 3, "部队数量恢复一致")
+	_check(_second_context.party_manager.get_all_parties().size() == 4, "部队数量恢复一致")
 	_check(_second_context.settlement_manager.get_all_settlements().size() == 4, "地点数量恢复一致")
 	_check(
 		_second_context.get_player_party().world_position == player.world_position,
@@ -176,6 +176,14 @@ func _run() -> void:
 	_second_context.free()
 	_second_context = null
 
+	# 商队初始在橡木村；本测试会在橡木村附近测试地点面板，先移开避免部队对话抢占。
+	for party: PartyData in _context.party_manager.get_all_parties():
+		if party.party_name == WorldInitializer.TEST_ENEMY_PARTY_NAME:
+			party.world_position = Vector2(900.0, 1500.0)
+			party.target_position = party.world_position
+			party.movement_state = PartyData.MovementState.IDLE
+			break
+
 	GameManager.world_context = _context
 	GameManager.player_party_id = _context.player_party_id
 	TimeManager.set_base_world_speed(TimeManager.SPEED_PAUSED)
@@ -187,7 +195,7 @@ func _run() -> void:
 	await get_tree().process_frame
 
 	var entities := _map.get_node("WorldEntities") as Node2D
-	_check(entities.get_child_count() == 7, "大地图生成 3 个部队图标与 4 个地点图标")
+	_check(entities.get_child_count() == 8, "大地图生成 4 个部队图标与 4 个地点图标")
 	_check(_map.find_child("TopBar", true, false) != null, "大地图时间 UI 已生成")
 	_check(_map.find_child("SettlementPanel", true, false) != null, "地点交互面板已生成")
 

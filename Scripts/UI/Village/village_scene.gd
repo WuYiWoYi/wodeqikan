@@ -1,0 +1,706 @@
+class_name VillageScene
+extends Node2D
+## 村庄小场景控制器。
+##
+## 只读取 WorldContext 的权威数据；玩家角色复用 UnitData / UnitVisual，
+## 不创建第二套角色系统，也不修改玩家装备、部队或存档。
+## 本阶段村庄为和平场景：没有敌对部队、没有战斗、没有招募与商店。
+
+signal exit_requested
+
+const UnitVisualScript = preload("res://Scripts/Systems/Combat/unit_visual.gd")
+
+const WORLD_SIZE := Vector2(1920.0, 1080.0)
+## 可活动区域。走出该区域会开始返回大地图的倒计时。
+const PLAYABLE_RECT := Rect2(110.0, 300.0, 1700.0, 700.0)
+const PLAYER_START_POSITION := Vector2(960.0, 860.0)
+const ELDER_POSITION := Vector2(1260.0, 560.0)
+const ELDER_NAME: String = "村庄头人"
+const ELDER_CLICK_RADIUS: float = 46.0
+const INTERACT_DISTANCE: float = 130.0
+## 场景内移动表现速度倍率；不修改 UnitData.move_speed。
+const VILLAGE_MOVE_SPEED_MULTIPLIER: float = 2.0
+
+const EXIT_COUNTDOWN_SECONDS: float = 5.0
+## 越界容差：必须离开可活动区域 8 px 才开始倒计时，避免边界抖动。
+const EXIT_TOLERANCE: float = 8.0
+
+const VILLAGE_ELDER_DIALOGUE_PATH: String = "res://Data/Dialogues/village_elder.tres"
+const WORLD_MAP_SCENE: String = "res://Scenes/WorldMap/world_map.tscn"
+
+var _context: WorldContext = null
+var _settlement: SettlementData = null
+var _player_unit: UnitData = null
+var _player_visual: UnitVisual = null
+var _npc_visual: UnitVisual = null
+var _npc_unit_data: UnitData = null
+var _camera: Camera2D = null
+var _camera_rig: SceneCameraRig = null
+
+var _player_position := PLAYER_START_POSITION
+var _moving: bool = false
+var _facing: float = 1.0
+var _dialogue_open: bool = false
+var _dialogue_pause_active: bool = false
+var _exit_timer: float = 0.0
+var _returning: bool = false
+var _auto_return_enabled: bool = true
+
+var _test_input := Vector2.ZERO
+var _has_test_input: bool = false
+
+var _ui_root: Control = null
+var _village_label: Label = null
+var _hint_label: Label = null
+var _status_label: Label = null
+var _exit_panel: PanelContainer = null
+var _exit_label: Label = null
+
+var _dialogue_panel: PanelContainer = null
+var _dialogue_speaker_label: Label = null
+var _dialogue_text_label: Label = null
+var _dialogue_choices: VBoxContainer = null
+
+
+func _ready() -> void:
+	_context = GameManager.world_context
+	if _context == null:
+		push_error("村庄场景缺少 WorldContext")
+		call_deferred("_abort_to_world_map")
+		return
+
+	_settlement = _resolve_settlement()
+	_player_unit = _resolve_player_unit()
+	if _player_unit == null:
+		push_error("村庄场景找不到玩家角色")
+		call_deferred("_abort_to_world_map")
+		return
+
+	_build_camera()
+	_build_actor_visuals()
+	_build_ui()
+	_update_header()
+	queue_redraw()
+
+
+func _exit_tree() -> void:
+	# 异常退出时清理本次场景的暂停，避免世界永久暂停。
+	if _dialogue_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_WORLD_DIALOGUE)
+		_dialogue_pause_active = false
+	TimeManager.pop_pause(GameManager.PAUSE_REASON_SMALL_SCENE)
+
+
+# ---------------------------------------------------------------------------
+# 场景搭建
+# ---------------------------------------------------------------------------
+
+
+func _resolve_settlement() -> SettlementData:
+	var settlement_id: String = GameManager.current_settlement_id
+	if not settlement_id.is_empty():
+		var settlement := _context.settlement_manager.get_settlement(settlement_id)
+		if settlement != null \
+				and settlement.settlement_type == SettlementData.SettlementType.VILLAGE:
+			return settlement
+	# 直接启动场景时退化到第一个村庄，避免测试/调试时立即退出。
+	for candidate: SettlementData in _context.settlement_manager.get_all_settlements():
+		if candidate.settlement_type == SettlementData.SettlementType.VILLAGE:
+			return candidate
+	return null
+
+
+## 优先玩家角色；旧存档没有玩家角色时退化到第一名成员。
+func _resolve_player_unit() -> UnitData:
+	var party := _context.get_player_party()
+	if party == null:
+		return null
+	for unit_id: String in party.member_unit_ids:
+		var unit := _context.unit_manager.get_unit(unit_id)
+		if unit != null and unit.is_player_character:
+			return unit
+	for unit_id: String in party.member_unit_ids:
+		var unit := _context.unit_manager.get_unit(unit_id)
+		if unit != null:
+			return unit
+	return null
+
+
+func _build_camera() -> void:
+	_camera = Camera2D.new()
+	_camera.name = "Camera2D"
+	_camera.enabled = true
+	add_child(_camera)
+	_camera.make_current()
+
+	# 与战斗场景共用同一套视野基准与边界规则。
+	_camera_rig = SceneCameraRig.new()
+	_camera_rig.setup(_camera, Rect2(Vector2.ZERO, WORLD_SIZE))
+	_camera_rig.snap_to(_player_position)
+
+
+func _build_actor_visuals() -> void:
+	_player_visual = UnitVisualScript.new()
+	_player_visual.name = "PlayerVisual"
+	_player_visual.position = _player_position
+	_player_visual.z_index = 100
+	add_child(_player_visual)
+	_player_visual.setup(_player_unit)
+	# 只隐藏本次场景的武器表现；UnitData.equipment 不修改。
+	_player_visual.set_weapon_visible(false)
+	_player_visual.set_facing(_facing)
+	_player_visual.reset_locomotion()
+
+	# 村庄头人使用运行时 UnitData 与同一 UnitVisual，但不注册进 UnitManager。
+	_npc_unit_data = UnitData.new()
+	_npc_unit_data.unit_id = "village_elder"
+	_npc_unit_data.display_name = ELDER_NAME
+	_npc_unit_data.faction_id = "FACTION_LOCAL"
+	_npc_unit_data.is_player_character = false
+
+	_npc_visual = UnitVisualScript.new()
+	_npc_visual.name = "VillageElderVisual"
+	_npc_visual.position = ELDER_POSITION
+	_npc_visual.z_index = 100
+	add_child(_npc_visual)
+	_npc_visual.setup(_npc_unit_data)
+	_npc_visual.set_facing(-1.0)
+	_npc_visual.reset_locomotion()
+
+	var npc_label := _make_label(ELDER_NAME, 14)
+	npc_label.name = "VillageElderNameLabel"
+	npc_label.position = ELDER_POSITION + Vector2(-60.0, -78.0)
+	npc_label.size = Vector2(120.0, 20.0)
+	npc_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	npc_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(npc_label)
+
+
+func _build_ui() -> void:
+	var canvas := CanvasLayer.new()
+	canvas.name = "UI"
+	add_child(canvas)
+
+	_ui_root = Control.new()
+	_ui_root.name = "VillageUI"
+	_ui_root.theme = UiTheme.create()
+	_ui_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_set_full_rect(_ui_root)
+	canvas.add_child(_ui_root)
+
+	_build_header()
+	_build_exit_countdown()
+	_build_dialogue_panel()
+
+
+func _build_header() -> void:
+	var panel := PanelContainer.new()
+	panel.name = "VillageHeader"
+	panel.position = Vector2(18.0, 14.0)
+	panel.custom_minimum_size = Vector2(560.0, 84.0)
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_ui_root.add_child(panel)
+
+	var margin := MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_theme_constant_override("margin_left", 14)
+	margin.add_theme_constant_override("margin_right", 14)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	panel.add_child(margin)
+
+	var column := VBoxContainer.new()
+	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_theme_constant_override("separation", 4)
+	margin.add_child(column)
+
+	_village_label = _make_label("", 20)
+	_village_label.name = "VillageNameLabel"
+	column.add_child(_village_label)
+
+	_hint_label = _make_label("WASD 移动　左键点击村庄头人交谈　F 自由视角", 14)
+	_hint_label.name = "VillageHintLabel"
+	_hint_label.modulate = Color(0.92, 0.9, 0.82)
+	column.add_child(_hint_label)
+
+	_status_label = _make_label("", 13)
+	_status_label.name = "VillageStatusLabel"
+	_status_label.modulate = Color(1.0, 0.86, 0.55)
+	column.add_child(_status_label)
+
+
+func _build_exit_countdown() -> void:
+	_exit_panel = PanelContainer.new()
+	_exit_panel.name = "VillageExitPanel"
+	_exit_panel.visible = false
+	_exit_panel.anchor_left = 0.5
+	_exit_panel.anchor_right = 0.5
+	_exit_panel.anchor_top = 1.0
+	_exit_panel.anchor_bottom = 1.0
+	_exit_panel.offset_left = -230.0
+	_exit_panel.offset_right = 230.0
+	_exit_panel.offset_top = -360.0
+	_exit_panel.offset_bottom = -300.0
+	_exit_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_ui_root.add_child(_exit_panel)
+
+	_exit_label = _make_label("", 20)
+	_exit_label.name = "VillageExitLabel"
+	_exit_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_exit_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_exit_label.modulate = Color(1.0, 0.72, 0.6)
+	_exit_panel.add_child(_exit_label)
+
+
+func _build_dialogue_panel() -> void:
+	_dialogue_panel = PanelContainer.new()
+	_dialogue_panel.name = "VillageDialoguePanel"
+	_dialogue_panel.visible = false
+	_dialogue_panel.anchor_left = 0.5
+	_dialogue_panel.anchor_right = 0.5
+	_dialogue_panel.anchor_top = 1.0
+	_dialogue_panel.anchor_bottom = 1.0
+	_dialogue_panel.offset_left = -620.0
+	_dialogue_panel.offset_right = 620.0
+	_dialogue_panel.offset_top = -300.0
+	_dialogue_panel.offset_bottom = -24.0
+	_ui_root.add_child(_dialogue_panel)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 24)
+	margin.add_theme_constant_override("margin_right", 24)
+	margin.add_theme_constant_override("margin_top", 16)
+	margin.add_theme_constant_override("margin_bottom", 16)
+	_dialogue_panel.add_child(margin)
+
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 10)
+	margin.add_child(column)
+
+	_dialogue_speaker_label = _make_label("", 22)
+	_dialogue_speaker_label.name = "VillageDialogueSpeakerLabel"
+	column.add_child(_dialogue_speaker_label)
+
+	_dialogue_text_label = _make_label("", 17)
+	_dialogue_text_label.name = "VillageDialogueTextLabel"
+	_dialogue_text_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_dialogue_text_label.custom_minimum_size = Vector2(0.0, 96.0)
+	column.add_child(_dialogue_text_label)
+
+	column.add_child(HSeparator.new())
+
+	_dialogue_choices = VBoxContainer.new()
+	_dialogue_choices.name = "VillageDialogueChoices"
+	_dialogue_choices.add_theme_constant_override("separation", 6)
+	column.add_child(_dialogue_choices)
+
+
+# ---------------------------------------------------------------------------
+# 每帧更新
+# ---------------------------------------------------------------------------
+
+
+func _physics_process(delta: float) -> void:
+	if _returning:
+		return
+
+	var camera_free: bool = _camera_rig != null and _camera_rig.is_free_mode()
+	# 自由视角下 WASD/方向键只移动摄像机，不改变玩家角色位置。
+	var input := Vector2.ZERO if camera_free else _read_input()
+	_moving = input != Vector2.ZERO and not _dialogue_open and not camera_free
+	if _moving:
+		var speed: float = maxf(_player_unit.move_speed, 1.0) \
+			* VILLAGE_MOVE_SPEED_MULTIPLIER
+		_player_position += input * speed * delta
+		_player_position.x = clampf(_player_position.x, 0.0, WORLD_SIZE.x)
+		_player_position.y = clampf(_player_position.y, 0.0, WORLD_SIZE.y)
+		if absf(input.x) > 0.01:
+			_facing = 1.0 if input.x > 0.0 else -1.0
+			_player_visual.set_facing(_facing)
+		_player_visual.position = _player_position
+
+	if is_instance_valid(_player_visual):
+		_player_visual.update_locomotion(delta, _moving)
+	if is_instance_valid(_npc_visual):
+		_npc_visual.update_locomotion(delta, false)
+	if _camera_rig != null:
+		_camera_rig.update(delta, _player_position, true, not _dialogue_open)
+
+	_update_exit_state(delta)
+	_update_interaction_hint()
+
+
+func _read_input() -> Vector2:
+	if _has_test_input:
+		return _test_input
+	var direction := Vector2.ZERO
+	if Input.is_physical_key_pressed(KEY_A):
+		direction.x -= 1.0
+	if Input.is_physical_key_pressed(KEY_D):
+		direction.x += 1.0
+	if Input.is_physical_key_pressed(KEY_W):
+		direction.y -= 1.0
+	if Input.is_physical_key_pressed(KEY_S):
+		direction.y += 1.0
+	if direction.length_squared() > 1.0:
+		direction = direction.normalized()
+	return direction
+
+
+func _update_interaction_hint() -> void:
+	if _status_label == null or _dialogue_open:
+		return
+	var distance := _player_position.distance_to(ELDER_POSITION)
+	if distance <= INTERACT_DISTANCE:
+		_hint_label.text = "左键点击村庄头人交谈"
+	else:
+		_hint_label.text = "WASD 移动　走近村庄头人后可以交谈"
+
+
+func _update_exit_state(delta: float) -> void:
+	if _returning:
+		return
+	var outside: bool = not PLAYABLE_RECT.grow(EXIT_TOLERANCE).has_point(_player_position)
+	if not outside:
+		if _exit_timer > 0.0:
+			_exit_timer = 0.0
+			_exit_panel.visible = false
+		return
+
+	_exit_timer += delta
+	_exit_panel.visible = true
+	var remaining: float = maxf(0.0, EXIT_COUNTDOWN_SECONDS - _exit_timer)
+	_exit_label.text = "离开村庄：%.1f 秒" % remaining
+	if _exit_timer >= EXIT_COUNTDOWN_SECONDS:
+		_request_exit()
+
+
+# ---------------------------------------------------------------------------
+# 交互
+# ---------------------------------------------------------------------------
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if _returning or _dialogue_open:
+		return
+	if event is InputEventKey:
+		var key_event := event as InputEventKey
+		if key_event.pressed and not key_event.echo and key_event.keycode == KEY_F:
+			toggle_camera_free_mode()
+			get_viewport().set_input_as_handled()
+			return
+	if not event is InputEventMouseButton:
+		return
+	var mouse_event := event as InputEventMouseButton
+	if not mouse_event.pressed or mouse_event.button_index != MOUSE_BUTTON_LEFT:
+		return
+
+	var mouse_world := get_global_mouse_position()
+	if mouse_world.distance_to(ELDER_POSITION) > ELDER_CLICK_RADIUS:
+		return
+	get_viewport().set_input_as_handled()
+	try_interact_with_elder()
+
+
+## 与村庄头人交互。距离不足时不打开对话，返回 false。
+func try_interact_with_elder() -> bool:
+	if _returning or _dialogue_open:
+		return false
+	if _player_position.distance_to(ELDER_POSITION) > INTERACT_DISTANCE:
+		_status_label.text = "距离太远，走近村庄头人后再交谈"
+		return false
+	return _open_dialogue()
+
+
+func _open_dialogue() -> bool:
+	var data := load(VILLAGE_ELDER_DIALOGUE_PATH) as DialogueData
+	if data == null:
+		push_error("村庄对话配置加载失败: %s" % VILLAGE_ELDER_DIALOGUE_PATH)
+		_status_label.text = "对话配置缺失"
+		return false
+	if not _context.dialogue_manager.start_dialogue(data):
+		_status_label.text = "无法开始对话"
+		return false
+
+	_dialogue_open = true
+	_moving = false
+	_player_visual.update_locomotion(0.0, false)
+	_dialogue_panel.visible = true
+	if not _dialogue_pause_active:
+		TimeManager.push_pause(GameManager.PAUSE_REASON_WORLD_DIALOGUE)
+		_dialogue_pause_active = true
+	_refresh_dialogue_ui()
+	return true
+
+
+func _refresh_dialogue_ui() -> void:
+	_dialogue_speaker_label.text = _context.dialogue_manager.get_speaker_name()
+	var text: String = _context.dialogue_manager.get_current_text()
+	text = text.replace("{village_name}", get_village_name())
+	_dialogue_text_label.text = text
+
+	for child: Node in _dialogue_choices.get_children():
+		_dialogue_choices.remove_child(child)
+		child.queue_free()
+
+	var choices: Array = _context.dialogue_manager.get_choices()
+	for index: int in range(choices.size()):
+		var choice: Variant = choices[index]
+		if not choice is Dictionary:
+			continue
+		var button := Button.new()
+		button.name = "VillageDialogueChoice_%d" % index
+		button.text = str((choice as Dictionary).get("text", "……"))
+		button.focus_mode = Control.FOCUS_NONE
+		button.custom_minimum_size = Vector2(0.0, 40.0)
+		button.pressed.connect(_on_dialogue_choice.bind(index))
+		_dialogue_choices.add_child(button)
+
+
+func _on_dialogue_choice(index: int) -> void:
+	if not _dialogue_open:
+		return
+	if _context.dialogue_manager.choose(index):
+		_refresh_dialogue_ui()
+		return
+	_close_dialogue()
+
+
+## 关闭对话界面并恢复玩家移动。
+func _close_dialogue() -> void:
+	_dialogue_open = false
+	_dialogue_panel.visible = false
+	_status_label.text = ""
+	_context.dialogue_manager.end_dialogue()
+	if _dialogue_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_WORLD_DIALOGUE)
+		_dialogue_pause_active = false
+
+
+# ---------------------------------------------------------------------------
+# 返回大地图
+# ---------------------------------------------------------------------------
+
+
+func _request_exit() -> void:
+	if _returning:
+		return
+	_returning = true
+	_exit_panel.visible = false
+	exit_requested.emit()
+
+	if _dialogue_open:
+		_close_dialogue()
+	if not _auto_return_enabled:
+		return
+	var settlement_id: String = _settlement.settlement_id if _settlement != null else ""
+	GameManager.pending_settlement_latch_id = settlement_id
+	TimeManager.set_base_world_speed(GameManager.small_scene_return_base_speed)
+	TimeManager.pop_pause(GameManager.PAUSE_REASON_SMALL_SCENE)
+	var error: Error = SceneManager.change_scene(WORLD_MAP_SCENE)
+	if error != OK:
+		push_error("无法返回大地图（错误码 %s）" % error)
+		TimeManager.push_pause(GameManager.PAUSE_REASON_SMALL_SCENE)
+		_returning = false
+
+
+func _abort_to_world_map() -> void:
+	TimeManager.pop_pause(GameManager.PAUSE_REASON_SMALL_SCENE)
+	SceneManager.change_scene(WORLD_MAP_SCENE)
+
+
+# ---------------------------------------------------------------------------
+# 绘制
+# ---------------------------------------------------------------------------
+
+
+func _draw() -> void:
+	# 草地与远景。
+	draw_rect(Rect2(Vector2.ZERO, WORLD_SIZE), Color("#4f6b3d"), true)
+	draw_rect(Rect2(0.0, 0.0, WORLD_SIZE.x, 230.0), Color("#5b7a48"), true)
+	draw_rect(Rect2(0.0, 0.0, WORLD_SIZE.x, 80.0), Color("#6f8f5c"), true)
+
+	# 道路。
+	var path_color := Color("#8a7550")
+	draw_rect(Rect2(0.0, 760.0, WORLD_SIZE.x, 92.0), path_color, true)
+	draw_rect(Rect2(930.0, 520.0, 70.0, 260.0), path_color, true)
+	draw_line(Vector2(0.0, 768.0), Vector2(WORLD_SIZE.x, 768.0), Color(0, 0, 0, 0.12), 3.0)
+
+	# 房屋。
+	_draw_house(Vector2(600.0, 470.0), Color("#c9b48a"), Color("#8a4a38"))
+	_draw_house(Vector2(1550.0, 500.0), Color("#c2ab7f"), Color("#7c4033"))
+	_draw_house(Vector2(880.0, 380.0), Color("#bfa87e"), Color("#7f4736"))
+
+	# 栅栏与树。
+	_draw_fence(Vector2(180.0, 700.0), 15)
+	for tree_position: Vector2 in [
+		Vector2(260.0, 420.0), Vector2(1720.0, 360.0),
+		Vector2(420.0, 940.0), Vector2(1500.0, 930.0),
+	]:
+		_draw_tree(tree_position)
+
+	# 可活动区域边界（轻微提示，不是硬墙）。
+	draw_rect(PLAYABLE_RECT, Color(1.0, 1.0, 1.0, 0.06), false, 2.0)
+
+
+func _draw_house(origin: Vector2, wall: Color, roof: Color) -> void:
+	draw_rect(Rect2(origin.x - 80.0, origin.y - 70.0, 160.0, 110.0), wall, true)
+	draw_colored_polygon(
+		PackedVector2Array([
+			Vector2(origin.x - 100.0, origin.y - 70.0),
+			Vector2(origin.x, origin.y - 150.0),
+			Vector2(origin.x + 100.0, origin.y - 70.0),
+		]),
+		roof
+	)
+	draw_rect(Rect2(origin.x - 18.0, origin.y - 10.0, 36.0, 50.0), Color("#4a3322"), true)
+	draw_rect(Rect2(origin.x + 44.0, origin.y - 48.0, 24.0, 22.0), Color("#3f4850"), true)
+
+
+func _draw_fence(origin: Vector2, segments: int) -> void:
+	var wood := Color("#6f5637")
+	for index: int in range(segments):
+		var x: float = origin.x + float(index) * 46.0
+		draw_line(Vector2(x, origin.y), Vector2(x, origin.y - 46.0), wood, 3.0)
+	draw_line(origin, Vector2(origin.x + float(segments) * 46.0, origin.y), wood, 2.0)
+	draw_line(
+		origin + Vector2(0.0, -28.0),
+		Vector2(origin.x + float(segments) * 46.0, origin.y - 28.0),
+		wood,
+		2.0
+	)
+
+
+func _draw_tree(tree_position: Vector2) -> void:
+	draw_rect(
+		Rect2(tree_position.x - 8.0, tree_position.y - 60.0, 16.0, 64.0),
+		Color("#5a4029"),
+		true
+	)
+	draw_circle(tree_position + Vector2(0.0, -84.0), 46.0, Color("#3f6a34"))
+	draw_circle(tree_position + Vector2(-18.0, -66.0), 30.0, Color("#4b7a3d"))
+	draw_circle(tree_position + Vector2(22.0, -70.0), 28.0, Color("#46743a"))
+
+
+# ---------------------------------------------------------------------------
+# 测试与查询接口
+# ---------------------------------------------------------------------------
+
+
+func set_test_input(direction: Vector2, active: bool = true) -> void:
+	_test_input = direction.limit_length(1.0)
+	_has_test_input = active
+
+
+func set_player_position(value: Vector2) -> void:
+	_player_position = value
+	if is_instance_valid(_player_visual):
+		_player_visual.position = value
+
+
+func get_player_position() -> Vector2:
+	return _player_position
+
+
+func get_elder_position() -> Vector2:
+	return ELDER_POSITION
+
+
+func get_village_name() -> String:
+	if _settlement != null:
+		return _settlement.display_name
+	return "村庄"
+
+
+func is_dialogue_open() -> bool:
+	return _dialogue_open
+
+
+func get_exit_countdown() -> float:
+	return _exit_timer
+
+
+func is_returning_to_world() -> bool:
+	return _returning
+
+
+## 自动化测试可关闭真实场景切换，只验证倒计时结束事件。
+func set_auto_return_enabled(enabled: bool) -> void:
+	_auto_return_enabled = enabled
+
+
+func advance_exit_countdown(delta: float) -> void:
+	_update_exit_state(delta)
+
+
+func get_player_visual() -> UnitVisual:
+	return _player_visual
+
+
+func get_dialogue_panel() -> PanelContainer:
+	return _dialogue_panel
+
+
+func get_camera_rig() -> SceneCameraRig:
+	return _camera_rig
+
+
+func toggle_camera_free_mode() -> bool:
+	if _camera_rig == null:
+		return false
+	var active: bool = _camera_rig.toggle_free_mode()
+	_moving = false
+	if is_instance_valid(_player_visual):
+		_player_visual.update_locomotion(0.0, false)
+	if _status_label != null:
+		_status_label.text = (
+			"摄像机：自由视角（WASD / 方向键移动，F 切回跟随）"
+			if active else ""
+		)
+	return active
+
+
+func set_camera_free_mode(active: bool) -> void:
+	if _camera_rig != null:
+		_camera_rig.set_free_mode(active)
+
+
+func is_camera_free_mode() -> bool:
+	return _camera_rig != null and _camera_rig.is_free_mode()
+
+
+func get_camera_position() -> Vector2:
+	return _camera_rig.get_camera_position() if _camera_rig != null else Vector2.ZERO
+
+
+func set_test_free_camera_input(direction: Vector2, active: bool = true) -> void:
+	if _camera_rig != null:
+		_camera_rig.set_test_free_input(direction, active)
+
+
+# ---------------------------------------------------------------------------
+# 工具
+# ---------------------------------------------------------------------------
+
+
+func _update_header() -> void:
+	_village_label.text = "村庄：%s" % get_village_name()
+
+
+func _make_label(text: String, font_size: int) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.add_theme_font_size_override("font_size", font_size)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return label
+
+
+func _set_full_rect(control: Control) -> void:
+	control.anchor_left = 0.0
+	control.anchor_top = 0.0
+	control.anchor_right = 1.0
+	control.anchor_bottom = 1.0
+	control.offset_left = 0.0
+	control.offset_top = 0.0
+	control.offset_right = 0.0
+	control.offset_bottom = 0.0

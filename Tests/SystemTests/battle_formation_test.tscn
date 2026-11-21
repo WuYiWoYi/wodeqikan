@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Tests/SystemTests/battle_formation_test.gd" id="1_battle_formation"]
+
+[node name="BattleFormationTest" type="Node"]
+script = ExtResource("1_battle_formation")

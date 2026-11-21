@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Tests/SystemTests/world_map_milestone6_test.gd" id="1_wm6"]
+
+[node name="WorldMapMilestone6Test" type="Node"]
+script = ExtResource("1_wm6")
