@@ -5,6 +5,10 @@ extends Node2D
 ## 只读取 UnitData 的静态属性，伤害写入 BattleUnitState；
 ## 战斗结算统一由 BattleManager.finish_battle() 执行。
 
+const ProjectileManagerScript = preload(
+	"res://Scripts/Systems/Combat/projectile_manager.gd"
+)
+
 const BATTLEFIELD_SIZE := Vector2(1280.0, 720.0)
 ## 初始部署：双方靠近左右边界，阵线间距约 1100（含列间距后质心约 1040）。
 ## 这是屏幕战斗唯一的初始距离参数；所有创建入口（玩家遭遇、AI 遭遇、
@@ -17,6 +21,9 @@ const SPAWN_SPACING_Y: float = 64.0
 ## 与村庄共用 SceneCameraRig.VIEW_SIZE（1920×1080 下为 2 倍缩放 / 960×540 区域）。
 ## 相机略向下偏移以显示底部地面。
 const BATTLE_CAMERA_Y_OFFSET: float = 30.0
+
+## 玩家获胜后结算面板的展示延迟（物理时间）。结算数据立即计算，只延迟 UI 展示。
+const VICTORY_RESULT_DELAY: float = 3.0
 
 ## 集群/队形参数集中配置。
 const FORMATION_REFRESH_INTERVAL: float = 0.4
@@ -40,6 +47,8 @@ var _battle_manager: BattleManager = null
 var _session: BattleSession = null
 var _formation_manager: FormationManager = FormationManager.new()
 var _camera_rig: SceneCameraRig = null
+## 临时箭矢的唯一创建/推进入口；箭矢节点挂在 Characters 下参与 YSort。
+var _projectile_manager: Variant = null
 
 ## unit_id -> UnitActor / UnitController
 var _actors: Dictionary = {}
@@ -75,6 +84,12 @@ var _battle_over: bool = false
 var _returned: bool = false
 var _result: BattleSession.BattleResult = BattleSession.BattleResult.UNDECIDED
 var _result_data: BattleResultData = null
+## 结果面板已展示（防止延迟期间或重复调用重复弹出）。
+var _result_shown: bool = false
+## 玩家胜利时的延迟展示状态；用物理帧 delta 计时，不使用 WorldTime。
+var _result_pending: bool = false
+var _result_delay_remaining: float = 0.0
+var _result_delay_enabled: bool = true
 
 var _ui_root: Control = null
 var _info_label: Label = null
@@ -115,6 +130,7 @@ func _ready() -> void:
 	_player_side = _resolve_player_side()
 	_build_ui()
 	_spawn_units()
+	_setup_projectiles()
 	_assign_initial_control()
 	_update_formations()
 	_refresh_neighbor_cache()
@@ -152,7 +168,12 @@ func _draw() -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if _session == null or _battle_over or _scene_paused:
+	if _session == null or _scene_paused:
+		return
+	if _result_pending:
+		_tick_result_delay(delta)
+		return
+	if _battle_over:
 		return
 
 	_formation_timer += delta
@@ -186,6 +207,10 @@ func _physics_process(delta: float) -> void:
 				controller.player_tick(delta, player_input)
 			else:
 				controller.tick(delta, enemies)
+
+	# 单位完成本帧移动/射击后再推进箭矢，命中检测使用最新地面坐标。
+	if _projectile_manager != null:
+		_projectile_manager.advance(delta)
 
 	_process_deaths()
 	var paused_for_transfer := _handle_controlled_unit_death()
@@ -243,6 +268,10 @@ func get_controlled_unit_id() -> String:
 
 func get_camera_rig() -> SceneCameraRig:
 	return _camera_rig
+
+
+func get_projectile_manager() -> Variant:
+	return _projectile_manager
 
 
 func toggle_camera_free_mode() -> bool:
@@ -604,19 +633,21 @@ func _update_formations() -> void:
 			var controllers := _alive_controllers_of_party(party_id)
 			if controllers.is_empty():
 				continue
+			# 近战单位占用前排槽位，远程单位排到后排，避免弓箭手被顶到阵线最前。
+			var ordered := _order_controllers_for_slots(controllers)
 			var formation_type: FormationManager.FormationType = (
 				_party_formations.get(party_id, _default_formation)
 				as FormationManager.FormationType
 			)
 			var spacing: float = FORMATION_SPACING
-			for controller: UnitController in controllers:
+			for controller: UnitController in ordered:
 				if controller.unit_data != null and controller.unit_data.is_mounted:
 					spacing = FORMATION_SPACING_MOUNTED
 					break
 			if loose_spacing:
 				spacing *= CONTACT_SPACING_MULTIPLIER
 			var slots := _formation_manager.compute_slots(
-				formation_type, controllers.size(), spacing
+				formation_type, ordered.size(), spacing
 			)
 			var lane: float = (
 				(float(party_index) - (float(party_count) - 1.0) * 0.5)
@@ -625,11 +656,26 @@ func _update_formations() -> void:
 			var center: Vector2 = line_center + right * lane
 			if _party_move_orders.has(party_id):
 				center = _party_move_orders[party_id] as Vector2
-			var count: int = mini(controllers.size(), slots.size())
+			var count: int = mini(ordered.size(), slots.size())
 			for i: int in range(count):
 				var local := slots[i]
 				var world_slot := center + forward * local.x + right * local.y
-				controllers[i].set_formation_slot(world_slot)
+				ordered[i].set_formation_slot(world_slot)
+
+
+## 保持近战/远程各自原有相对顺序；远程追加在末尾，占据队形后排槽位。
+func _order_controllers_for_slots(
+	controllers: Array[UnitController]
+) -> Array[UnitController]:
+	var melee: Array[UnitController] = []
+	var ranged: Array[UnitController] = []
+	for controller: UnitController in controllers:
+		if controller.is_ranged_unit():
+			ranged.append(controller)
+		else:
+			melee.append(controller)
+	melee.append_array(ranged)
+	return melee
 
 
 ## 周期性构建局部邻居缓存；避免每个单位每帧遍历全场。
@@ -724,7 +770,7 @@ func _build_ui() -> void:
 	_retreat_button.pressed.connect(_on_retreat_pressed)
 	row.add_child(_retreat_button)
 
-	var hint := _make_label("WASD 移动 · 鼠标左键攻击", 14)
+	var hint := _make_label("WASD 移动 · 鼠标左键攻击/射箭", 14)
 	hint.name = "BattleHintLabel"
 	hint.anchor_left = 0.0
 	hint.anchor_top = 1.0
@@ -870,6 +916,23 @@ func _build_control_transfer_ui() -> void:
 	_spectate_button.custom_minimum_size = Vector2(0.0, 40.0)
 	_spectate_button.pressed.connect(_on_spectate_pressed)
 	column.add_child(_spectate_button)
+
+
+## 所有战斗单位共享一个发射物管理器；远程单位只通过它生成临时箭矢。
+func _setup_projectiles() -> void:
+	_projectile_manager = ProjectileManagerScript.new()
+	_projectile_manager.setup(characters)
+	for side_index: int in _side_order:
+		var controllers := _side_controllers.get(
+			side_index, []
+		) as Array[UnitController]
+		for controller: UnitController in controllers:
+			controller.set_projectile_manager(_projectile_manager)
+
+
+func _clear_projectiles() -> void:
+	if _projectile_manager != null:
+		_projectile_manager.clear()
 
 
 func _spawn_units() -> void:
@@ -1048,7 +1111,7 @@ func _check_battle_end() -> void:
 	_result = _result_for_winning_side(_winning_side)
 	if _retreat_button != null:
 		_retreat_button.disabled = true
-	_show_result()
+	_prepare_result(true)
 
 
 func _on_retreat_pressed() -> void:
@@ -1062,7 +1125,7 @@ func _on_retreat_pressed() -> void:
 	_result = BattleSession.BattleResult.RETREATED
 	if _retreat_button != null:
 		_retreat_button.disabled = true
-	_show_result()
+	_prepare_result(false)
 
 
 func _result_for_winning_side(winning_side: int) -> BattleSession.BattleResult:
@@ -1083,7 +1146,68 @@ func _resolve_player_side() -> int:
 	return side_index if side_index >= 0 else 0
 
 
+## 结算数据立即计算；只有玩家获胜的结果面板展示延迟。
+## 失败、撤退与平局保持原有即时展示。
+func _prepare_result(allow_victory_delay: bool) -> void:
+	_result_data = _battle_manager.build_battle_result(_session, int(_result))
+	if allow_victory_delay and _result_delay_enabled and _is_player_victory():
+		_result_pending = true
+		_result_delay_remaining = VICTORY_RESULT_DELAY
+		return
+	_show_result()
+
+
+func _is_player_victory() -> bool:
+	return (
+		_result != BattleSession.BattleResult.RETREATED
+		and _winning_side >= 0
+		and _winning_side == _player_side
+	)
+
+
+## 使用物理帧时间推进延迟；场景退出时节点销毁，计时自然取消。
+func _tick_result_delay(delta: float) -> void:
+	_result_delay_remaining -= delta
+	if _result_delay_remaining > 0.0:
+		return
+	_result_pending = false
+	_result_delay_remaining = 0.0
+	_show_result()
+
+
+## 测试钩子：关闭/开启玩家胜利的展示延迟。
+func set_result_delay_enabled(enabled: bool) -> void:
+	_result_delay_enabled = enabled
+
+
+## 测试钩子：立即结束延迟并展示结果面板。
+func skip_result_delay() -> void:
+	if not _result_pending:
+		return
+	_result_pending = false
+	_result_delay_remaining = 0.0
+	_show_result()
+
+
+func is_result_pending() -> bool:
+	return _result_pending
+
+
+func get_result_delay_remaining() -> float:
+	return _result_delay_remaining
+
+
+## 结果数据在胜负判定时立即生成；延迟只影响面板展示。
+func get_result_data() -> BattleResultData:
+	return _result_data
+
+
 func _show_result() -> void:
+	if _result_shown:
+		return
+	_result_shown = true
+	_result_pending = false
+	_clear_projectiles()
 	# 结果面板优先于控制权转移面板。
 	_scene_paused = false
 	if _control_dim != null:
@@ -1102,7 +1226,6 @@ func _show_result() -> void:
 	else:
 		_result_label.text = "战斗失败"
 
-	_result_data = _battle_manager.build_battle_result(_session, int(_result))
 	_refresh_result_labels()
 	_update_alive_label()
 

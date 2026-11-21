@@ -124,6 +124,12 @@ func _tick_party_tactical() -> void:
 
 
 func _update_bandit_party(party: PartyData) -> void:
+	# 刚结束战斗：先脱离接触并恢复游荡，不立即追回同一目标。
+	if _is_in_post_battle_cooldown(party):
+		party.attack_intent = false
+		party.current_target_id = ""
+		_update_bandit_route(party)
+		return
 	# 附近有可加入的战斗时优先响应，再考虑自己的追击目标。
 	if _try_respond_to_battle(party):
 		party.attack_intent = false
@@ -147,6 +153,12 @@ func _update_bandit_party(party: PartyData) -> void:
 
 
 func _update_guard_party(party: PartyData) -> void:
+	# 刚结束战斗：先脱离接触并恢复巡逻，不立即追回同一目标。
+	if _is_in_post_battle_cooldown(party):
+		party.attack_intent = false
+		party.current_target_id = ""
+		_update_patrol_party(party)
+		return
 	if _try_respond_to_battle(party):
 		party.attack_intent = false
 		return
@@ -257,6 +269,8 @@ func _chase_target(party: PartyData, target: PartyData) -> void:
 
 ## 响应附近正在进行的离屏战斗：只负责接近；实际加入由 EncounterManager 统一判定。
 func _try_respond_to_battle(party: PartyData) -> bool:
+	if _is_in_post_battle_cooldown(party):
+		return false
 	if _battle_manager == null or _battle_manager.current_battle == null:
 		return false
 	if _battle_manager.get_join_side(party.party_id) < 0:
@@ -345,3 +359,10 @@ func _tick_lord_strategic() -> void:
 
 func _wrapped_index(index: int, size: int) -> int:
 	return ((index % size) + size) % size
+
+
+## 战斗刚结束时，存活部队在短时间内不得重新追击/参战。
+func _is_in_post_battle_cooldown(party: PartyData) -> bool:
+	if party == null:
+		return false
+	return party.engagement_cooldown_until > TimeManager.world_elapsed_seconds

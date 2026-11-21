@@ -53,6 +53,8 @@ func _run() -> void:
 	add_child(_battle_scene)
 	await get_tree().process_frame
 	await get_tree().process_frame
+	# 本测试在清空敌方后立即检查结果面板；关闭胜利展示延迟。
+	_battle_scene.set_result_delay_enabled(false)
 
 	var characters := _battle_scene.get_node("World/Characters") as Node2D
 	var actors := characters.get_children()

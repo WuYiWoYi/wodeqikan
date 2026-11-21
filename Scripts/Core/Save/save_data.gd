@@ -3,9 +3,10 @@ extends RefCounted
 ## 单个存档的完整持久化容器。
 ##
 ## 只保存数据，不保存场景节点。各实体以 ID 为键保存。
-## Schema v2 增加了世界标识、世界尺寸与玩家部队 ID。
+## Schema v3 增加世界日志（战斗结果、伤亡与遭遇历史）；
+## 不要求兼容 v2 存档，读取时仍保留 v1 → v2 的浅迁移入口。
 
-const CURRENT_SCHEMA_VERSION: int = 2
+const CURRENT_SCHEMA_VERSION: int = 3
 
 var schema_version: int = CURRENT_SCHEMA_VERSION
 var project_version: String = "0.2.0"
@@ -23,6 +24,8 @@ var player_party_id: String = ""
 var player: Dictionary = {}
 var world_state: Dictionary = {}
 var scene_state: Dictionary = {}
+## 世界日志：战斗结果、部队覆灭与遭遇历史。
+var world_log: Dictionary = {}
 
 ## 以下均为 { 实体 ID: 实体数据字典 }。
 var units: Dictionary = {}
@@ -54,6 +57,7 @@ func to_dict() -> Dictionary:
 		"player": player_payload,
 		"world_state": world_state.duplicate(true),
 		"scene_state": scene_state.duplicate(true),
+		"world_log": world_log.duplicate(true),
 		"units": units.duplicate(true),
 		"parties": parties.duplicate(true),
 		"lords": lords.duplicate(true),
@@ -92,6 +96,7 @@ static func from_dict(payload: Dictionary) -> SaveData:
 	save.player_party_id = str(payload.get("player_party_id", save.player.get("party_id", "")))
 	save.world_state = _as_dict(payload.get("world_state", {}))
 	save.scene_state = _as_dict(payload.get("scene_state", {}))
+	save.world_log = _as_dict(payload.get("world_log", {}))
 	save.units = _as_dict(payload.get("units", {}))
 	save.parties = _as_dict(payload.get("parties", {}))
 	save.lords = _as_dict(payload.get("lords", {}))

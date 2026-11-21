@@ -82,8 +82,10 @@ func _test_new_game_economy(context: WorldContext) -> void:
 	_check(
 		context.party_manager.get_total_wage(player.party_id)
 			== WorldInitializer.PLAYER_MILITIA_COUNT * 2
-				+ WorldInitializer.PLAYER_TRAINED_COUNT * 5,
-		"玩家部队每日工资按民兵/职业步兵数量计算"
+				+ WorldInitializer.PLAYER_TRAINED_COUNT * 5
+				+ WorldInitializer.PLAYER_ARCHER_MILITIA_COUNT * 2
+				+ WorldInitializer.PLAYER_ARCHER_TRAINED_COUNT * 5,
+		"玩家部队每日工资按民兵/职业步兵/弓箭手数量计算"
 	)
 
 	var militia_unit: UnitData = null

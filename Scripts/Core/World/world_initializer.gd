@@ -33,16 +33,24 @@ const TEST_FORCE_SOURCE: String = "milestone2_test"
 const MILITIA_CONFIG_PATH: String = "res://Data/Units/infantry_militia.tres"
 const TRAINED_CONFIG_PATH: String = "res://Data/Units/infantry_trained.tres"
 const VETERAN_CONFIG_PATH: String = "res://Data/Units/infantry_veteran.tres"
+const ARCHER_MILITIA_CONFIG_PATH: String = "res://Data/Units/archer_militia.tres"
+const ARCHER_TRAINED_CONFIG_PATH: String = "res://Data/Units/archer_trained.tres"
 const PLAYER_HERO_CONFIG_PATH: String = "res://Data/Units/player_hero.tres"
 const TEST_MILITIA_COUNT: int = 3
 const TEST_TRAINED_COUNT: int = 2
-## 玩家部队：5 民兵 + 6 职业步兵（其中 4 名骑乘）+ 1 玩家角色 = 12 人。
-## 只复用现有兵种配置，不新增骑兵 UnitConfig。
+## 玩家部队：5 民兵 + 6 职业步兵（其中 4 名骑乘）+ 3 弓箭手 + 1 玩家角色 = 15 人。
+## 只复用现有兵种配置；弓箭手使用一级/二级配置，不新增骑兵 UnitConfig。
 const PLAYER_MILITIA_COUNT: int = 5
 const PLAYER_TRAINED_COUNT: int = 6
 const PLAYER_MOUNTED_TRAINED_COUNT: int = 4
+## 初始 3 名弓箭手：2 名一级 + 1 名二级，优先复用现有一级/二级配置。
+const PLAYER_ARCHER_MILITIA_COUNT: int = 2
+const PLAYER_ARCHER_TRAINED_COUNT: int = 1
+const PLAYER_ARCHER_COUNT: int = (
+	PLAYER_ARCHER_MILITIA_COUNT + PLAYER_ARCHER_TRAINED_COUNT
+)
 const PLAYER_TOTAL_MEMBER_COUNT: int = (
-	PLAYER_MILITIA_COUNT + PLAYER_TRAINED_COUNT + 1
+	PLAYER_MILITIA_COUNT + PLAYER_TRAINED_COUNT + PLAYER_ARCHER_COUNT + 1
 )
 const TEST_MOUNT_ID: String = "mount_horse_01"
 ## 4 匹装备给骑乘职业步兵，额外 1 匹留在背包，便于验证“上马/下马”。
@@ -341,15 +349,21 @@ static func _find_party_by_name(context: WorldContext, party_name: String) -> Pa
 	return null
 
 
-## 玩家部队：5 民兵 + 6 职业步兵（前 4 名骑乘）+ 玩家角色（最后加入，保持 UI 默认选中民兵）。
+## 玩家部队：5 民兵 + 6 职业步兵（前 4 名骑乘）+ 3 弓箭手
+## + 玩家角色（最后加入，保持 UI 默认选中民兵）。
 static func _populate_player_party(
 	context: WorldContext, party: PartyData, militia: UnitConfig, trained: UnitConfig
 ) -> bool:
 	if not party.member_unit_ids.is_empty():
 		return true
 	var hero_config: UnitConfig = load(PLAYER_HERO_CONFIG_PATH) as UnitConfig
+	var archer_militia: UnitConfig = load(ARCHER_MILITIA_CONFIG_PATH) as UnitConfig
+	var archer_trained: UnitConfig = load(ARCHER_TRAINED_CONFIG_PATH) as UnitConfig
 	if hero_config == null:
 		push_error("玩家角色配置加载失败: %s" % PLAYER_HERO_CONFIG_PATH)
+		return false
+	if archer_militia == null or archer_trained == null:
+		push_error("玩家弓箭手配置加载失败")
 		return false
 
 	var configs: Array[UnitConfig] = []
@@ -357,6 +371,10 @@ static func _populate_player_party(
 		configs.append(militia)
 	for i: int in range(PLAYER_TRAINED_COUNT):
 		configs.append(trained)
+	for i: int in range(PLAYER_ARCHER_MILITIA_COUNT):
+		configs.append(archer_militia)
+	for i: int in range(PLAYER_ARCHER_TRAINED_COUNT):
+		configs.append(archer_trained)
 	configs.append(hero_config)
 
 	# 测试用马匹/晋升物品库存：新游戏补齐到实际需要的数量，不修改正式经济系统。

@@ -1,6 +1,6 @@
 extends Node
 ## 玩家初始部队扩编测试。
-## 覆盖：12 人编制、完整 UnitData、骑乘/马匹库存、成员归属、
+## 覆盖：15 人编制（含 3 名弓箭手）、完整 UnitData、骑乘/马匹库存、成员归属、
 ## 存档往返不丢失或重复生成成员。
 ## 运行：
 ##   Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/player_party_expansion_test.tscn
@@ -33,18 +33,20 @@ func _run() -> void:
 
 	_check(
 		player.member_unit_ids.size() == WorldInitializer.PLAYER_TOTAL_MEMBER_COUNT,
-		"玩家部队人数为 12"
+		"玩家部队人数为 15"
 	)
 	_check(
 		WorldInitializer.PLAYER_TOTAL_MEMBER_COUNT
 			== WorldInitializer.PLAYER_MILITIA_COUNT
-				+ WorldInitializer.PLAYER_TRAINED_COUNT + 1,
+				+ WorldInitializer.PLAYER_TRAINED_COUNT
+				+ WorldInitializer.PLAYER_ARCHER_COUNT + 1,
 		"编制常量与人数一致"
 	)
 
 	var hero_count: int = 0
 	var militia_count: int = 0
 	var trained_count: int = 0
+	var archer_count: int = 0
 	var mounted_count: int = 0
 	var all_have_data: bool = true
 	var all_belong_to_party: bool = true
@@ -66,6 +68,9 @@ func _run() -> void:
 				militia_count += 1
 			"infantry_trained":
 				trained_count += 1
+			_:
+				if unit.config_id.begins_with("archer_"):
+					archer_count += 1
 		if unit.is_mounted:
 			mounted_count += 1
 
@@ -79,6 +84,10 @@ func _run() -> void:
 	_check(
 		trained_count == WorldInitializer.PLAYER_TRAINED_COUNT,
 		"职业步兵数量符合配置"
+	)
+	_check(
+		archer_count == WorldInitializer.PLAYER_ARCHER_COUNT,
+		"弓箭手数量符合配置"
 	)
 	_check(
 		mounted_count == WorldInitializer.PLAYER_MOUNTED_TRAINED_COUNT,

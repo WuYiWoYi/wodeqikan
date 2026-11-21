@@ -212,6 +212,11 @@ func play_attack_animation(direction: Vector2 = Vector2.LEFT) -> void:
 		_human_visual.play_attack_animation(direction)
 
 
+func play_ranged_attack_animation(direction: Vector2 = Vector2.LEFT) -> void:
+	if _human_visual != null:
+		_human_visual.play_ranged_attack_animation(direction)
+
+
 func advance_animation(delta: float) -> void:
 	if _human_visual != null:
 		_human_visual.advance_animation(delta)

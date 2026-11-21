@@ -1,0 +1,35 @@
+[gd_resource type="Resource" script_class="UnitConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/unit_config.gd" id="1_unitconfig"]
+
+[resource]
+script = ExtResource("1_unitconfig")
+config_id = "archer_trained"
+display_name = "军士弓箭手"
+description = "受过训练的二级弓箭手。攻击方式由所装备的远程武器决定。"
+unit_class = 1
+is_mounted = false
+tier = 2
+base_level = 1
+base_max_hp = 100
+base_attack = 20
+attack_interval = 3.0
+attack_range = 360.0
+move_speed = 55.0
+body_height = 48.0
+daily_wage = 5
+promotion_item_id = "promotion_rank_token"
+promotion_item_cost = 1
+promotion_target_config_id = "archer_veteran"
+max_level = 10
+base_exp_to_next_level = 100
+exp_growth_per_level = 50
+hp_per_level = 8
+attack_per_level = 2
+move_speed_per_level = 0.0
+attack_range_per_level = 0.0
+visual_scene_path = ""
+recruit_cost = 0
+default_equipment = {
+"WEAPON": "weapon_bow_01"
+}

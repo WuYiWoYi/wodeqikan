@@ -112,6 +112,25 @@ func play_attack(direction: Vector2 = Vector2.LEFT) -> void:
 	queue_redraw()
 
 
+## 弓箭攻击表现：拉弓/放箭；箭矢与伤害由 UnitController / ProjectileManager 负责。
+func play_ranged_attack(direction: Vector2 = Vector2.LEFT) -> void:
+	_attack_flash = 0.0
+	if is_instance_valid(visual):
+		visual.play_ranged_attack_animation(direction)
+		visual.set_attack_flash(true)
+	queue_redraw()
+
+
+## 当前右手武器枢轴的世界坐标；弓的发射位置从这里取样。
+## 没有武器枢轴时返回 Vector2.INF，调用方使用单位地面坐标作为回退。
+func get_weapon_pivot_global_position() -> Vector2:
+	if is_instance_valid(visual):
+		var pivot: Node2D = visual.get_weapon_pivot()
+		if pivot != null:
+			return pivot.global_position
+	return Vector2.INF
+
+
 func is_attack_animating() -> bool:
 	return is_instance_valid(visual) and visual.is_attack_animating()
 

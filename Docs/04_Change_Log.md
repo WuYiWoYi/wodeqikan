@@ -4,6 +4,83 @@
 
 ---
 
+## 2026-11-21 · 阶段 6 后续：弓箭手与远程箭矢
+
+### 新增
+
+- `EquipmentConfig.attack_type`（`MELEE` / `RANGED`）、`attack_interval_override`、`projectile_texture_path`、`projectile_speed`、`projectile_arc_height`、`is_ranged_weapon()`。
+- `UnitConfig.body_height`；`UnitData` 派生字段 `attack_type`、`body_height`、`projectile_*` 与 `is_ranged_attacker()`，随存档往返。
+- 三级弓箭手配置 `Data/Units/archer_militia.tres` / `archer_trained.tres` / `archer_veteran.tres`（10/50、20/100、25/180）。
+- 弓装备 `Data/Equipment/weapon_bow_01.tres`：射程 360、攻击间隔 3 秒、临时弓/箭美术、握把锚点 `(27,36)`。
+- `ArrowProjectile`：地面投影 + 抛物线视觉高度、固定终点、地面半径/身高命中、每箭最多一次伤害。
+- `ProjectileManager`：创建/推进/清理箭矢，注入全部 `UnitController`。
+- `CombatRules.ranged_attack_range()` / `is_in_ranged_range()` / `can_ranged_attack()`。
+- `UnitController._tick_ranged()` 与 `_fire_ranged_at()`：远程 AI（接近/站定/后撤/换目标）与玩家共用发射入口。
+- `HumanVisual.play_ranged_attack_animation()`：拉弓 0.18s / 撒放 0.08s / 恢复 0.30s。
+- `archer_battle_test`、`archer_scene_test`。
+
+### 变更
+
+- `StatCalculator` 从 WEAPON 派生攻击方式、攻击间隔与弹道参数，并按骑乘叠加身高。
+- `BattleScene` 创建并推进 `ProjectileManager`；队形槽位分配将近战排前、远程排后；左键提示改为“攻击/射箭”。
+- `WorldInitializer` 新游戏玩家部队扩编到 15 人：5 民兵 + 6 职业步兵（4 骑乘）+ 2 一级弓 + 1 二级弓 + 1 玩家角色。
+- 玩家接管弓箭手后使用弓的 3 秒冷却，不继承原控制单位冷却。
+- `player_party_expansion_test`、`unit_tier_wage_test` 更新到 15 人编制与新增工资。
+
+### 决策
+
+- D103：攻击方式由武器派生，不按兵种名分支。
+- D104：箭矢地面投影与视觉高度分离，高度不参与 Y 排序。
+- D105：固定终点 + 身高判定，无随机命中率，每箭最多一次伤害。
+- D106：AI/玩家共用发射入口，冷却绑定发射者。
+- D107：远程单位优先分配后排队形槽位。
+
+### 验证
+
+- 通过：`archer_battle_test`、`archer_scene_test`、`battle_scene_test`、`combat_attack_rules_test`、`battle_formation_test`、`player_control_test`、`battle_retreat_test`、`battle_side_result_test`、`milestone2_flow_test`、`save_persistence_test`、`battle_result_delay_test`、`player_party_expansion_test`、`unit_tier_wage_test`、`unit_visual_test`。
+- 未执行与经济/大地图无关且不受本次改动影响的全量套件。
+
+---
+
+## 2026-11-21 · 阶段 6 后续：大地图表现、AI 战后恢复、存档与战斗 UI
+
+### 新增
+
+- `PartyData.engagement_cooldown_until`：战斗结束后的运行时交战冷却（30 世界秒，不进入存档）。
+- `PartyManager.sanitize_loaded_runtime_state()`：读档清理攻击意图、焦点、冷却、失效战斗/追击状态。
+- `SaveData.world_log` 与 Schema v3：世界日志进入存档。
+- `BattleScene.VICTORY_RESULT_DELAY = 3.0` 与结果延迟状态；测试钩子 `set_result_delay_enabled()`、`skip_result_delay()`、`get_result_data()`。
+- 大地图战斗汇总按 `side_index` 多列显示；`get_battle_summary_column_count()` / `get_battle_summary_side_indices()`。
+- 悬浮信息左 Alt 详细模式与测试钩子 `set_alt_detail_active()` / `is_alt_detail_active()`。
+- `save_persistence_test`、`battle_result_delay_test`。
+
+### 变更
+
+- `SettlementIcon` 恢复原始村庄/城堡世界美术；名称与家族徽章迁移到 `SettlementNameTag` 的固定 240×36 组合（徽章在左）。
+- `BattleManager._unlock_session_parties()` 不再把存活部队移动目标重置到当前位置；清除战斗指令并施加交战冷却。
+- `AIManager` 强盗/治安队在冷却期间恢复游荡/巡逻；`EncounterManager` 跳过冷却中的敌对组合。
+- `WorldContext` 保存/恢复世界日志，并在读档后执行运行时清理与领袖/成员校验。
+- `PartyData.from_dict()` 增加枚举范围校验；`validate_membership_consistency()` 校验领袖归属。
+- 胜利结果面板延迟展示；失败、撤退、平局保持即时。
+- 战斗汇总按战斗侧分列，第三侧自动扩列；战斗结束移除列。
+- 悬浮默认为名称，按住左 Alt 显示总人数与兵种/骑乘构成。
+
+### 决策
+
+- D097：村庄美术与名称/徽章分层。
+- D098：战后冷却而非重置移动目标。
+- D099：Schema v3 世界日志与读档清理。
+- D100：胜利面板物理时间延迟、数据即时。
+- D101：汇总按 side_index 分列。
+- D102：左 Alt 悬浮输入集中在 `world_map._input()`。
+
+### 验证
+
+- 通过：`save_persistence_test`、`battle_result_delay_test`、`world_map_milestone6_test`、`world_map_battle_marker_test`、`battle_scene_test`、`milestone2_flow_test`、`multi_party_battle_test`、`milestone1_restart_test`（save/load）及相关单元/系统回归。
+- 存档 Schema：v2 → v3（新增 `world_log`，不要求旧档兼容）。
+
+---
+
 ## 2026-11-21 · 修复：已有战斗时普通部队对话显示真实原因
 
 ### 新增

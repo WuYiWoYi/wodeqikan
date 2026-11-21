@@ -55,6 +55,15 @@ const SPEAR_POST_ATTACK_HOLD_TIME: float = 4.0
 const SPEAR_POST_ATTACK_DELAY: float = SPEAR_POST_ATTACK_HOLD_TIME
 const SPEAR_RECOVER_TIME: float = 0.35
 
+## 弓箭动画参数。弓默认朝左，旋转 0 时箭矢沿人物左前方射出。
+## 伤害/冷却仍由 UnitController 负责，本动画只表现拉弓与放箭。
+const BOW_DRAW_TIME: float = 0.18
+const BOW_RELEASE_TIME: float = 0.08
+const BOW_RECOVER_TIME: float = 0.30
+const BOW_DRAW_BACK_DISTANCE: float = 4.0
+const BOW_RELEASE_FORWARD_DISTANCE: float = 2.0
+const BOW_IDLE_ROTATION: float = 0.0
+
 const WEAPON_FLASH_COLOR: Color = Color(1.7, 1.35, 0.55)
 const WEAPON_NORMAL_COLOR: Color = Color.WHITE
 
@@ -89,6 +98,9 @@ enum AnimationPhase {
 	THRUST,
 	POST_DELAY,
 	RECOVER,
+	RANGED_DRAW,
+	RANGED_RELEASE,
+	RANGED_RECOVER,
 }
 
 var _weapon_pivot: Node2D = null
@@ -401,6 +413,29 @@ func play_attack_animation(direction: Vector2 = Vector2.LEFT) -> void:
 	set_process(true)
 
 
+## 弓箭攻击动画：拉弓 -> 放箭 -> 恢复。只播放表现，不生成箭矢或结算伤害。
+## direction 为世界方向；弓素材默认朝左，因此目标角度按“左方向”换算。
+func play_ranged_attack_animation(direction: Vector2 = Vector2.LEFT) -> void:
+	if _weapon_pivot == null:
+		return
+	var facing_scale: float = -1.0 if scale.x < 0.0 else 1.0
+	var local_direction := Vector2(direction.x * facing_scale, direction.y)
+	if local_direction.length_squared() < 0.0001:
+		local_direction = Vector2.LEFT
+	local_direction = local_direction.normalized()
+	# 旋转 0 时弓的射击方向为左；目标旋转 = 目标方向角 - 左方向角。
+	_attack_target_rotation = local_direction.angle() - PI
+	var shot_direction := Vector2.LEFT.rotated(_attack_target_rotation)
+	_weapon_back_offset = -shot_direction * BOW_DRAW_BACK_DISTANCE
+	_weapon_forward_offset = shot_direction * BOW_RELEASE_FORWARD_DISTANCE
+	_windup_start_rotation = _weapon_pivot.rotation
+	_windup_start_position = _weapon_pivot.position
+	_weapon_sway_current = 0.0
+	_attack_phase = AnimationPhase.RANGED_DRAW
+	_phase_time = 0.0
+	set_process(true)
+
+
 ## 供测试/调试确定性推进动画；_process 也会调用。
 func advance_animation(delta: float) -> void:
 	if _weapon_pivot == null or _attack_phase == AnimationPhase.IDLE:
@@ -462,6 +497,49 @@ func advance_animation(delta: float) -> void:
 				_attack_phase = AnimationPhase.IDLE
 				_phase_time = 0.0
 				_weapon_sway_current = 0.0
+		AnimationPhase.RANGED_DRAW:
+			var draw_t: float = clampf(_phase_time / BOW_DRAW_TIME, 0.0, 1.0)
+			var draw_ease: float = _ease(draw_t)
+			_weapon_pivot.rotation = lerp_angle(
+				_windup_start_rotation, _attack_target_rotation, draw_ease
+			)
+			_weapon_pivot.position = _windup_start_position.lerp(
+				BODY_WEAPON_ANCHOR + _weapon_back_offset, draw_ease
+			)
+			if draw_t >= 1.0:
+				_attack_phase = AnimationPhase.RANGED_RELEASE
+				_phase_time = 0.0
+		AnimationPhase.RANGED_RELEASE:
+			var release_t: float = clampf(_phase_time / BOW_RELEASE_TIME, 0.0, 1.0)
+			var release_ease: float = _ease(release_t)
+			_weapon_pivot.rotation = _attack_target_rotation
+			_weapon_pivot.position = (
+				(BODY_WEAPON_ANCHOR + _weapon_back_offset).lerp(
+					BODY_WEAPON_ANCHOR + _weapon_forward_offset, release_ease
+				)
+			)
+			if release_t >= 1.0:
+				_attack_phase = AnimationPhase.RANGED_RECOVER
+				_phase_time = 0.0
+		AnimationPhase.RANGED_RECOVER:
+			var bow_recover_t: float = clampf(
+				_phase_time / BOW_RECOVER_TIME, 0.0, 1.0
+			)
+			var bow_recover_ease: float = _ease(bow_recover_t)
+			_weapon_pivot.rotation = lerp_angle(
+				_attack_target_rotation, BOW_IDLE_ROTATION, bow_recover_ease
+			)
+			_weapon_pivot.position = (
+				(BODY_WEAPON_ANCHOR + _weapon_forward_offset).lerp(
+					BODY_WEAPON_ANCHOR, bow_recover_ease
+				)
+			)
+			if bow_recover_t >= 1.0:
+				_weapon_pivot.rotation = BOW_IDLE_ROTATION
+				_weapon_pivot.position = BODY_WEAPON_ANCHOR
+				_attack_phase = AnimationPhase.IDLE
+				_phase_time = 0.0
+				_weapon_sway_current = 0.0
 
 
 func _process(delta: float) -> void:
@@ -500,6 +578,8 @@ func is_attack_pose_locked() -> bool:
 	return (
 		_attack_phase == AnimationPhase.WINDUP
 		or _attack_phase == AnimationPhase.THRUST
+		or _attack_phase == AnimationPhase.RANGED_DRAW
+		or _attack_phase == AnimationPhase.RANGED_RELEASE
 	)
 
 

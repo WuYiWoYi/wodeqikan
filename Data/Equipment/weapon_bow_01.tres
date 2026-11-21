@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="EquipmentConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/equipment_config.gd" id="1_equipmentconfig"]
+
+[resource]
+script = ExtResource("1_equipmentconfig")
+equipment_id = "weapon_bow_01"
+display_name = "临时弓"
+slot = 0
+attack_bonus = 0
+max_hp_bonus = 0
+move_speed_bonus = 0.0
+attack_range_bonus = 0.0
+weapon_attack_range = 360.0
+attack_type = 1
+attack_interval_override = 3.0
+projectile_texture_path = "res://art/我的骑砍临时美术/武器箭临时.png"
+projectile_speed = 480.0
+projectile_arc_height = 70.0
+visual_part = ""
+visual_texture_path = "res://art/我的骑砍临时美术/武器弓临时.png"
+visual_layer = 0
+visual_anchor = Vector2(27, 36)
+allowed_unit_config_ids = Array[String]([])

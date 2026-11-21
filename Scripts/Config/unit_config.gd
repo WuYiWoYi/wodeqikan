@@ -34,6 +34,9 @@ enum UnitClass {
 @export var attack_interval: float = 1.0
 @export var attack_range: float = 20.0
 @export var move_speed: float = 60.0
+## 单位身体有效高度（像素），用于远程箭矢的高度命中判定。
+## 骑乘时由 StatCalculator 统一追加坐骑高度，不在兵种配置中重复设置。
+@export var body_height: float = 48.0
 
 @export_category("Economy")
 ## 每名士兵的每日工资；由该兵种等级决定，骑马/下马不变。
@@ -131,6 +134,10 @@ func validate() -> bool:
 		return false
 	if move_speed_per_level < 0.0 or attack_range_per_level < 0.0:
 		push_error("UnitConfig 等级成长配置非法: %s" % config_id)
+		return false
+	if body_height <= 0.0:
+		push_error("UnitConfig 身体高度必须大于 0: %s（body_height=%s）"
+			% [config_id, body_height])
 		return false
 	if tier < 1 or tier > 3:
 		push_error("UnitConfig 兵种等级必须在 1..3: %s（tier=%s）" % [config_id, tier])

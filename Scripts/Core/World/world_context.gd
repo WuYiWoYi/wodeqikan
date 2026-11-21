@@ -85,6 +85,7 @@ func to_save_data() -> SaveData:
 	}
 	save.world_state = {}
 	save.scene_state = {}
+	save.world_log = world_log_manager.to_dict()
 	save.units = unit_manager.to_dict()
 	save.parties = party_manager.to_dict()
 	save.settlements = settlement_manager.to_dict()
@@ -119,7 +120,12 @@ func load_from_save_data(save: SaveData) -> bool:
 	# 旧存档没有 control_type / party_kind / banner_texture_path：
 	# 按 player_party_id、阵营、家族与 AI 类型补齐安全默认值。
 	party_manager.apply_runtime_defaults(player_party_id)
+	# 存档不保存活动战斗会话：清理读档后不可能成立的战斗/追逐状态。
+	var sanitize_notes: Array[String] = party_manager.sanitize_loaded_runtime_state()
+	for message: String in sanitize_notes:
+		print("[WorldContext] %s" % message)
 	settlement_manager.load_from_dict(save.settlements)
+	world_log_manager.load_from_dict(save.world_log)
 	world_map_manager.world_bounds = Rect2(Vector2.ZERO, world_size)
 
 	# 读档以当前静态配置、持久化等级与装备为准重算最终属性；

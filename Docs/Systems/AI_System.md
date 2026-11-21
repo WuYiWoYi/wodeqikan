@@ -69,6 +69,19 @@ Idle
 - 部队移动目标可通过 `BattleScene.set_party_move_order()` 覆盖，为后续键盘指挥预留。
 - 当前 AI 没有寻路、地形阻挡、显式攻击槽位分配、复杂包围与士气。
 
+### 2.2 远程单位 AI（阶段 6 后续）
+
+`UnitController.tick()` 对 `UnitData.is_ranged_attacker()` 为真的单位进入 `_tick_ranged`，其余保持近战流程：
+
+- **射程**：使用 `UnitData.attack_range`，弓配置为 360；射程独立于近战攻击矩形，判定为双方地面中心距离 ≤ 射程。
+- **射程内**：站定并面向目标，冷却结束立即发射；冷却中保持位置，不冲入近战。
+- **射程外**：向目标外围的站定点移动，站定距离 = 射程 × `RANGED_STANDOFF_FACTOR(0.82)`，避免贴脸。
+- **敌方过近**：距离 < `RANGED_MIN_RANGE = 110` 时后撤，同时保持面向目标，避免被近战单位贴身。
+- **换目标**：目标死亡/失效时在同一 tick 重新索敌；新的有效目标必须在射程内才会立即开火。
+- **发射**：与玩家共用 `_fire_ranged_at`，冻结目标当前地面坐标后生成箭矢；发射后进入 `attack_interval`（弓为 3 秒）冷却。
+- **队形**：`BattleScene` 分配槽位时把远程单位排在队形后列，AI 因此更倾向在己方后排活动。
+- 当前没有提前量计算、弹道预判、齐射/集火指令、弹药管理或“无箭线时停火”策略。
+
 ## 3. 部队 AI
 
 ### 3.1 当前实现（大地图固定路线）
@@ -323,6 +336,7 @@ AI 参数应可配置：
 | 玩家主动追击接触 | 已实现（`focus_party_id` 作为显式交互意图，`PLAYER_INITIATED` 保留离开） |
 | 中立/无关部队不自动打断 | 已实现（普通对话只对主动点击目标；自动遭遇需实际追击关系） |
 | `UnitAI` | AI/玩家双模式、360°定向矩形、单次单目标、搜索/接近/攻击状态、外围进攻点、降速、实体碰撞、队形槽位与局部避让已实现；复杂战术/寻路 TODO |
+| 远程单位 AI | 已实现：射程内站定射击、射程外接近、过近后撤、换目标、独立 3 秒冷却；无预判/齐射/弹药 |
 | `LordAI` | TODO(阶段5) |
 | 空间查询 | TODO(阶段2) |
 | 统一随机源 | TODO(阶段3) |
@@ -343,3 +357,13 @@ AI 参数应可配置：
 - 东路强盗、荒野强盗沿用 `BANDIT` AI，只通过独立 `ai_route_settlement_ids` 与出生点区分。
 - 家族不参与敌对判定：家族骑士属于 `FACTION_LOCAL`，与玩家中立；家族 `family_id` 仅由表现层读取。
 - 大地图速度倍率在 `WorldMapManager` 统一应用，AI 仍按原始 `movement_speed` 做速度关系比较。
+
+## 11. 战后交战冷却与恢复（阶段 6 后续）
+
+- `PartyData.engagement_cooldown_until` 为运行时世界时间截止点，由 `BattleManager._unlock_session_parties()` 设置。
+- `AIManager._is_in_post_battle_cooldown()` 在冷却期间：
+  - 强盗：清除攻击意图与追击目标，恢复游荡路线；
+  - 治安队：清除攻击意图与追击目标，恢复巡逻；
+  - `_try_respond_to_battle()` 直接返回 false，不接近附近战斗。
+- `EncounterManager.update_encounters()` 跳过任一方处于冷却的敌对组合，避免接触距离内逐 tick 重新开战。
+- 冷却不写入存档；读档统一清零，AI 按当前世界状态重新决策。

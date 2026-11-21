@@ -1,8 +1,8 @@
 # 当前开发状态
 
 **更新日期：** 2026-11-21
-**当前阶段：** 阶段 6 后续 · 村庄表现、玩家扩编与小地图战斗集群完成
-**整体状态：** 部队标记已恢复原尺寸，村庄改用独立放大的圆形旗帜标记且名称位于正上方；玩家初始部队扩编为 12 人；小地图战斗初始距离拉开，并通过双方半场列阵、接敌放松、目标分流与局部分离减少扎堆；统一 Party 架构与底部遭遇对话保持有效；相关系统与单元测试通过
+**当前阶段：** 阶段 6 后续 · 弓箭手与远程箭矢完成
+**整体状态：** 三级弓箭手接入现有 UnitData/UnitController；弓与箭临时美术、抛物线箭矢、高度命中与自然射失完成；AI 与玩家共用固定终点发射入口和 3 秒冷却；新游戏玩家部队扩编到 15 人（含 3 名弓箭手）；远程与近战/存档相关测试通过
 
 ---
 
@@ -30,6 +30,8 @@
 | 6 世界日志、美术层级与战斗表现 | 完成 | 左下角世界日志、左右手独立层级、头部/头盔分离、中立部队不自动打断、满血隐藏生命条 |
 | 6 后续 · 统一部队架构与遭遇交互 | 完成 | 统一 Party 控制类型/类型标识、底部 NPC 遭遇对话、领袖头像/默认剪影、遭遇原因、ENEMY_PURSUIT 禁止离开、旧存档安全推断 |
 | 6 后续 · 村庄表现/玩家扩编/战斗集群 | 完成 | 部队标记恢复原尺寸、村庄圆形标记放大、名称位于上方、玩家 12 人、初始部署距离 1100、半场列阵/接敌放松/目标分流/局部避让 |
+| 6 后续 · 大地图表现/AI 恢复/存档/战斗 UI | 完成 | 村庄原始美术 + 徽章名称组合、AI 战后恢复与冷却、Schema v3 世界日志与读档清理、胜利 3 秒延迟、按 side_index 分列、左 Alt 详细悬浮 |
+| 6 后续 · 弓箭手与远程箭矢 | 完成 | 三级弓箭手、弓/箭临时美术、固定终点抛物线箭矢、高度命中与自然射失、远程 AI、玩家射箭、3 秒冷却、新游戏 3 名弓箭手与存档 |
 | 6（原路线图）援军与高级战斗 | 未开始 | 并入后续高级战斗阶段 |
 | 7 沙盒扩展 | 未开始 | — |
 
@@ -1122,6 +1124,102 @@
 - 新增 `battle_occupancy_ui_test`：离屏战斗占用时独立部队按钮禁用且原因明确；绕过按钮直接调用同样被拒绝；参战方按钮变为“加入战斗”，加入后复用同一会话并切换为屏幕战斗。
 - 回归通过：`party_dialogue_test`、`encounter_dialogue_ui_test`、`world_map_milestone6_test`、`player_encounter_test`、`ai_encounter_flow_test`。
 
+## 8.16 阶段 6 后续 · 大地图表现、AI 战后恢复、存档与战斗 UI
+
+### 村庄与名称
+
+- `SettlementIcon` 恢复原始村庄/城堡世界美术，仅负责世界层绘制；位置、缩放与点击判定不变。
+- `SettlementNameTag` 改为固定 240×36 的屏幕层组合：左侧圆形家族徽章 + 右侧名称，整体位于地点美术上方并水平居中。
+- 徽章读取 `SettlementData.family_id` 对应的 `FamilyConfig`；无家族地点隐藏徽章。名称与徽章都不拦截鼠标。
+
+### AI 战后恢复
+
+- `PartyData.engagement_cooldown_until` 为运行时字段：战斗结束后的存活部队获得 30 世界秒冷却，期间不重新追击、不响应/创建战斗。
+- `BattleManager._unlock_session_parties()` 只清理战斗目标、攻击意图、焦点与指令，不把移动目标重置到当前位置。
+- `AIManager` 的强盗/治安队冷却结束后恢复游荡或巡逻；`EncounterManager` 跳过冷却中的敌对组合，避免同一对手逐 tick 重复开战。
+- 两方与多方战斗共用同一解锁流程；结算后 `current_battle` 清空，战斗标记与汇总列同步清理。
+
+### 存档持久化
+
+- `SaveData.CURRENT_SCHEMA_VERSION` 升级为 3，新增 `world_log`；`WorldContext` 保存/恢复世界日志。
+- 读档时 `PartyManager.sanitize_loaded_runtime_state()` 清理运行时字段：`attack_intent`、`focus_party_id`、战斗冷却；无活动战斗时 `IN_BATTLE`/`RETURNING` 回落为 `AVAILABLE`（无成员则 `DISABLED`）；失效追击目标与 `FOLLOW_PARTY` 指令被清除。
+- `PartyData.from_dict()` 对战斗/移动/指令枚举做范围校验；`validate_membership_consistency()` 增加领袖必须属于本部队且单位存在的校验。
+- 战斗会话仍不写入存档；保存期间有活动战斗仍被 `GameManager.save_game()` 拒绝。
+
+### 战斗结果与汇总 UI
+
+- 玩家获胜时结算数据立即生成，结果面板延迟 `VICTORY_RESULT_DELAY = 3.0` 物理秒展示；失败、撤退、平局保持即时。
+- 计时只使用战斗场景 `_physics_process(delta)`，不使用世界时间；场景退出时随节点销毁安全取消；`_result_shown` 防止重复展示。
+- 大地图战斗汇总改为 `HBoxContainer` 多列：每个 `side_index` 一列，同侧部队在列内纵向排列，第三侧起自动扩展列与面板宽度；战斗结束移除所有列。
+
+### 悬浮信息
+
+- 默认只显示部队名称；按住左 Alt 时显示总人数、按兵种/骑乘分组的构成。
+- `world_map._input()` 集中处理左 Alt 的按下/松开与 echo，右 Alt 不触发；不标记事件已处理，不影响点击与数字键。
+- 模式切换立即重建当前悬浮面板，无需移动鼠标；松开左 Alt 立即恢复简单模式。
+
+### 测试
+
+- 新增 `save_persistence_test`：世界/时间/地点/部队/士兵/经济/世界日志往返、战后状态、失效战斗清理、领袖校验。
+- 新增 `battle_result_delay_test`：胜利延迟、数据立即生成、失败即时、延迟期间退出、无重复展示。
+- 更新 `world_map_battle_marker_test`（三方战斗三列与结束清理）、`world_map_milestone6_test`（村庄原始美术、徽章位置/家族、左 Alt 输入）、`battle_scene_test`/`milestone2_flow_test`/`multi_party_battle_test`（测试内关闭胜利延迟）。
+- 回归通过：`party_manager_test`、`unit_party_serialization_test`、`party_architecture_test`、`family_appearance_test`、`world_log_manager_test`、`battle_manager_test`、`battle_result_test`、`ai_manager_test`、`offscreen_battle_hourly_test`、`ai_encounter_flow_test`、`player_encounter_test`、`player_pursuit_encounter_test`、`encounter_dialogue_ui_test`、`world_map_input_test`、`world_log_ui_test`、`party_panel_test`、`neutral_party_interaction_test`、`battle_scene_test`、`milestone2_flow_test`、`battle_side_result_test`、`battle_retreat_test`、`player_control_test`、`multi_party_battle_test`、`milestone1_restart_test`（save/load 两进程）。
+
+### 明确未实现
+
+- 活动战斗会话不进入存档；读档只保证不出现永久战斗状态，不恢复战斗中的临时 HP/位置。
+- 胜利延迟期间不能跳过；左 Alt 详细模式没有触屏/手柄入口。
+- 仍不支持并行战斗；仍是单一 `current_battle`。
+
+## 8.17 阶段 6 后续 · 弓箭手与远程箭矢
+
+### 数据与配置
+
+- 新增三级弓箭手 `archer_militia` / `archer_trained` / `archer_veteran`，基础攻击/生命 10/50、20/100、25/180，工资 2/5/10，晋升链路完整。
+- 弓箭手复用 `UnitData`、`UnitManager`、`UnitActor`、`UnitController`；没有独立 ArcherActor。
+- 新增 `weapon_bow_01`：WEAPON、`attack_type = RANGED`、射程 360、攻击间隔固定 3 秒、箭速 480、抛物线高度 70。
+- `UnitConfig.body_height`（默认 48）与 `UnitData` 派生字段 `attack_type` / `body_height` / `projectile_*` 接入 `StatCalculator` 与存档。
+- 攻击方式由武器决定，`UnitData.is_ranged_attacker()` 是战斗层唯一分支入口。
+
+### 表现
+
+- 弓 48×48、默认朝左，握把旋转中心 `(27,36)`（对应素材左下角 `(27,12)`）；拉弓 0.18s、撒放 0.08s、恢复 0.30s。
+- 箭 48×48、箭头朝上；飞行旋转取地面速度与高度变化合成的视觉速度，箭头始终指向飞行方向。
+- 箭矢节点位置始终是地面投影并参与 `Characters` YSort；视觉高度只偏移子 Sprite，不改变前后排序。
+- 近战长矛与其他武器路径未改变。
+
+### 箭矢与命中
+
+- 发射时冻结目标地面坐标，`P(t)=P0+(P1-P0)t`；视觉高度 `h(t)=launch·(1-t)+4H·t(1-t)`，显示为 `P+(0,-h)`。
+- 命中条件：地面距离 ≤ 18、高度 ≤ 目标 `body_height`、目标存活且敌对；每支箭最多结算一次伤害。
+- 移动目标会因固定终点与飞行时间自然射失，没有随机命中率；头顶掠过的箭矢不造成伤害。
+- 箭矢在命中、抵达终点或超过 3 秒后销毁；飞行状态不进入存档。
+
+### AI 与玩家
+
+- `UnitController._tick_ranged`：射程内站定射击；射程外接近到 0.82 倍射程；敌人近于 110 时后撤；目标失效后同一 tick 重选。
+- 队形槽位分配把近战排前、远程排后，弓箭手优先进入后列。
+- AI 与玩家共用 `_fire_ranged_at`；玩家鼠标世界坐标由 `get_global_mouse_position()` 转换后交给 `try_player_attack_at()`。
+- 发射成功立即进入 3 秒冷却，动画与冷却独立；接管弓箭手不继承原单位冷却，控制权切换不复制单位或重置 HP。
+
+### 初始部队与存档
+
+- 新游戏玩家部队 15 人：5 民兵 + 6 职业步兵（4 骑乘）+ 2 一级弓 + 1 二级弓 + 1 玩家角色；弓箭手拥有完整 UnitData、弓装备与唯一 ID。
+- 旧存档不补兵、不重复生成，也不会额外发放弓箭手。
+- `UnitData` 持久化攻击方式/身高/弹道参数与弓装备；飞行箭矢与冷却不入档。
+
+### 测试
+
+- 新增 `archer_battle_test`：配置/装备属性、弓锚点与动画、抛物线/地面深度、静止命中、移动目标射失、头顶掠过、死亡目标、每箭单次伤害、AI 发射/冷却/接近/后撤、玩家固定终点、初始 3 名弓箭手与存档往返。
+- 新增 `archer_scene_test`：真实战斗场景注入 ProjectileManager、接管弓箭手、鼠标世界坐标入口、3 秒冷却、箭矢命中与冷却拒绝。
+- 回归通过：`battle_scene_test`、`combat_attack_rules_test`、`battle_formation_test`、`player_control_test`、`battle_retreat_test`、`battle_side_result_test`、`milestone2_flow_test`、`save_persistence_test`、`battle_result_delay_test`、`player_party_expansion_test`、`unit_tier_wage_test`、`unit_visual_test`。
+
+### 明确未实现
+
+- 弩、投石索、穿透、AOE、弹药、蓄力、爆头、风力、箭矢回收与完整音效。
+- 移动目标预判、齐射/集火、独立弓手线与战术保护。
+- 正式弓/箭美术与瞄准指示线。
+
 ## 9. 自动化验收
 
 ### 测试套件
@@ -1137,10 +1235,10 @@
 | `Tests/UnitTests/multi_party_battle_test.tscn` | 双方回归、友军加入、独立第三方、中立拒绝、距离/重复校验、多方离屏结算、多侧战斗场景 |
 | `Tests/SystemTests/ai_encounter_flow_test.tscn` | 玩家加入离屏战斗、玩家实际战斗侧、`battle_started` 自动进入战斗场景 |
 | `Tests/SystemTests/player_encounter_test.tscn` | 敌对 AI 主动拦截玩家、ENEMY_PURSUIT 原因、底部布局与领袖头像、无离开选项、暂停原因栈、防重复、异常清理、进入战斗场景 |
-| `Tests/SystemTests/world_map_milestone6_test.tscn` | 村庄圆形标记放大、旗帜裁剪、名称位于标记上方、部队标记保持原尺寸、悬浮与点击 |
+| `Tests/SystemTests/world_map_milestone6_test.tscn` | 村庄原始美术/位置/缩放、固定尺寸徽章+名称组合、徽章读取家族、无家族隐藏、左 Alt 输入切换、简单/详细悬浮 |
 | `Tests/UnitTests/party_architecture_test.tscn` | 统一 Party 字段、控制类型/部队类型、NPC 领袖、序列化往返、旧存档默认值与类型推断、读档不重置位置/成员 |
 | `Tests/SystemTests/encounter_dialogue_ui_test.tscn` | 部队标记恢复原尺寸、底部 NPC 对话、领袖头像/默认剪影、敌对追击无离开、玩家主动接近保留离开、配置文本 |
-| `Tests/SystemTests/player_party_expansion_test.tscn` | 玩家 12 人编制、完整 UnitData、兵种/骑乘数量、领袖、马匹库存、存档往返不丢失或重复生成 |
+| `Tests/SystemTests/player_party_expansion_test.tscn` | 玩家 15 人编制（含 3 名弓箭手）、完整 UnitData、兵种/骑乘数量、领袖、马匹库存、存档往返不丢失或重复生成 |
 | `Tests/SystemTests/battle_cluster_test.tscn` | 初始部署距离、战场边界、双方半场列阵、接近/接敌后无严重重叠、局部拥挤上限、目标分流、纵深分布 |
 | `Tests/SystemTests/battle_occupancy_ui_test.tscn` | 已有战斗时独立部队禁止另开战场、原因文本、绕过按钮拒绝、参战方“加入战斗”复用同一会话 |
 | `Tests/SystemTests/player_battle_interaction_test.tscn` | 接近离屏战斗加入/离开面板、加入已有战斗、离开拒绝与重触发、战斗结束/异常清理、暂停与倍率保护 |
@@ -1155,7 +1253,9 @@
 | `Tests/UnitTests/ai_manager_test.tscn` | 商队往返、治安队巡逻、玩家/战斗/NONE 跳过、强盗动态评分/切换阈值/追击/失去视野、攻击意图、单方/双方意图遭遇、友方不遭遇、治安队拦截/恢复巡逻、离屏遭遇与中途加入、AI 字段序列化 |
 | `Tests/SystemTests/party_dialogue_test.tscn` | 接近 AI 部队、对话内容、暂停恢复、重复 UI、战斗准备、战斗中禁存档 |
 | `Tests/SystemTests/world_map_input_test.tscn` | 数字键 1/2/3、小键盘/echo、UI 屏蔽、点击切 1x、真实 tick 下 NPC 移动 |
-| `Tests/SystemTests/battle_scene_test.tscn` | 全部参战士兵生成（玩家 12 + 敌方 5）、唯一 unit_id、初始部署距离、边界、2 倍相机、1920×1080 设置、部件 z/贴图、骑乘保留人腿、实时伤害、死亡移除、胜利、结算与存档 |
+| `Tests/SystemTests/battle_scene_test.tscn` | 全部参战士兵生成（玩家 15 + 敌方 5）、唯一 unit_id、初始部署距离、边界、2 倍相机、1920×1080 设置、部件 z/贴图、骑乘保留人腿、实时伤害、死亡移除、胜利、结算与存档 |
+| `Tests/SystemTests/archer_battle_test.tscn` | 三级弓配置/属性、弓锚点与拉弓动画、抛物线/地面深度、静止命中、移动目标射失、头顶掠过、死亡目标、每箭单次伤害、远程 AI/冷却/接近/后撤、玩家固定终点、初始 3 名弓箭手与存档往返 |
+| `Tests/SystemTests/archer_scene_test.tscn` | 真实战斗场景 ProjectileManager 注入、接管弓箭手、鼠标世界坐标射击入口、3 秒冷却、箭矢伤害与冷却拒绝 |
 | `Tests/SystemTests/player_control_test.tscn` | 玩家角色控制、WASD/斜向、左键攻击/冷却、受伤、控制权转移、观战、战败结果 |
 | `Tests/SystemTests/battle_formation_test.tscn` | 队形槽位、同队间距、多友军 lane 分区、阵亡后重分配 |
 | `Tests/SystemTests/battle_side_result_test.tscn` | 同侧一支部队全灭但仍有友军时战斗继续；侧全灭后失败 |
@@ -1175,7 +1275,9 @@
 | `Tests/UnitTests/offscreen_battle_hourly_test.tscn` | 离屏战斗 1 小时门槛、双方伤亡、tier 影响、小数累计、玩家加入保留伤亡、转换后停止结算、全灭结束 |
 | `Tests/SystemTests/small_scene_camera_test.tscn` | 统一视野、跟随、自由视角、边界限制、切回跟随、村庄摄像机 |
 | `Tests/SystemTests/player_pursuit_encounter_test.tscn` | 同向追击接触、停止/清目标、暂停与面板、撤退、拒绝锁、重新触发、进入战斗 |
-| `Tests/SystemTests/world_map_battle_marker_test.tscn` | 单战斗标记、参战图标隐藏、按战斗侧汇总、小时伤亡刷新、第三方加入、结束恢复 |
+| `Tests/SystemTests/world_map_battle_marker_test.tscn` | 单战斗标记、参战图标隐藏、按 side_index 分列汇总、小时伤亡刷新、同侧加入、三方三列、结束清理 |
+| `Tests/SystemTests/save_persistence_test.tscn` | Schema v3、世界日志往返、世界/地点/部队/士兵/经济恢复、战后成员与 HP、失效战斗状态清理、领袖校验 |
+| `Tests/SystemTests/battle_result_delay_test.tscn` | 胜利数据立即生成、面板约 3 秒延迟、失败即时、延迟期间退出取消、无重复展示 |
 | `Tests/UnitTests/world_log_manager_test.tscn` | 战斗/胜负/消灭/遭遇/地点事件文本、扩展事件、100 条上限、序列化预留 |
 | `Tests/SystemTests/world_log_ui_test.tscn` | 左下角日志面板、自动刷新、滚动区域、不阻挡地图移动 |
 | `Tests/SystemTests/neutral_party_interaction_test.tscn` | 路过中立不弹窗、追击不被无关目标打断、主动点击对话、AI 追击遭遇、防重复 |
@@ -1237,6 +1339,10 @@ Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/world_lo
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/world_log_ui_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/neutral_party_interaction_test.tscn
 
+# 阶段 6 后续：大地图表现、AI 战后恢复、存档与战斗 UI
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/save_persistence_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/battle_result_delay_test.tscn
+
 # 手动视觉验收（非 headless，打开窗口并保存截图到 user://）
 Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/visual_probe.tscn
 Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/party_preview_probe.tscn
@@ -1255,10 +1361,12 @@ Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/main_menu_probe.tscn
 
 本次实际执行（战斗占用提示修复）：新增 `battle_occupancy_ui_test` 全部通过；回归通过 `party_dialogue_test`、`encounter_dialogue_ui_test`、`world_map_milestone6_test`、`player_encounter_test`、`ai_encounter_flow_test`。覆盖离屏战斗占用时的禁用与原因文本、绕过按钮直接拒绝、参战方加入已有战斗。未改变存档 Schema；未修改 BattleManager 单一战斗会话规则。
 
+本次实际执行（阶段 6 后续：大地图表现/AI 恢复/存档/战斗 UI）：新增 `save_persistence_test`、`battle_result_delay_test` 全部通过；更新后通过 `world_map_milestone6_test`、`world_map_battle_marker_test`、`battle_scene_test`、`milestone2_flow_test`、`multi_party_battle_test`；回归通过 `party_manager_test`、`unit_party_serialization_test`、`party_architecture_test`、`family_appearance_test`、`world_log_manager_test`、`battle_manager_test`、`battle_result_test`、`ai_manager_test`、`offscreen_battle_hourly_test`、`ai_encounter_flow_test`、`player_encounter_test`、`player_pursuit_encounter_test`、`encounter_dialogue_ui_test`、`world_map_input_test`、`world_log_ui_test`、`party_panel_test`、`neutral_party_interaction_test`、`battle_side_result_test`、`battle_retreat_test`、`player_control_test`、`milestone1_restart_test`（save/load 两进程）。存档 Schema 升至 v3；仅执行自动测试，未做非 headless 视觉验收。
+
 ### 手动验证步骤
 
 1. 启动游戏，进入主菜单。
-2. New Game → 大地图默认暂停；玩家部队 12 名成员（含 4 名骑乘职业步兵），数据速度 150（大地图实际 75）。
+2. New Game → 大地图默认暂停；玩家部队 15 名成员（含 4 名骑乘职业步兵与 3 名弓箭手），数据速度 150（大地图实际 75）。
 3. 按 `2` 进入 1x，观察河畔商队向巴里移动、北境巡逻队向第一个巡逻点移动；按 `1` / `3` 验证暂停与二倍速。
 4. 点击地图移动玩家部队；若点击前为 2x，应自动切回 1x；观察玩家速度明显慢于 NPC。
 5. 持续运行一段时间，确认商队到达巴里后转向墨西西，巡逻队按四点顺序循环；确认巴里/墨西西骑士沿各自专属巡逻点移动。
@@ -1327,7 +1435,7 @@ Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/main_menu_probe.tscn
 68. 大地图上确认玩家、家族、强盗、商队标记保持原有小尺寸，村庄圆形标记明显更大且旗帜被边框裁剪；村庄名称在标记正上方。
 69. 被盗贼主动追上时，底部遭遇对话显示领袖头像/名称与威胁对白，且没有离开选项；玩家主动点击敌对部队时仍可离开。
 70. 清空某支部队的 `leader_unit_id` 后触发遭遇，确认显示默认剪影与部队名，UI 不报错。
-71. 新游戏部队面板确认玩家 12 人（5 民兵、6 职业步兵、1 玩家角色），其中 4 名职业步兵显示骑马；背包剩 1 匹马。
+71. 新游戏部队面板确认玩家 15 人（5 民兵、6 职业步兵、3 弓箭手、1 玩家角色），其中 4 名职业步兵显示骑马；背包剩 1 匹马。
 72. 小地图战斗开始时确认双方位于战场两侧，有明显接近距离；步兵与骑兵都能正常接敌。
 73. 接敌后观察 1–2 分钟，确认士兵不再全部叠在一点，后排不会全部挤到前排，骑兵有更大活动空间。
 74. 多方战斗/中途加入时确认各战斗侧保持自己的集群，不混成一个点；单位不越出战场边界或卡死。
@@ -1380,7 +1488,10 @@ Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/main_menu_probe.tscn
 - 四条马腿仍是独立贴图，已挂载在马身 rig 下并继承整体跃动，但仍是程序化局部动作；没有骨骼/正式逐帧动画。骑手只跟随马身垂直偏移，不跟随马身俯仰/缩放，不是完整骑乘绑定。骑马影子仅有缩放/透明度响应，没有轮廓形态变化。
 - 目标周围没有显式攻击槽位分配，单位很多时仍可能因局部避让而拥挤（KI348）。
 - 战斗集群参数（初始距离、队形间距、接敌放松、分离半径、目标占用惩罚）目前为集中常量，仅通过自动化位置断言验证，仍需实机观察微调（KI404）。
-- 玩家扩编只作用于新游戏；已有成员的旧存档保持原人数与位置，不会自动补到 12 人（KI405）。
+- 弓箭手已接入远程 AI、玩家射箭与 3 秒冷却；但仍无弹药、穿透、溅射、爆头、箭矢回收、移动目标预判与齐射/集火，命中只做每帧地面距离 + 身高检测，无线段扫掠（KI423/KI424/KI426）。
+- 弓与箭均为临时 48×48 美术；握把锚点 `(27,36)` 按临时素材校准，正式素材替换时需重新核对；玩家没有瞄准指示线（KI425/KI428）。
+- 弓箭手队形只依赖“近战排前、远程排后”的槽位排序，没有独立 `ARCHER_LINE`、护卫阵型或接敌后自动后撤的战术协同（KI427）。
+- 玩家扩编（含 3 名弓箭手）只作用于新游戏；已有成员的旧存档保持原人数与位置，不会自动补员（KI405）。
 - 村庄名称位置按标记半径 × 相机缩放计算，使用固定 32 半径；若未来村庄标记改为可配置尺寸，需要同步读取配置而不是硬编码。
 - `art/正式人物美术/` 已提供巴里/墨西西两家族独立的罩袍、缨饰、旗帜与长矛；普通无家族士兵仍使用身体贴图蓝色区域着色，缨饰插槽为空（KI349）。
 - 没有骑乘/卸下马匹 UI，也没有物品数量 UI（KI350/KI351）。

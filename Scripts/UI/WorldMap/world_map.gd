@@ -15,6 +15,9 @@ const PARTY_HOVER_RADIUS: float = 30.0
 const HOVER_PANEL_WIDTH: float = 320.0
 const HOVER_PANEL_LINE_HEIGHT: float = 22.0
 const BATTLE_SUMMARY_WIDTH: float = 360.0
+## 每个战斗侧一列；出现第三侧时面板横向扩展。
+const BATTLE_SUMMARY_COLUMN_WIDTH: float = 168.0
+const BATTLE_SUMMARY_COLUMN_GAP: int = 14
 const BATTLE_SUMMARY_SEPARATOR: String = "────────────"
 const WORLD_LOG_WIDTH: float = 460.0
 const WORLD_LOG_HEIGHT: float = 220.0
@@ -107,6 +110,8 @@ var _hover_panel: PanelContainer = null
 var _hover_content: VBoxContainer = null
 var _hover_party_id: String = ""
 var _hover_signature: String = ""
+## 按住左 Alt 时悬浮面板显示详细构成；默认只显示部队名称。
+var _alt_detail_active: bool = false
 
 ## 同一场战斗只显示一个标记；参战部队图标暂时隐藏。
 var _party_icons: Dictionary = {}
@@ -119,7 +124,7 @@ var _battle_marker: BattleMarker = null
 var _battle_marker_id: String = ""
 var _battle_summary_panel: PanelContainer = null
 var _battle_summary_title: Label = null
-var _battle_summary_content: VBoxContainer = null
+var _battle_summary_content: HBoxContainer = null
 var _battle_summary_text: String = ""
 var _battle_summary_signature: String = ""
 
@@ -235,6 +240,23 @@ func _process(delta: float) -> void:
 	_check_party_interaction()
 	_update_party_hover()
 	_last_player_position = _player_party.world_position
+
+
+## 集中处理左 Alt 的按住/松开，不标记事件已处理，不影响点击与快捷键。
+func _input(event: InputEvent) -> void:
+	if not event is InputEventKey:
+		return
+	var key_event := event as InputEventKey
+	if key_event.keycode != KEY_ALT and key_event.physical_keycode != KEY_ALT:
+		return
+	# 只响应左 Alt；右 Alt（含 AltGr）不切换详细模式。
+	if key_event.location == KEY_LOCATION_RIGHT:
+		return
+	if key_event.pressed:
+		if not key_event.echo:
+			set_alt_detail_active(true)
+	else:
+		set_alt_detail_active(false)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -460,12 +482,8 @@ func _build_world_entities() -> void:
 		var settlement_icon: SettlementIcon = SettlementIcon.new()
 		settlement_icon.name = "SettlementIcon_%s" % settlement.settlement_id
 		world_entities.add_child(settlement_icon)
-		var family := _get_family_config(settlement.family_id)
-		settlement_icon.setup(
-			settlement,
-			family,
-			_load_texture(family.banner_texture_path if family != null else "")
-		)
+		# 世界层只绘制地点原有美术；家族徽章属于屏幕名称组合。
+		settlement_icon.setup(settlement)
 
 	world_entities.y_sort_enabled = true
 
@@ -507,7 +525,8 @@ func _build_settlement_name_tags() -> void:
 		var tag := SettlementNameTag.new()
 		tag.name = "SettlementNameTag_%s" % settlement.settlement_id
 		_settlement_name_layer.add_child(tag)
-		tag.setup(settlement)
+		# 徽章读取地点实际家族归属；无家族时仅显示名称。
+		tag.setup(settlement, _get_family_config(settlement.family_id))
 		_settlement_name_tags[settlement.settlement_id] = tag
 	# 名称层放在 UI 最底层，避免覆盖地点/部队/日志面板。
 	_ui_root.move_child(_settlement_name_layer, 0)
@@ -1221,10 +1240,13 @@ func _build_battle_summary_panel() -> void:
 	separator.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	column.add_child(separator)
 
-	_battle_summary_content = VBoxContainer.new()
+	# 每个 side_index 一列；同侧多支部队在列内纵向排列。
+	_battle_summary_content = HBoxContainer.new()
 	_battle_summary_content.name = "BattleSummaryContent"
 	_battle_summary_content.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_battle_summary_content.add_theme_constant_override("separation", 1)
+	_battle_summary_content.add_theme_constant_override(
+		"separation", BATTLE_SUMMARY_COLUMN_GAP
+	)
 	column.add_child(_battle_summary_content)
 
 
@@ -1378,9 +1400,30 @@ func _hide_party_hover() -> void:
 		_hover_panel.visible = false
 
 
+## 切换详细模式；鼠标不移动也立即刷新当前悬浮面板。
+func set_alt_detail_active(active: bool) -> void:
+	if _alt_detail_active == active:
+		return
+	_alt_detail_active = active
+	if _hover_party_id.is_empty() or _context == null:
+		return
+	var party := _context.party_manager.get_party(_hover_party_id)
+	if party == null:
+		_hide_party_hover()
+		return
+	_hover_signature = _party_composition_signature(party)
+	_rebuild_party_hover(party)
+	_position_party_hover(get_viewport().get_mouse_position())
+
+
+func is_alt_detail_active() -> bool:
+	return _alt_detail_active
+
+
 ## 成员构成变化时刷新悬浮面板；只比较兵种/骑乘/身份，不读取完整属性。
+## 模式前缀保证按住/松开 Alt 时无需移动鼠标也会重建面板。
 func _party_composition_signature(party: PartyData) -> String:
-	var parts: Array[String] = []
+	var parts: Array[String] = ["D" if _alt_detail_active else "S"]
 	for unit_id: String in party.member_unit_ids:
 		var unit := _context.unit_manager.get_unit(unit_id)
 		if unit == null:
@@ -1405,19 +1448,26 @@ func _rebuild_party_hover(party: PartyData) -> void:
 	title.name = "PartyHoverName"
 	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_hover_content.add_child(title)
-	var separator := HSeparator.new()
-	separator.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_hover_content.add_child(separator)
 
-	var lines: Array[String] = _party_composition_lines(party)
-	if lines.is_empty():
-		lines.append("无成员")
-	for line: String in lines:
-		var label := _make_label(line, 14)
-		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		_hover_content.add_child(label)
+	var height: float = 58.0
+	# 默认只显示名称；按住左 Alt 才展开总人数与兵种构成。
+	if _alt_detail_active:
+		var separator := HSeparator.new()
+		separator.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_hover_content.add_child(separator)
 
-	var height: float = 58.0 + float(lines.size()) * HOVER_PANEL_LINE_HEIGHT
+		var lines: Array[String] = ["总人数：%d" % party.member_unit_ids.size()]
+		var composition := _party_composition_lines(party)
+		if composition.is_empty():
+			composition.append("无成员")
+		lines.append_array(composition)
+		for line: String in lines:
+			var label := _make_label(line, 14)
+			label.name = "PartyHoverDetail"
+			label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			_hover_content.add_child(label)
+		height += float(lines.size() + 1) * HOVER_PANEL_LINE_HEIGHT
+
 	_hover_panel.custom_minimum_size = Vector2(HOVER_PANEL_WIDTH, height)
 	_hover_panel.size = Vector2(HOVER_PANEL_WIDTH, height)
 	_hover_panel.visible = true
@@ -1504,6 +1554,10 @@ func _clear_battle_display() -> void:
 			icon.visible = true
 	if _battle_summary_panel != null:
 		_battle_summary_panel.visible = false
+	if _battle_summary_content != null:
+		for child: Node in _battle_summary_content.get_children():
+			_battle_summary_content.remove_child(child)
+			child.queue_free()
 	_battle_summary_signature = ""
 	_battle_summary_text = ""
 
@@ -1516,7 +1570,7 @@ func _refresh_battle_summary(battle: BattleSession) -> void:
 	if text != _battle_summary_signature:
 		_battle_summary_signature = text
 		_battle_summary_text = text
-		_rebuild_battle_summary(lines)
+		_rebuild_battle_summary(battle)
 	_battle_summary_title.text = "战斗 · 已交战 %d 小时 · 存活 %d" % [
 		battle.offscreen_settlements_done,
 		_count_battle_alive(battle),
@@ -1528,28 +1582,65 @@ func _refresh_battle_summary(battle: BattleSession) -> void:
 	_battle_summary_panel.visible = show_panel
 
 
-func _rebuild_battle_summary(lines: Array[String]) -> void:
-	if _battle_summary_content == null:
+## 按 side_index 建列；列内再按该战斗侧的参战部队纵向排列。
+func _rebuild_battle_summary(battle: BattleSession) -> void:
+	if _battle_summary_content == null or battle == null:
 		return
 	for child: Node in _battle_summary_content.get_children():
 		_battle_summary_content.remove_child(child)
 		child.queue_free()
 
-	for line: String in lines:
-		if line == BATTLE_SUMMARY_SEPARATOR:
-			var separator := HSeparator.new()
-			separator.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			_battle_summary_content.add_child(separator)
-			continue
-		var is_composition: bool = line.begins_with("  ")
-		var label := _make_label(line, 14 if is_composition else 15)
-		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		if not is_composition:
-			label.add_theme_color_override("font_color", Color("#f0d8a0"))
-		_battle_summary_content.add_child(label)
+	var sides := battle.get_side_indices()
+	var max_lines: int = 1
+	for side_position: int in range(sides.size()):
+		var side_index: int = sides[side_position]
+		var column := VBoxContainer.new()
+		column.name = "BattleSummarySide_%d" % side_index
+		column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		column.custom_minimum_size = Vector2(BATTLE_SUMMARY_COLUMN_WIDTH, 0.0)
+		column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		column.add_theme_constant_override("separation", 1)
+		_battle_summary_content.add_child(column)
 
-	var height: float = 66.0 + float(lines.size()) * 20.0
-	_battle_summary_panel.custom_minimum_size = Vector2(BATTLE_SUMMARY_WIDTH, height)
+		var header := _make_label("战斗侧 %d" % (side_position + 1), 14)
+		header.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		header.add_theme_color_override("font_color", Color("#f0d8a0"))
+		column.add_child(header)
+		var line_count: int = 1
+
+		var party_ids: Array[String] = battle.get_side_party_ids(side_index)
+		for party_position: int in range(party_ids.size()):
+			var party_id: String = party_ids[party_position]
+			var party := _context.party_manager.get_party(party_id)
+			var party_label := _make_label(
+				party.party_name if party != null else party_id, 15
+			)
+			party_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			if party_position > 0:
+				party_label.add_theme_color_override("font_color", Color("#cfe0f0"))
+			column.add_child(party_label)
+			line_count += 1
+
+			var composition := _battle_party_composition(battle, party_id)
+			if composition.is_empty():
+				composition.append("无存活人员")
+			for entry: String in composition:
+				var entry_label := _make_label("  • %s" % entry, 14)
+				entry_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				column.add_child(entry_label)
+				line_count += 1
+
+		max_lines = maxi(max_lines, line_count)
+
+	var side_count: int = maxi(1, sides.size())
+	var width: float = maxf(
+		BATTLE_SUMMARY_WIDTH,
+		float(side_count) * BATTLE_SUMMARY_COLUMN_WIDTH
+		+ float(maxi(0, side_count - 1) * BATTLE_SUMMARY_COLUMN_GAP)
+		+ 28.0
+	)
+	var height: float = 66.0 + float(max_lines) * 20.0
+	_battle_summary_panel.custom_minimum_size = Vector2(width, height)
 
 
 ## 按 BattleSession 的 side_index 分组，不使用阵营代替战斗侧。
@@ -1632,7 +1723,7 @@ func _position_battle_summary() -> bool:
 			or screen_position.y > viewport_size.y + offscreen_margin:
 		return false
 	var panel_size := Vector2(
-		BATTLE_SUMMARY_WIDTH,
+		maxf(_battle_summary_panel.custom_minimum_size.x, BATTLE_SUMMARY_WIDTH),
 		maxf(_battle_summary_panel.custom_minimum_size.y, 60.0)
 	)
 	var desired := screen_position + Vector2(26.0, 26.0)
@@ -1648,6 +1739,31 @@ func get_battle_marker() -> BattleMarker:
 
 func get_battle_summary_text() -> String:
 	return _battle_summary_text
+
+
+## 当前汇总面板按 side_index 生成的列数；供 UI 测试核对多侧动态分列。
+func get_battle_summary_column_count() -> int:
+	if _battle_summary_content == null:
+		return 0
+	var count: int = 0
+	for child: Node in _battle_summary_content.get_children():
+		if child is VBoxContainer:
+			count += 1
+	return count
+
+
+## 返回每一列对应的 side_index（按 BattleSession.get_side_indices() 顺序）。
+func get_battle_summary_side_indices() -> Array[int]:
+	var result: Array[int] = []
+	if _battle_summary_content == null:
+		return result
+	for child: Node in _battle_summary_content.get_children():
+		if not child is VBoxContainer:
+			continue
+		var column := child as VBoxContainer
+		var suffix: String = column.name.trim_prefix("BattleSummarySide_")
+		result.append(int(suffix))
+	return result
 
 
 func is_battle_summary_visible() -> bool:

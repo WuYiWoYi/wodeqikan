@@ -298,6 +298,40 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 
 ## 15. 玩家初始部队扩编（Schema 仍为 v2）
 
-- 新游戏玩家部队为 12 人（1 玩家角色 + 5 民兵 + 6 职业步兵，其中 4 名骑乘）；成员数据仍走现有 `UnitData` / `PartyData` 序列化，不新增 Schema 字段。
+- 新游戏玩家部队为 15 人（1 玩家角色 + 5 民兵 + 6 职业步兵，其中 4 名骑乘 + 3 弓箭手）；成员数据仍走现有 `UnitData` / `PartyData` 序列化，不新增 Schema 字段。
 - `WorldInitializer._populate_player_party()` 在 `party.member_unit_ids` 非空时直接返回；旧存档读档不会补兵或重复生成。
 - 旧存档保留原人数、位置、装备和成员关系；扩编仅作用于新游戏。
+
+## 16. Schema v3 与世界日志（阶段 6 后续）
+
+- `SaveData.CURRENT_SCHEMA_VERSION = 3`；新增顶层 `world_log`，内容为 `{"entries": [...]}`。
+- `WorldContext.to_save_data()` 写入 `world_log_manager.to_dict()`；`load_from_save_data()` 调用 `load_from_dict()` 恢复。
+- 日志条目包含事件类型、世界时间、显示文本与元数据；上限仍为 100 条。
+- 不要求兼容 Schema v2；`SaveData.from_dict()` 仍接受 1..3，v1 → v2 的浅迁移入口保留。
+
+### 16.1 读档状态清理
+
+`WorldContext.load_from_save_data()` 在 `apply_runtime_defaults()` 之后调用 `PartyManager.sanitize_loaded_runtime_state()`：
+
+| 情况 | 处理 |
+|---|---|
+| `battle_state == IN_BATTLE / RETURNING` 且无活动战斗 | 无成员 → `DISABLED`；否则 `AVAILABLE` |
+| `attack_intent` / `focus_party_id` / `engagement_cooldown_until` | 清零 |
+| `current_order == BATTLE` | 改为 `NONE` |
+| `current_target_id` 指向不存在部队 | 清空；`FOLLOW_PARTY` 指令清除，移动停止 |
+| 领袖不属于本部队或单位不存在 | 成员关系校验失败，拒绝读档 |
+
+### 16.2 仍不持久化
+
+- 活动 `BattleSession`（`current_battle`）；有战斗时 `GameManager.save_game()` 直接拒绝。
+- 战斗中的临时 `BattleUnitState`、站位、追逐焦点与遭遇拒绝锁。
+- 静态家族/外观/遭遇对白配置。
+
+## 17. 弓箭手与远程派生字段（Schema 仍为 v3）
+
+- 弓箭手没有独立实体或存档类型：`unit_id`、`config_id`、等级/经验/属性、装备、部队归属与控制权状态全部走现有 `UnitData` / `PartyData` 序列化。
+- `UnitData.to_dict()` / `from_dict()` 持久化 `attack_type`、`body_height`、`projectile_texture_path`、`projectile_speed`、`projectile_arc_height`；旧存档缺失时使用安全默认值（近战、48 身高、默认弹道参数），读档后由 `UnitManager.recalculate_all_stats()` 按当前武器配置重算校正。
+- 弓装备本身以 `equipment["WEAPON"] = "weapon_bow_01"` 保存，不复制武器 Resource。
+- 飞行中的 `ArrowProjectile`、`ProjectileManager` 与攻击冷却均为战斗场景瞬时状态，不进入存档；战斗中禁止保存。
+- 新游戏只在 `party.member_unit_ids` 为空时创建 3 名弓箭手；读档不会补兵、不会重复生成，也不向已有存档额外发放弓箭手。
+- 阵亡弓箭手与其他阵亡成员一样由战斗结算移出部队，读档不会恢复。

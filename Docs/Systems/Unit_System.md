@@ -27,6 +27,11 @@
 | `attack_interval` | float | 攻击间隔（秒） | 配置 |
 | `move_speed` | float | 小场景移动速度（像素/秒） | 配置 + 等级成长 + 装备 |
 | `attack_range` | float | 攻击距离（像素） | 配置 + 等级成长 + 装备 |
+| `attack_type` | int | 攻击方式：`MELEE` / `RANGED`；由 WEAPON 的 `attack_type` 派生 | `StatCalculator` |
+| `body_height` | float | 受击判定身高（像素）；弓/箭命中判定使用 | 配置 + 骑乘加成 |
+| `projectile_texture_path` | String | 箭矢贴图路径；仅远程武器有效 | 装备配置 |
+| `projectile_speed` | float | 箭矢飞行速度（像素/秒） | 装备配置 |
+| `projectile_arc_height` | float | 箭矢抛物线视觉高度 | 装备配置 |
 | `faction_id` | String | 所属阵营 | `UnitManager` |
 | `current_party_id` | String | 当前所属部队 | `PartyManager` |
 | `equipment` | Dictionary | 槽位字符串（`WEAPON` 等）→ 装备 ID | `UnitManager.equip_item()` / `unequip_slot()` |
@@ -75,7 +80,7 @@
 - “玩家角色身份”与“当前控制权”分离：
   - 身份由 `is_player_character` 表示；
   - 当前控制权由 `BattleScene._controlled_unit_id` 运行时表示，可切换到其他存活友军。
-- 新游戏玩家部队：5 民兵 + 6 职业步兵（其中 4 名装备马匹）+ 1 玩家角色，共 12 人；玩家角色最后加入。人数由 `WorldInitializer` 的玩家编制常量集中配置。
+- 新游戏玩家部队：5 民兵 + 6 职业步兵（其中 4 名装备马匹）+ 3 弓箭手 + 1 玩家角色，共 15 人；玩家角色最后加入。人数由 `WorldInitializer` 的玩家编制常量集中配置。
 - 骑乘职业步兵仍然使用 `infantry_trained` 配置，不新增骑兵 `config_id`；其 `is_mounted` 只表示 MOUNT 装备状态。
 - `UnitController` 同时支持 AI 与玩家控制模式；玩家控制不影响 UnitData 本身。
 
@@ -193,6 +198,8 @@ exp_to_next_level(level) = base_exp_to_next_level
 - 装备操作必须先通过：单位存在、装备配置已注册、槽位合法、槽位与配置匹配。
 - 同槽位装备直接替换；任意校验失败不产生部分修改。
 - `default_equipment` 在创建单位时逐条校验，非法条目报告错误并丢弃，不进入 `UnitData`。
+- WEAPON 还可配置 `attack_type`（`MELEE` / `RANGED`）、`attack_interval_override`、`projectile_texture_path`、`projectile_speed`、`projectile_arc_height`。远程武器要求 `projectile_speed > 0`、`projectile_arc_height >= 0`、`attack_interval_override > 0`，否则 `validate()` 失败。
+- 攻击方式由武器派生，不按兵种名/`unit_class` 分支：`StatCalculator` 把武器 `attack_type` 写入 `UnitData.attack_type`，战斗逻辑只读取 `UnitData.is_ranged_attacker()`。空手或未装备武器时保持 `MELEE`。
 - 数据层使用 `equip_item()` / `unequip_slot()`；阶段 6 起部队面板提供 MOUNT 上下马与晋升，其他装备槽位的更换 UI 尚未实现（KI327）。
 - 本次不实现品质、耐久、随机词条、职业限制与装备获取（商店/掉落）。
 - 装备视觉字段（`EquipmentConfig`）：
@@ -214,6 +221,7 @@ exp_to_next_level(level) = base_exp_to_next_level
 | `helmet_iron_01` | 铁盔 | HEAD | 最大 HP +3 |
 | `armor_leather_01` | 皮甲 | BODY | 最大 HP +8 |
 | `mount_horse_01` | 普通战马 | MOUNT | 移速 +25 |
+| `weapon_bow_01` | 猎弓 | WEAPON | 攻击距离 360；攻击间隔固定 3 秒；远程箭矢 |
 
 ### 3.5.1 马匹与骑乘状态
 
@@ -261,6 +269,22 @@ exp_to_next_level(level) = base_exp_to_next_level
 - `remove_unit()` 成功返回 `true`，单位不存在或仍被部队引用返回 `false`。
 - `load_from_dict()` 遇到重复单位 ID 时报告错误并跳过后续记录，避免静默覆盖。
 - 单位归属只由 `PartyManager` 写入；`UnitManager` 不修改 `PartyData`。
+
+### 3.9 弓箭手与远程武器（阶段 6 后续）
+
+- 弓箭手不是独立 Actor/Controller：使用 `UnitConfig` / `UnitData` / `UnitManager` / `UnitActor` / `UnitController`，可否远程完全由 WEAPON 的 `attack_type` 决定。
+- 三级弓箭手配置（`Data/Units/archer_*.tres`）：
+
+| 配置 ID | 等级 | 攻击 / 生命 | 移速 | 工资 | 晋升目标 |
+|---|---|---|---|---|---|
+| `archer_militia` | 1 | 10 / 50 | 60 | 2 | `archer_trained` |
+| `archer_trained` | 2 | 20 / 100 | 55 | 5 | `archer_veteran` |
+| `archer_veteran` | 3 | 25 / 180 | 55 | 10 | 满级 |
+
+- 三个配置的 `unit_class = RANGED`，`body_height = 48`，默认装备 `{"WEAPON": "weapon_bow_01"}`。
+- `UnitConfig.body_height` 必须 > 0；`StatCalculator` 在基础身高上叠加骑乘加成（`MOUNTED_BODY_HEIGHT_BONUS = 18`）。
+- `attack_interval` 由 `EquipmentConfig.attack_interval_override` 覆盖为 3 秒；玩家接管弓箭手时同样使用该间隔，不沿用原英雄的长矛冷却。
+- 属性、等级、经验、工资、晋升、装备与存档走与近战兵完全相同的链路；没有弓箭手专属存档字段。
 
 ## 4. 表现层
 
@@ -482,6 +506,23 @@ Idle
 - 伤害结算写 `BattleUnitState`，不直接写 `UnitData`。
 - 受击表现与伤害结算分离；当前没有受击硬直或目标级受击锁。
 
+### 5.3.1 远程攻击流程（弓箭手 / 玩家弓）
+
+```text
+1. AI 或玩家点击确定目标地面坐标并“冻结”
+2. 播放拉弓/撒放/恢复动画
+3. 发射瞬间向 ProjectileManager 请求生成箭矢，冷却开始（3 秒）
+4. 箭矢沿冻结坐标飞行；目标移动不会改变终点
+5. 命中或落地后箭矢销毁，每次发射最多造成一次伤害
+```
+
+- AI 在射程内站立射击；超出射程向目标外围接近，敌人过近时后撤。详见 [AI_System.md](AI_System.md)。
+- 玩家接管弓箭手后，鼠标左键把鼠标世界坐标作为射击终点，与 AI 共用同一个发射入口；不改写冻结终点、高度判定与伤害结算。
+- 发射时记录射手位置/身高与目标地面点；箭矢不追踪目标、不更新终点，因此移动中的敌人会自然“射空”，没有独立随机命中率。
+- 箭矢在 `ProjectileManager` 中由 `BattleScene._physics_process` 推进；飞行中的箭矢是瞬时表现，不进入存档。
+- 控制权从英雄转移给弓箭手时只切换输入归属，不复制单位、不重置 HP，也不继承英雄的攻击冷却；弓箭手使用自己的冷却。
+- 箭矢的实际命中/高度规则见 [Combat_System.md](Combat_System.md) 第 14 节。
+
 ### 5.4 受击与死亡
 
 - 受击进入短硬直，播放受击反馈。
@@ -550,7 +591,11 @@ Idle
 | 控制权切换 / 观战 | 已实现，见 [Combat_System.md](Combat_System.md) |
 | 部件视觉与动画 | 临时部件、待机/跑动动画、长矛 360°攻击/恢复动画已接入；受击动画与正式资源 TODO |
 | 受击硬直 / 命中动画 | 未实现（KI124）；长矛动画不改变即时命中规则 |
-| 初始世界/招募生成士兵 | 已用临时测试兵力打通；玩家部队共 12 人，含 4 名骑乘职业步兵；招募系统 TODO |
+| 三级弓箭手配置 | 已实现：`archer_militia` / `archer_trained` / `archer_veteran`，10/50、20/100、25/180 |
+| 远程武器与攻击方式 | 已实现：WEAPON `attack_type` / 弹道参数派生到 `UnitData`；不按兵种名分支 |
+| 弓表现与箭矢 | 已实现：弓默认朝左、方向旋转；箭矢独立飞行、抛物线视觉高度、地面投影参与 Y 排序 |
+| 远程 AI / 玩家射箭 | 已实现：AI 接近/站定/后撤/换目标；玩家鼠标世界坐标、固定终点、独立 3 秒冷却 |
+| 初始世界/招募生成士兵 | 已用临时测试兵力打通；玩家部队共 15 人（含 3 名弓箭手），其中 4 名骑乘职业步兵；招募系统 TODO |
 
 ## 9. 待确认
 
@@ -558,6 +603,8 @@ Idle
 - 战斗移动速度：步兵 `0.6`、骑乘 `0.84`；初始部署边距 `160`。后续仍可能按兵种/武器继续平衡。
 - 实体碰撞为“最小间距推开”而非物理刚体；后续可在不破坏队形/攻击判定的前提下替换为物理层。
 - 待机/跑动动画的幅度、周期、武器摇摆、马身压缩与跃马四肢伸展仍需实际手感微调。
+- 弓的待机/移动姿态、拉弓节奏（0.18s 拉弓 / 0.08s 撒放 / 0.30s 恢复）与正式弓素材仍需实机微调。
+- 箭矢当前无弹药、穿透、回收、暴击/爆头、风力与命中音效；见 [Combat_System.md](Combat_System.md) 第 14 节。
 - 纵向移动速度是否低于横向。
 - 单位碰撞层与阵营过滤的具体配置。
 - 大量单位时是否使用对象池。

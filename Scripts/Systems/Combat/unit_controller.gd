@@ -28,6 +28,14 @@ const TARGET_CLAIM_PENALTY: float = 90.0
 const CLOSE_APPROACH_RANGE: float = 140.0
 const TARGET_APPROACH_LATERAL: float = 10.0
 
+## 远程单位行为参数。
+## 敌人进入该距离后优先后撤，避免弓箭手被近战单位贴脸。
+const RANGED_MIN_RANGE: float = 110.0
+## 超出射程时，向敌人接近到射程的这个比例处，而不是一直贴近。
+const RANGED_STANDOFF_FACTOR: float = 0.82
+## 没有 WeaponPivot 时的箭矢发射高度回退值。
+const RANGED_FALLBACK_LAUNCH_HEIGHT: float = 20.0
+
 ## 战斗场景移动速度系数；只影响战斗，不影响大地图 PartyData.movement_speed。
 ## 步兵保持原值：民兵 60→36、职业步兵 55→33、玩家角色 75→45。
 ## 骑乘单位使用独立战斗系数，放大坐骑的机动优势：
@@ -65,6 +73,8 @@ var has_formation_slot: bool = false
 var nearby_controllers: Array[UnitController] = []
 ## 由 BattleScene 周期刷新：本战斗侧每个敌人当前被多少友军选为目标。
 var target_claim_counts: Dictionary = {}
+## 由 BattleScene 注入；远程单位发射箭矢的唯一入口。
+var _projectile_manager: Variant = null
 
 var _attack_cooldown: float = 0.0
 var _retarget_timer: float = 0.0
@@ -128,6 +138,15 @@ func set_target_claim_counts(counts: Dictionary) -> void:
 	target_claim_counts = counts
 
 
+func set_projectile_manager(manager: Variant) -> void:
+	_projectile_manager = manager
+
+
+## 当前武器是否为远程武器。来源是 UnitData 的装备派生值，不是 config 名称。
+func is_ranged_unit() -> bool:
+	return unit_data != null and unit_data.is_ranged_attacker()
+
+
 # ---------------------------------------------------------------------------
 # 统一攻击判断
 # ---------------------------------------------------------------------------
@@ -158,6 +177,29 @@ func is_target_in_attack_range(target: UnitController) -> bool:
 
 func can_attack_target(target: UnitController) -> bool:
 	return CombatRulesScript.can_attack(self, target)
+
+
+func get_ranged_attack_range() -> float:
+	return CombatRulesScript.ranged_attack_range(unit_data)
+
+
+func is_target_in_ranged_range(target: UnitController) -> bool:
+	return CombatRulesScript.is_in_ranged_range(self, target)
+
+
+func can_ranged_attack_target(target: UnitController) -> bool:
+	return CombatRulesScript.can_ranged_attack(self, target)
+
+
+## 箭矢起点：地面坐标 + 弓枢轴的视觉高度。高度只用于表现，不改变地面坐标。
+func get_ranged_launch_info() -> Dictionary:
+	var ground: Vector2 = get_position()
+	var height: float = RANGED_FALLBACK_LAUNCH_HEIGHT
+	if actor != null and is_instance_valid(actor):
+		var bow_position: Vector2 = actor.get_weapon_pivot_global_position()
+		if is_finite(bow_position.x) and is_finite(bow_position.y):
+			height = clampf(ground.y - bow_position.y, 8.0, 56.0)
+	return {"ground": ground, "height": height}
 
 
 func get_last_attack_direction() -> Vector2:
@@ -223,6 +265,11 @@ func tick(delta: float, enemies: Array[UnitController]) -> void:
 			_has_manual_move = false
 		return
 
+	# 远程单位使用独立的射程/站位/发射流程，但冷却、索敌和伤害入口与近战一致。
+	if is_ranged_unit():
+		_tick_ranged(delta, enemies)
+		return
+
 	_retarget_timer -= delta
 	if _target == null or not _target.is_alive():
 		_target = _find_best_enemy(enemies)
@@ -253,6 +300,65 @@ func tick(delta: float, enemies: Array[UnitController]) -> void:
 	# 不在射程内：沿目标外围的进攻点推进，避免全部挤向同一个坐标。
 	_ai_state = AIState.APPROACH
 	_move_toward(_attack_approach_position(_target), delta)
+
+
+## 弓箭手 AI：射程内站定射击，射程外接近，敌人贴脸时后撤。
+## 每次射击只把目标“当前地面坐标”交给箭矢；飞行期间不追踪目标。
+func _tick_ranged(delta: float, enemies: Array[UnitController]) -> void:
+	_retarget_timer -= delta
+	if _target == null or not _target.is_alive():
+		_target = _find_best_enemy(enemies)
+		_retarget_timer = RETARGET_INTERVAL
+	elif _retarget_timer <= 0.0:
+		# 已在射程内时不换目标，避免射击前一刻被重新索敌打断。
+		if not is_target_in_ranged_range(_target):
+			_target = _find_best_enemy(enemies)
+		_retarget_timer = RETARGET_INTERVAL
+
+	if _target == null:
+		_ai_state = AIState.SEEK
+		if has_formation_slot:
+			_move_toward(formation_slot, delta)
+		return
+
+	var target_position: Vector2 = _target.get_position()
+	var distance: float = state.battle_position.distance_to(target_position)
+	var attack_range: float = get_ranged_attack_range()
+	_face_towards(target_position)
+
+	if distance <= attack_range:
+		_ai_state = AIState.ATTACK
+		if _attack_cooldown <= 0.0:
+			_fire_ranged_at(target_position, enemies)
+	else:
+		_ai_state = AIState.APPROACH
+		_move_toward(_ranged_standoff_position(target_position), delta)
+
+	# 敌人贴脸：即使刚完成一次射击也优先拉开距离，避免弓箭手原地近战。
+	if distance < RANGED_MIN_RANGE:
+		var away: Vector2 = state.battle_position - target_position
+		if away.length_squared() < 0.0001:
+			away = Vector2.LEFT
+		_move_toward_direction(
+			away.normalized(), delta, PLAYER_SEPARATION_STRENGTH
+		)
+		_face_towards(target_position)
+		_ai_state = AIState.APPROACH
+
+
+## 射程外时的接近点：停在射程的 82% 处，优先沿队形槽位方向展开。
+func _ranged_standoff_position(target_position: Vector2) -> Vector2:
+	var desired_distance: float = maxf(
+		RANGED_MIN_RANGE + 10.0, get_ranged_attack_range() * RANGED_STANDOFF_FACTOR
+	)
+	var direction_from_target: Vector2 = state.battle_position - target_position
+	if has_formation_slot:
+		var slot_direction: Vector2 = formation_slot - target_position
+		if slot_direction.length_squared() > 1.0:
+			direction_from_target = slot_direction
+	if direction_from_target.length_squared() <= 0.0001:
+		direction_from_target = Vector2.LEFT
+	return target_position + direction_from_target.normalized() * desired_distance
 
 
 ## 玩家控制：WASD 方向移动；direction 由 BattleScene 归一化。
@@ -288,6 +394,11 @@ func player_attack_at(
 		return false
 	if _attack_cooldown > 0.0:
 		return false
+
+	# 玩家弓箭：鼠标世界坐标就是本次射击的固定地面目标，不在这里挑选/锁定敌人。
+	# AI 弓箭手也走同一个 _fire_ranged_at 入口。
+	if is_ranged_unit():
+		return _fire_ranged_at(target_position, enemies)
 
 	var direction: Vector2 = target_position - state.battle_position
 	if direction.length_squared() < 0.0001:
@@ -375,6 +486,44 @@ func _execute_attack(target: UnitController, direction: Vector2 = Vector2.ZERO) 
 	_last_attack_target_id = target.unit_id
 	_play_attack(attack_direction)
 	return true
+
+
+## 玩家与 AI 共用的唯一弓箭发射入口。
+## 无论箭矢最终是否命中，成功发射即进入攻击冷却；冷却从发射瞬间开始。
+func _fire_ranged_at(
+	ground_target: Vector2, enemies: Array[UnitController]
+) -> bool:
+	if not is_alive() or unit_data == null or not is_ranged_unit():
+		return false
+	if _attack_cooldown > 0.0:
+		return false
+
+	var direction: Vector2 = ground_target - state.battle_position
+	if direction.length_squared() < 0.0001:
+		direction = Vector2.LEFT
+	direction = direction.normalized()
+	_face_attack_direction(direction)
+
+	var launched: bool = false
+	if _projectile_manager != null:
+		launched = bool(_projectile_manager.spawn_arrow(
+			self,
+			ground_target,
+			enemies,
+			get_attack_damage(),
+			unit_data.projectile_texture_path,
+			unit_data.projectile_speed,
+			unit_data.projectile_arc_height
+		))
+	# 没有发射物管理器（例如纯数据测试）时仍完成一次攻击动作与冷却，
+	# 但不伪造命中；正式战斗始终由 BattleScene 注入 ProjectileManager。
+	_attack_cooldown = maxf(0.05, unit_data.attack_interval)
+	_last_attack_direction = direction
+	_last_attack_target_id = (
+		_target.unit_id if _target != null and _target.is_alive() else ""
+	)
+	_play_ranged_attack(direction)
+	return launched or _projectile_manager == null
 
 
 ## 目标外围的进攻点：保持攻击距离，并从自己队形槽位所在方向靠近，
@@ -492,6 +641,11 @@ func _face_attack_direction(direction: Vector2) -> void:
 func _play_attack(direction: Vector2) -> void:
 	if actor != null and is_instance_valid(actor):
 		actor.play_attack(direction)
+
+
+func _play_ranged_attack(direction: Vector2) -> void:
+	if actor != null and is_instance_valid(actor):
+		actor.play_ranged_attack(direction)
 
 
 ## 实体碰撞的最后空间约束：与附近存活单位保持最小中心间距。

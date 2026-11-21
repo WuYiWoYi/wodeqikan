@@ -103,6 +103,10 @@ var attack_intent: bool = false
 ## 非空时大地图不自动弹出村庄信息或无关部队对话，避免打断玩家追逐。
 var focus_party_id: String = ""
 
+## 战斗刚结束时禁止立即再次交战的截止世界时间（仅运行时，不进入存档）。
+## 存活部队需要时间脱离接触；到期后由 AI 正常重新决策。
+var engagement_cooldown_until: float = 0.0
+
 
 func has_member(unit_id: String) -> bool:
 	return member_unit_ids.has(unit_id)
@@ -205,12 +209,20 @@ static func from_dict(data: Dictionary) -> PartyData:
 	party.target_position = _read_vector2(data.get("target_position", []))
 	party.movement_speed = float(data.get("movement_speed", 10.0))
 	party.sight_range = float(data.get("sight_range", 40.0))
-	party.current_order = int(data.get("current_order", OrderType.NONE)) as OrderType
+	party.current_order = _read_enum(
+		data.get("current_order", OrderType.NONE), OrderType.NONE, OrderType.FOLLOW_PARTY
+	) as OrderType
 	party.current_target_id = str(data.get("current_target_id", ""))
-	party.movement_state = int(
-		data.get("movement_state", MovementState.IDLE)
+	party.movement_state = _read_enum(
+		data.get("movement_state", MovementState.IDLE),
+		MovementState.IDLE,
+		MovementState.MOVING
 	) as MovementState
-	party.battle_state = int(data.get("battle_state", BattleState.AVAILABLE)) as BattleState
+	party.battle_state = _read_enum(
+		data.get("battle_state", BattleState.AVAILABLE),
+		BattleState.AVAILABLE,
+		BattleState.DISABLED
+	) as BattleState
 
 	var member_values: Variant = data.get("member_unit_ids", [])
 	if member_values is Array:
@@ -234,6 +246,14 @@ static func from_dict(data: Dictionary) -> PartyData:
 			party.ai_patrol_points.append(_read_vector2(value))
 
 	return party
+
+
+## 读取整数枚举；超出范围时回退到给定默认值，避免坏存档产生幽灵状态。
+static func _read_enum(value: Variant, fallback: int, max_value: int) -> int:
+	var parsed: int = int(value)
+	if parsed < 0 or parsed > max_value:
+		return fallback
+	return parsed
 
 
 static func _vector2_array_to_data(points: Array[Vector2]) -> Array:

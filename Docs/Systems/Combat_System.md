@@ -265,6 +265,7 @@ BattleScene (Node2D)
   - 双方质心距离 ≤ `CONTACT_DISTANCE = 220` 后视为接敌，队形间距 × `CONTACT_SPACING_MULTIPLIER = 1.35` 自动放松；
   - 同一侧的多支部队使用 `PARTY_LANE_SPACING = 170` 分配独立 lane；
   - 为每个单位写入 `UnitController.formation_slot`。
+  - 槽位分配前按近战/远程排序：远程单位排在队形后列，避免弓箭手站到第一排；排序只改变槽位分配顺序，不改变单位数据。
 - `BattleScene` 每 0.3 秒构建局部邻居缓存（`NEIGHBOR_RADIUS = 56`），避免每个单位逐帧遍历全场。
 - 同一周期统计每个战斗侧的目标占用（`_refresh_target_claims`），只遍历己方控制器。
 - 队形间距按部队内是否有骑乘单位选择：步行 `40`，存在骑乘单位时 `56`，避免马匹部件明显重叠。
@@ -517,7 +518,12 @@ BattleScene (Node2D)
 | 人物头部与头盔分离 | 已实现（独立 Head / Helmet 部件；装备视觉按 `EquipmentConfig` 注入） |
 | 满血隐藏生命条 | 已实现（独立 `UnitHealthBar`；名称只对当前控制单位显示，与生命条独立） |
 | 玩家中途加入离屏战斗 | 已实现 |
-| 复杂阵型、骑兵冲锋、远程弹道、士气 | 未实现 |
+| 弓箭手 / 远程射程 | 已实现（武器 `attack_type = RANGED`、`weapon_attack_range` 覆盖、`CombatRules` 圆形远程判定） |
+| 箭矢弹道 | 已实现（`ArrowProjectile` + `ProjectileManager`；地面投影 + 抛物线视觉高度；终点冻结） |
+| 高度命中 / 射失 | 已实现（地面半径 18 + 身高判定；移动目标自然射失，每箭最多一次伤害） |
+| 远程 AI | 已实现（射程内站定、射程外接近、过近后撤、目标失效重选、后排队形槽位） |
+| 玩家射箭 | 已实现（鼠标世界坐标、与 AI 共用发射入口、独立 3 秒冷却） |
+| 复杂阵型、骑兵冲锋、士气 | 未实现 |
 
 ## 11. 待确认
 
@@ -546,3 +552,76 @@ BattleScene (Node2D)
 - 玩家身份（`is_player_character`）、当前控制权（`UnitActor.is_controlled`）与部队领袖（`PartyData.leader_unit_id`）在战斗场景中继续保持分离。
 - NPC 家族骑士由 `AIManager` 控制部队移动；进入战斗后仍按现有 `BattleScene` 单位 AI 运行，不需要特殊分支。
 - 外观选择随 `UnitData` 持久化，战斗前后不重新随机。
+
+## 13. 战斗结果延迟与战后恢复（阶段 6 后续）
+
+### 13.1 胜利结果面板延迟
+
+- 胜负判定时立即 `build_battle_result(..., apply=false)` 生成结果数据。
+- 仅玩家获胜进入 `VICTORY_RESULT_DELAY = 3.0` 秒延迟；失败、撤退、平局立即展示。
+- 计时使用 `BattleScene._physics_process(delta)`，不使用世界时间；场景退出即取消。
+- `_result_shown` 防止重复展示；测试可用 `set_result_delay_enabled(false)` / `skip_result_delay()`。
+
+### 13.2 战后部队解锁
+
+- `BattleManager._unlock_session_parties()` 对存活部队：
+  - 设置 `engagement_cooldown_until = 世界时间 + 30`（运行时字段，不入档）；
+  - 清除 `current_target_id`、`current_order`、`attack_intent`、`focus_party_id`；
+  - **不**把 `target_position` 重置为当前位置。
+- 无成员部队置为 `DISABLED`。
+- 两方与多方战斗共用该流程；结算后清空 `current_battle`，大地图标记与汇总列随之清理。
+
+## 14. 弓箭手与远程箭矢（阶段 6 后续）
+
+### 14.1 单位与判定入口
+
+- 远程单位仍是普通 `UnitController`；`is_ranged_unit()` 只读取 `UnitData.is_ranged_attacker()`，不做兵种名/class 分支。
+- 远程射程取 `UnitData.attack_range`，由 `weapon_bow_01.weapon_attack_range = 360` 覆盖基础值；`CombatRules` 新增：
+
+```text
+ranged_attack_range(unit)      → 最终 attack_range
+is_in_ranged_range(a, b)       → 两个地面中心的距离 ≤ 远程射程（圆形，不是 360°近战矩形）
+can_ranged_attack(a, b)        → 攻击者存活 ∧ 目标存活 ∧ 敌对 ∧ 冷却结束 ∧ 在射程内
+```
+
+- 近战仍走 4.2.1 的定向矩形；两套判定互不替代，单位按武器类型进入对应分支。
+- AI 与玩家共用 `UnitController._fire_ranged_at(ground_target, enemies)`：冻结终点、取 `get_attack_damage()`、请求 `ProjectileManager` 生成箭矢、进入攻击冷却、播放远程动画。
+- AI 的 `tick()` 对远程单位进入 `_tick_ranged`：射程内站定射击；射程外接近到目标外围（`RANGED_STANDOFF_FACTOR = 0.82` 射程）；敌人近于 `RANGED_MIN_RANGE = 110` 时后撤并面向目标；目标失效后在同一 tick 重新索敌。
+- 玩家射箭入口仍是 `BattleScene.try_player_attack_at(world_pos)`；鼠标屏幕坐标在 `_unhandled_input` 中经 `get_global_mouse_position()` 转为战场世界坐标，不直接使用屏幕像素。
+- 控制权切换只改变输入归属；新接管的弓箭手使用自身 `attack_interval = 3.0`，不继承原控制单位的冷却。
+
+### 14.2 箭矢实体与飞行
+
+- `ArrowProjectile`（`Node2D`，挂在 `Characters` 下）由 `ProjectileManager` 创建与推进；`BattleScene._physics_process(delta)` 在控制器 tick 之后调用 `advance(delta)`。
+- 节点 `position` 是**地面投影**，只用于 Y 排序与地面距离判定；视觉 Sprite 是子节点，按当前高度向上偏移。高度不参与 `position`，因此不会影响 Y 排序。
+- 地面位置线性插值：`P(t) = P0 + (P1 - P0) · t`，`t = elapsed / duration`，`duration = ground_distance / projectile_speed`。
+- 高度曲线：`h(t) = launch_height · (1 - t) + 4 · arc_height · t · (1 - t)`；发射高度来自射手 `get_ranged_launch_info()`（默认 20），视觉位置为 `P_visual = P_ground + (0, -h)`。
+- 箭矢旋转取视觉速度向量（地面速度 + 垂直高度变化）的角度 `+ PI/2`，使箭尖朝飞行方向；素材原始箭头朝上。
+- 终点在发射瞬间冻结；目标之后移动不会更新终点，因此产生自然射失，不使用随机命中率。
+- 箭矢 `z_index = UnitActor.ACTOR_Z_INDEX`，与人物共用现有 Y 排序；没有独立的高空层。
+- 生命期结束条件：命中一个有效目标、`t >= 1` 落地、或超过 `MAX_FLIGHT_TIME = 3.0` 秒。每支箭最多结算一次伤害。
+
+### 14.3 高度命中与伤害
+
+```text
+命中 ⇔ 地面距离 ≤ HIT_GROUND_RADIUS(18)
+     ∧ 当前高度 ≤ 目标 unit_data.body_height
+     ∧ 目标存活
+     ∧ 目标属于其他战斗侧（与射手敌对）
+```
+
+- 敌人从箭下经过但视觉高度高于其身高 → 不受伤（“从头顶飞过”）。
+- 目标已死亡、失效或同侧 → 不结算伤害；箭矢继续飞行直至落地。
+- 伤害通过既有 `BattleUnitState` 伤害入口写入，与近战一致；不直接写 `UnitData`。
+- 受击判定使用单位身高而不是固定点，骑乘单位身高由 `StatCalculator` 加上骑乘加成。
+
+### 14.4 表现
+
+- 弓使用 `art/我的骑砍临时美术/武器弓临时.png`（48×48，默认朝左）；装备锚点 `visual_anchor = (27,36)`，对应素材左下角 `(27,12)`，旋转中心在握把处。
+- `HumanVisual.play_ranged_attack_animation()`：拉弓 0.18s（手部后移 `4px`）、撒放 0.08s（前移 `2px`）、恢复 0.30s；攻击方向通过弓默认朝左的基准角换算，人物整体镜像仍由朝向控制。
+- 动画与冷却独立：动画只表现拉弓/撒放，冷却在箭矢发射成功时立即开始，固定 3 秒。
+- 长矛/近战武器路径不受影响；只有装备了远程 WEAPON 的单位进入远程动画与发射流程。
+
+### 14.5 明确不做
+
+- 弩、投石索、穿透、溅射/AOE、弹药数量、蓄力、爆头/暴击、风力、箭矢回收与完整音效。

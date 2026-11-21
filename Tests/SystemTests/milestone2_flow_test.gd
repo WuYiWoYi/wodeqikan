@@ -91,6 +91,8 @@ func _run() -> void:
 	var battle_scene := get_tree().current_scene as BattleScene
 	if battle_scene == null:
 		return
+	# 本测试在清空敌方后立即检查结果面板；关闭胜利展示延迟。
+	battle_scene.set_result_delay_enabled(false)
 
 	var session := context.battle_manager.current_battle
 	_check(session != null, "战斗会话存在")

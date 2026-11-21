@@ -265,6 +265,8 @@ func _test_battle_scene_multi_side() -> void:
 	add_child(_battle_scene)
 	await get_tree().process_frame
 	await get_tree().process_frame
+	# 本测试直接清空其他战斗侧后立即检查胜负；关闭胜利展示延迟。
+	_battle_scene.set_result_delay_enabled(false)
 
 	_check(_battle_scene.get_side_controller_count(0) == 4, "战斗侧 0 生成 4 名士兵")
 	_check(_battle_scene.get_side_controller_count(1) == 2, "战斗侧 1 生成 2 名士兵")

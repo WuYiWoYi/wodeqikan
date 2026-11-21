@@ -219,6 +219,18 @@ func validate_membership_consistency() -> Array[String]:
 					% [unit_id, unit.current_party_id, party.party_id]
 				)
 
+		# 领袖必须是本部队的有效成员，避免读档后遭遇/战斗 UI 引用悬空单位。
+		if not party.leader_unit_id.is_empty():
+			if not party.member_unit_ids.has(party.leader_unit_id):
+				errors.append(
+					"部队 %s 的领袖 %s 不在该部队成员列表中"
+					% [party.party_id, party.leader_unit_id]
+				)
+			elif _unit_manager.get_unit(party.leader_unit_id) == null:
+				errors.append(
+					"部队 %s 的领袖 %s 不存在" % [party.party_id, party.leader_unit_id]
+				)
+
 	for unit: UnitData in _unit_manager.get_all_units():
 		if unit.current_party_id.is_empty():
 			continue
@@ -265,6 +277,57 @@ func apply_runtime_defaults(player_party_id: String) -> void:
 	for party: PartyData in get_all_parties():
 		if party != null:
 			party.apply_runtime_defaults(player_party_id)
+
+
+## 读档后清理仅运行时字段与已失效的战斗/追逐状态。
+##
+## 存档不保存活动战斗会话，因此 IN_BATTLE/RETURNING 必须回落为可行动状态，
+## 否则部队会永久卡在战斗状态。返回被修正项的说明列表，供日志与测试核对。
+func sanitize_loaded_runtime_state() -> Array[String]:
+	var notes: Array[String] = []
+	for party: PartyData in get_all_parties():
+		if party == null:
+			continue
+		# 这些字段不进入存档，读档时一律视为“无意图”。
+		party.attack_intent = false
+		party.focus_party_id = ""
+		party.engagement_cooldown_until = 0.0
+
+		if party.battle_state == PartyData.BattleState.IN_BATTLE \
+				or party.battle_state == PartyData.BattleState.RETURNING:
+			var fallback: PartyData.BattleState = (
+				PartyData.BattleState.DISABLED
+				if party.member_unit_ids.is_empty()
+				else PartyData.BattleState.AVAILABLE
+			)
+			notes.append(
+				"部队 %s 无活动战斗，战斗状态回落为 %s"
+				% [party.party_id, PartyData.BattleState.keys()[fallback]]
+			)
+			party.battle_state = fallback
+
+		# 战斗指令已随战斗结束失效。
+		if party.current_order == PartyData.OrderType.BATTLE:
+			party.current_order = PartyData.OrderType.NONE
+
+		# 追逐/跟随目标不存在时清理引用；仅在目标确实失效时停止移动，
+		# 避免无故丢弃存档中有效的移动目标。
+		if not party.current_target_id.is_empty() \
+				and get_party(party.current_target_id) == null:
+			notes.append(
+				"部队 %s 的追击目标 %s 不存在，已清除"
+				% [party.party_id, party.current_target_id]
+			)
+			party.current_target_id = ""
+			if party.current_order == PartyData.OrderType.FOLLOW_PARTY:
+				party.current_order = PartyData.OrderType.NONE
+			if party.movement_state == PartyData.MovementState.MOVING:
+				party.movement_state = PartyData.MovementState.IDLE
+				party.target_position = party.world_position
+		elif party.current_order == PartyData.OrderType.FOLLOW_PARTY \
+				and party.current_target_id.is_empty():
+			party.current_order = PartyData.OrderType.NONE
+	return notes
 
 
 ## 从除目标部队外的所有部队成员列表中移除该单位，保证一单位最多一支部队。

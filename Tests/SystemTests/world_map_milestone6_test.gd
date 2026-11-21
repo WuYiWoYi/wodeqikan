@@ -59,6 +59,7 @@ func _run() -> void:
 	_test_party_icon_counts()
 	_test_settlement_name_tags()
 	_test_hover_panel()
+	_test_alt_input_switch()
 	await _test_icon_count_updates()
 	_test_chase_suppression()
 
@@ -106,26 +107,46 @@ func _test_settlement_name_tags() -> void:
 		"地点名称标签不拦截地图点击")
 	_check(tag.get_parent().name == "SettlementNameLayer",
 		"地点名称位于独立屏幕 UI 层")
+	# 世界层保留村庄原始美术，位置/缩放/点击区域不变。
 	_check(
-		icon != null and icon.get_marker_radius() > 0.0,
-		"村庄使用放大后的圆形标记"
+		icon != null and icon.position == _village.world_position,
+		"村庄美术位于原世界坐标"
 	)
 	_check(
-		icon != null and icon.has_family_flag(),
-		"村庄圆形标记内部显示家族旗帜"
+		icon != null and icon.scale == Vector2.ONE,
+		"村庄美术保持原始缩放"
+	)
+	# 名称 UI 是固定尺寸的“徽章 + 名称”组合。
+	_check(
+		tag.size == Vector2(SettlementNameTag.TAG_WIDTH, SettlementNameTag.TAG_HEIGHT),
+		"地点名称组合使用固定屏幕尺寸"
+	)
+	var badge := tag.get_badge()
+	var name_label := tag.get_name_label()
+	_check(
+		badge != null and name_label != null
+			and badge.get_index() < name_label.get_index(),
+		"家族徽章位于名称左侧"
 	)
 	_check(
-		icon != null and icon.get_flag_max_size() > (icon.get_marker_radius() - 3.0) * 2.0,
-		"村庄旗帜同步放大并允许被圆形边框裁剪"
+		tag.has_family_badge() == not _village.family_id.is_empty(),
+		"有家族的村庄显示徽章"
 	)
-	var party_style := load(
-		"res://Data/WorldMap/party_marker_style.tres"
-	) as PartyMarkerStyle
-	_check(
-		party_style != null and icon != null
-			and icon.get_marker_radius() > party_style.marker_radius,
-		"只有村庄标记放大，部队标记保持原尺寸"
-	)
+	if not _village.family_id.is_empty():
+		_check(
+			tag.get_badge_family_id() == _village.family_id,
+			"徽章读取地点实际家族而不是名称"
+		)
+
+	# 无家族地点不显示徽章（回退为纯名称）。
+	var castle_tag := _map.call(
+		"get_settlement_name_tag", _castle.settlement_id
+	) as SettlementNameTag
+	if castle_tag != null:
+		_check(
+			castle_tag.has_family_badge() == not _castle.family_id.is_empty(),
+			"无家族地点隐藏家族徽章"
+		)
 	# 名称整体位于标记上方：标签底边不高于标记顶部。
 	var marker_screen: Vector2 = (
 		_map.get_viewport().get_canvas_transform() * _village.world_position
@@ -166,12 +187,21 @@ func _test_settlement_name_tags() -> void:
 
 
 func _test_hover_panel() -> void:
+	_map.call("set_alt_detail_active", false)
 	_map.call("apply_hover_for_test", _merchant.world_position)
 	_check(_map.call("is_hover_panel_visible") == true, "悬浮部队图标显示信息面板")
 	var text: String = str(_map.call("get_hover_panel_text"))
-	_check(text.contains(_merchant.party_name), "悬浮面板显示部队名称")
-	_check(text.contains("民兵（3）"), "悬浮面板合并显示民兵数量")
-	_check(text.contains("职业步兵（2）"), "悬浮面板显示士兵类型")
+	_check(text.contains(_merchant.party_name), "悬浮面板默认显示部队名称")
+	_check(not text.contains("民兵（3）"), "默认模式不显示兵种构成")
+	_check(not text.contains("总人数"), "默认模式不显示总人数")
+
+	# 按住左 Alt：鼠标不动也立即展开详细构成。
+	_map.call("set_alt_detail_active", true)
+	text = str(_map.call("get_hover_panel_text"))
+	_check(text.contains("总人数：%d" % _merchant.member_unit_ids.size()),
+		"按住左 Alt 显示总人数")
+	_check(text.contains("民兵（3）"), "详细模式合并显示民兵数量")
+	_check(text.contains("职业步兵（2）"), "详细模式显示士兵类型")
 
 	_map.call("apply_hover_for_test", _player.world_position)
 	text = str(_map.call("get_hover_panel_text"))
@@ -183,8 +213,43 @@ func _test_hover_panel() -> void:
 	)
 	_check(text.contains("玩家角色（1）"), "玩家角色单独显示")
 
+	# 松开左 Alt：立即恢复简单模式，无需移动鼠标。
+	_map.call("set_alt_detail_active", false)
+	text = str(_map.call("get_hover_panel_text"))
+	_check(text.contains(_player.party_name), "松开后仍显示部队名称")
+	_check(not text.contains("总人数"), "松开后立即恢复简单模式")
+	_check(not text.contains("玩家角色（1）"), "简单模式不再显示兵种构成")
+
 	_map.call("clear_hover_for_test")
 	_check(_map.call("is_hover_panel_visible") == false, "鼠标离开后悬浮面板关闭")
+
+
+## 输入层只认左 Alt；右 Alt 不切换详细模式。
+func _test_alt_input_switch() -> void:
+	_map.call("set_alt_detail_active", false)
+
+	var left_alt := InputEventKey.new()
+	left_alt.keycode = KEY_ALT
+	left_alt.physical_keycode = KEY_ALT
+	left_alt.location = KEY_LOCATION_LEFT
+	left_alt.pressed = true
+	_map.call("_input", left_alt)
+	_check(_map.call("is_alt_detail_active") == true, "按下左 Alt 进入详细模式")
+
+	var right_alt := InputEventKey.new()
+	right_alt.keycode = KEY_ALT
+	right_alt.physical_keycode = KEY_ALT
+	right_alt.location = KEY_LOCATION_RIGHT
+	right_alt.pressed = true
+	_map.call("_input", right_alt)
+	_check(
+		_map.call("is_alt_detail_active") == true,
+		"按下右 Alt 不改变详细模式"
+	)
+
+	left_alt.pressed = false
+	_map.call("_input", left_alt)
+	_check(_map.call("is_alt_detail_active") == false, "松开左 Alt 退出详细模式")
 
 
 func _test_icon_count_updates() -> void:

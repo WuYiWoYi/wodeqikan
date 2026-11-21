@@ -22,6 +22,12 @@ const MOUNT_CHARGE_SPEED_THRESHOLD: float = 60.0
 const MOUNT_CHARGE_ATTACK_PER_SPEED: float = 0.1
 const MOUNT_CHARGE_MAX_BONUS: int = 5
 
+## 骑乘时身体有效高度追加值；用于远程箭矢的高度命中判定。
+const MOUNTED_BODY_HEIGHT_BONUS: float = 18.0
+## 未配置远程武器时的发射物默认参数。
+const DEFAULT_PROJECTILE_SPEED: float = 480.0
+const DEFAULT_PROJECTILE_ARC_HEIGHT: float = 70.0
+
 
 ## 返回最终属性字典；缺少兵种配置时返回空字典。
 ## equipment_configs 为 { equipment_id: EquipmentConfig }；缺失或槽位不匹配的装备
@@ -44,6 +50,12 @@ static func compute_final_stats(
 	var attack_range: float = (
 		config.attack_range + levels_gained * config.attack_range_per_level
 	)
+	var attack_interval: float = maxf(config.attack_interval, 0.0)
+	var attack_type: int = EquipmentConfig.AttackType.MELEE
+	var projectile_texture_path: String = ""
+	var projectile_speed: float = DEFAULT_PROJECTILE_SPEED
+	var projectile_arc_height: float = DEFAULT_PROJECTILE_ARC_HEIGHT
+	var has_mount: bool = false
 	var range_bonus_total: float = 0.0
 	var weapon_range_override: float = -1.0
 
@@ -59,12 +71,18 @@ static func compute_final_stats(
 			attack += equipment.attack_bonus
 			move_speed += equipment.move_speed_bonus
 			range_bonus_total += equipment.attack_range_bonus
-			# 武器是攻击距离的主要来源；>0 时覆盖 UnitConfig 基础距离。
-			if (
-				equipment.slot == EquipmentConfig.Slot.WEAPON
-				and equipment.weapon_attack_range > 0.0
-			):
-				weapon_range_override = equipment.weapon_attack_range
+			# 武器是攻击距离与攻击方式的唯一来源；>0 时覆盖 UnitConfig 基础距离。
+			if equipment.slot == EquipmentConfig.Slot.WEAPON:
+				if equipment.weapon_attack_range > 0.0:
+					weapon_range_override = equipment.weapon_attack_range
+				attack_type = int(equipment.attack_type)
+				if equipment.attack_interval_override > 0.0:
+					attack_interval = equipment.attack_interval_override
+				projectile_texture_path = equipment.projectile_texture_path
+				projectile_speed = maxf(1.0, equipment.projectile_speed)
+				projectile_arc_height = maxf(0.0, equipment.projectile_arc_height)
+			elif equipment.slot == EquipmentConfig.Slot.MOUNT:
+				has_mount = true
 
 	if weapon_range_override >= 0.0:
 		attack_range = (
@@ -73,12 +91,20 @@ static func compute_final_stats(
 		)
 	attack_range += range_bonus_total
 
+	var body_height: float = config.body_height + (
+		MOUNTED_BODY_HEIGHT_BONUS if has_mount else 0.0
+	)
 	return {
 		"max_hp": maxi(1, max_hp),
 		"attack": maxi(0, attack),
-		"attack_interval": maxf(config.attack_interval, 0.0),
+		"attack_interval": attack_interval,
 		"move_speed": maxf(move_speed, 0.0),
 		"attack_range": maxf(attack_range, 0.0),
+		"attack_type": attack_type,
+		"body_height": maxf(1.0, body_height),
+		"projectile_texture_path": projectile_texture_path,
+		"projectile_speed": projectile_speed,
+		"projectile_arc_height": projectile_arc_height,
 	}
 
 
@@ -122,5 +148,10 @@ static func apply_to_unit(
 	unit.attack_interval = float(stats["attack_interval"])
 	unit.move_speed = float(stats["move_speed"])
 	unit.attack_range = float(stats["attack_range"])
+	unit.attack_type = int(stats["attack_type"])
+	unit.body_height = float(stats["body_height"])
+	unit.projectile_texture_path = str(stats["projectile_texture_path"])
+	unit.projectile_speed = float(stats["projectile_speed"])
+	unit.projectile_arc_height = float(stats["projectile_arc_height"])
 	unit.clamp_hp()
 	return true

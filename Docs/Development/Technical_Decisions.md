@@ -1902,3 +1902,206 @@
 **原因：** 离屏 NPC 战斗会占用全局战斗槽位。原 UI 只检查同阵营与兵力，玩家点击后只能得到笼统提示，真实原因仅存在于控制台警告中，容易被误认为目标部队本身不可战。
 
 **影响：** 不改变战斗会话与结算逻辑；只补充入口判断与提示。并行战斗仍是明确限制（KI410）。
+
+---
+
+## D097 · 村庄美术、名称与家族徽章分为三个独立层级
+
+**日期：** 2026-11-21
+**状态：** 已确定
+
+**决策：**
+
+- `SettlementIcon` 只保留世界层原始村庄/城堡美术；世界位置、缩放与点击半径不变。
+- `SettlementNameTag` 是屏幕层固定尺寸 UI（240×36），内部为 `HBoxContainer`：左徽章、右名称。
+- 徽章读取 `SettlementData.family_id` 对应的 `FamilyConfig`；无家族时隐藏徽章，不伪造身份。
+- 名称与徽章都设置 `MOUSE_FILTER_IGNORE`，不改变地点点击判定。
+
+**原因：** 世界层美术会随相机缩放，名称和徽章需要保持固定可读性；三者职责分离后可独立调整美术与 UI。
+
+**影响：** 旧测试中针对村庄圆形标记半径/旗帜裁剪的断言改为检查原始美术位置与组合布局。
+
+---
+
+## D098 · 战后用交战冷却恢复 AI，而不是重置移动目标
+
+**日期：** 2026-11-21
+**状态：** 已确定
+
+**决策：**
+
+- 战斗结算解锁部队时只清除 `attack_intent`、`current_target_id`、`current_order`、`focus_party_id` 与移动锁，不把 `target_position` 设为当前位置。
+- 存活部队获得 `engagement_cooldown_until = 当前世界时间 + 30` 的运行时冷却。
+- `AIManager` 在冷却期间直接恢复商队路线/巡逻点；`EncounterManager` 跳过冷却中的敌对组合。
+- 冷却字段仅运行时存在，不进入存档；读档统一清零。
+
+**原因：** 战后双方仍在接触距离内，立刻重新索敌会逐 tick 重复开战，表现为“战斗后 AI 卡死”。重置目标又会抹掉路线进度。
+
+**影响：** 两方与多方战斗共用同一解锁流程；冷却结束后 AI 正常重新决策。
+
+---
+
+## D099 · 存档 Schema v3：世界日志入档与读档状态清理
+
+**日期：** 2026-11-21
+**状态：** 已确定
+
+**决策：**
+
+- `SaveData.CURRENT_SCHEMA_VERSION = 3`，新增 `world_log`；不要求兼容 v2 存档。
+- `WorldContext` 读写 `WorldLogManager.to_dict()/load_from_dict()`。
+- 读档时由 `PartyManager.sanitize_loaded_runtime_state()` 处理不可能成立的状态：
+  - 无活动战斗会话时 `IN_BATTLE`/`RETURNING` 回落为 `AVAILABLE`，无成员则 `DISABLED`；
+  - 清除 `attack_intent`、`focus_party_id`、交战冷却；
+  - 追击目标不存在时清除 `current_target_id`，并停止对应 `FOLLOW_PARTY` 移动。
+- `PartyData.from_dict()` 对指令/移动/战斗枚举做范围校验。
+- `validate_membership_consistency()` 要求领袖存在于本部队成员列表与 UnitManager 中。
+- 活动 `BattleSession` 仍不进入存档，保存期间有战斗仍被拒绝。
+
+**原因：** 旧读档会把战斗中的 `IN_BATTLE` 原样恢复，导致部队永久不可行动；世界日志此前只留内存接口，读档后历史丢失。
+
+**影响：** 读档可能打印状态清理日志；损坏的领袖引用会拒绝加载而不是静默修正。
+
+---
+
+## D100 · 胜利结果面板使用物理时间延迟，结算数据即时生成
+
+**日期：** 2026-11-21
+**状态：** 已确定
+
+**决策：**
+
+- 胜负判定时立即调用 `build_battle_result(..., apply=false)` 生成 `_result_data`。
+- 仅玩家获胜时进入 `VICTORY_RESULT_DELAY = 3.0` 秒延迟；失败、撤退、平局与测试关闭延迟时立即展示。
+- 计时在 `BattleScene._physics_process(delta)` 中递减，不使用 `WorldTime`、`Engine.time_scale` 或 `tree.paused`。
+- `_result_shown` 保证面板只展示一次；场景销毁即取消计时。
+
+**原因：** 击败敌人后立即弹出大面板会打断战斗收尾观感；结算数据必须马上确定，避免延迟期间状态变化影响结果。
+
+**影响：** 依赖即时面板的测试通过 `set_result_delay_enabled(false)` 保持快速断言。
+
+---
+
+## D101 · 大地图战斗汇总按 side_index 分列
+
+**日期：** 2026-11-21
+**状态：** 已确定
+
+**决策：**
+
+- 汇总面板内容改为 `HBoxContainer`；每个 `BattleSession.get_side_indices()` 生成一个 `VBoxContainer` 列。
+- 同侧部队通过 `get_side_party_ids(side_index)` 放入同一列，列内纵向排列；不按阵营、名称、类型或列表顺序分组。
+- 第三侧起动态增加列，并按列数扩展面板宽度；列内伤亡由 BattleUnitState 实时统计。
+- 战斗结束时移除所有列并清空文本。
+
+**原因：** 单列纵向排列会让多方战斗的阵营关系难以辨认，且“同侧多队”无法直观表达。
+
+**影响：** 列宽固定为 168；极多战斗侧或超长名称可能拥挤（KI419）。
+
+---
+
+## D102 · 左 Alt 详细悬浮由大地图统一定义输入
+
+**日期：** 2026-11-21
+**状态：** 已确定
+
+**决策：**
+
+- `world_map._input()` 统一观察 `KEY_ALT`；只接受 `location != KEY_LOCATION_RIGHT` 的按下与松开，忽略 echo。
+- 不调用 `set_input_as_handled()`，ALT 不参与点击、数字键或面板快捷键。
+- 悬浮签名包含当前模式；按下/松开后立即重建当前面板并重新定位，不要求鼠标移动。
+- 默认模式只显示部队名称；详细模式增加总人数与按兵种/骑乘分组的条目。
+
+**原因：** 多个 UI 脚本各自读取输入会重复触发且难以保证左右 Alt 区分；集中处理后可保证状态一致。
+
+**影响：** 触屏/手柄没有等价入口（KI420）。
+
+
+---
+
+## D103 · 攻击方式是武器属性，不是兵种类型
+
+**日期：** 2026-11-21
+**状态：** 已确定
+
+**决策：**
+
+- `EquipmentConfig.attack_type`（`MELEE` / `RANGED`）为权威来源；`StatCalculator` 把它写入 `UnitData.attack_type`。
+- `UnitData.is_ranged_attacker()` 是战斗层唯一判断入口；`UnitController`、`CombatRules`、UI 不按 `config_id`、`unit_class` 或单位名称分支。
+- 远程武器额外配置 `attack_interval_override`、`projectile_texture_path`、`projectile_speed`、`projectile_arc_height`；`weapon_bow_01` 覆盖攻击间隔为 3 秒、射程 360。
+- 弓箭手使用现有 `UnitData` / `UnitManager` / `UnitActor` / `UnitController`，不新增 Actor 或 Controller 子类。
+
+**原因：** 让任何单位装备远程武器后都能获得远程行为，避免“弓箭手特殊分支”扩散；同时保证玩家英雄拿起弓时复用同一套判定。
+
+**影响：** 数据层新增派生字段与武器校验；旧存档缺字段时回落近战，读档重算后按当前武器修正。
+
+---
+
+## D104 · 箭矢分离地面投影与视觉高度
+
+**日期：** 2026-11-21
+**状态：** 已确定
+
+**决策：**
+
+- `ArrowProjectile` 节点自身 `position` 永远是地面投影，参与 `Characters` 的 YSort。
+- 视觉 Sprite 作为子节点，只按当前高度偏移 `(0, -h)`；高度不写入 `position`，不影响排序。
+- 地面位置线性插值 `P(t) = P0 + (P1 - P0)t`；高度 `h(t) = launch_height(1-t) + 4·arc·t(1-t)`。
+- 箭矢 `z_index = UnitActor.ACTOR_Z_INDEX`，与人物共用同一深度层。
+
+**原因：** 如果直接把高度加到节点坐标，箭矢会被 YSort 误判为更远处/更近处，并破坏现有“脚底坐标排序”规则。
+
+**影响：** 高空箭矢仍按地面位置与人物前后排序；未来若需要真正的高空遮挡层，必须单独引入，不能改 `position` 语义。
+
+---
+
+## D105 · 远程命中采用固定终点 + 身高判定，不追踪目标
+
+**日期：** 2026-11-21
+**状态：** 已确定
+
+**决策：**
+
+- 发射瞬间快照目标地面坐标，飞行过程中不读取目标当前位置、不更新终点。
+- 命中条件：地面距离 ≤ `HIT_GROUND_RADIUS = 18` ∧ 当前高度 ≤ 目标 `UnitData.body_height` ∧ 目标存活 ∧ 敌对。
+- 每支箭最多造成一次伤害，命中或 `t >= 1` 后销毁。
+- 不使用随机命中率，移动目标射失来自固定终点 + 飞行时间。
+
+**原因：** 满足“箭矢不得追踪目标”和“高度掠过不伤害”的要求，同时避免玩家/AI 出现无法解释的随机 miss。
+
+**影响：** AI 对移动目标命中率偏低（KI426）；目标在箭飞行期间死亡时箭矢继续飞行但不结算。
+
+---
+
+## D106 · AI 与玩家共用远程发射入口，冷却绑定发射者
+
+**日期：** 2026-11-21
+**状态：** 已确定
+
+**决策：**
+
+- `UnitController._fire_ranged_at(ground_target, enemies)` 为唯一发射入口；AI 的 `_tick_ranged` 与玩家的 `player_attack_at()` 都调用它。
+- 发射成功后立即按 `UnitData.attack_interval`（弓 3 秒）进入冷却；拉弓/撒放动画与冷却独立计时。
+- 玩家鼠标坐标在 `BattleScene._unhandled_input` 中用 `get_global_mouse_position()` 转为世界坐标，再交给 `try_player_attack_at()`。
+- 控制权切换不复制单位、不重置 HP，也不继承旧控制单位的冷却。
+
+**原因：** 保证 AI 与玩家在射程、弹道、高度判定和伤害上不会出现两套逻辑；控制权切换不应给玩家“免费重置冷却”的优势。
+
+**影响：** 测试可直接调用 `try_player_attack_at(world_pos)` 覆盖鼠标输入路径；AI 与玩家行为差异只在决策层。
+
+---
+
+## D107 · 远程单位优先分配后排队形槽位
+
+**日期：** 2026-11-21
+**状态：** 已确定
+
+**决策：**
+
+- `BattleScene._order_controllers_for_slots()` 在分配槽位前把近战单位排在前面、远程单位排在后面。
+- 排序只影响槽位分配顺序，不修改 `UnitData`、AI 目标选择或战斗侧数据。
+- 仍复用现有 `FormationManager` 的 LINE/DEPTH/LOOSE 槽位，不新增 `ARCHER_LINE`。
+
+**原因：** 远程单位需要距离与射击视野，站在第一排会立刻被近战接敌；以最小改动修正站位。
+
+**影响：** 队形外观可能与纯距离分配不同；没有独立弓手线或保护逻辑（KI427）。

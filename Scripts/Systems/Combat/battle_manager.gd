@@ -12,6 +12,9 @@ extends RefCounted
 
 const JOIN_RADIUS: float = 60.0
 const OFFSCREEN_CONFIG_PATH: String = "res://Data/Combat/offscreen_battle_default.tres"
+## 战斗结束后存活部队的禁止再战时间（世界秒）。
+## 避免双方刚解锁就因仍在接触范围内而立刻重新开战，导致看似卡死。
+const POST_BATTLE_ENGAGEMENT_COOLDOWN: float = 30.0
 
 ## 战斗经验与奖励集中配置。
 const EXP_SURVIVAL_BASE: int = 10
@@ -744,6 +747,9 @@ func _destroy_dead_unit(state: BattleUnitState) -> void:
 
 
 func _unlock_session_parties(session: BattleSession) -> void:
+	var cooldown_until: float = (
+		TimeManager.world_elapsed_seconds + POST_BATTLE_ENGAGEMENT_COOLDOWN
+	)
 	for party_id: String in session.get_all_party_ids():
 		var party := _party_manager.get_party(party_id)
 		if party == null:
@@ -753,9 +759,15 @@ func _unlock_session_parties(session: BattleSession) -> void:
 			party.battle_state = PartyData.BattleState.DISABLED
 		else:
 			party.battle_state = PartyData.BattleState.AVAILABLE
+			# 存活部队短暂禁止再战，给出脱离接触与恢复路线的时间。
+			party.engagement_cooldown_until = maxf(
+				party.engagement_cooldown_until, cooldown_until
+			)
+		# 不把移动目标重置为当前位置：移动状态改为 IDLE 后，
+		# 由 AIManager 在下一个决策周期按 AI 类型重新生成目标/路线。
 		party.movement_state = PartyData.MovementState.IDLE
-		party.target_position = party.world_position
 		party.current_target_id = ""
 		party.current_order = PartyData.OrderType.NONE
 		party.attack_intent = false
+		party.focus_party_id = ""
 		EventBus.party_battle_state_changed.emit(party.party_id, int(party.battle_state))

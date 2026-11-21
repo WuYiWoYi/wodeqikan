@@ -22,6 +22,14 @@ var attack: int = 0
 var attack_interval: float = 1.0
 var move_speed: float = 60.0
 var attack_range: float = 20.0
+## 由当前 WEAPON 装备派生：0 = 近战，1 = 远程。不通过兵种名称判断。
+var attack_type: int = EquipmentConfig.AttackType.MELEE
+## 远程命中判定使用的身体有效高度；骑乘时由 StatCalculator 追加坐骑高度。
+var body_height: float = 48.0
+## 远程武器发射物表现参数；近战单位保持默认值且不会被使用。
+var projectile_texture_path: String = ""
+var projectile_speed: float = 480.0
+var projectile_arc_height: float = 70.0
 
 var faction_id: String = ""
 ## 家族身份（持久化）。空字符串表示无家族，使用阵营色/默认外观。
@@ -48,6 +56,11 @@ func is_alive() -> bool:
 	return current_hp > 0
 
 
+## 当前装备的武器是否为远程武器。攻击行为入口统一读取该派生值。
+func is_ranged_attacker() -> bool:
+	return attack_type == EquipmentConfig.AttackType.RANGED
+
+
 func clamp_hp() -> void:
 	current_hp = clampi(current_hp, 0, maxi(max_hp, 0))
 
@@ -66,6 +79,11 @@ func to_dict() -> Dictionary:
 		"attack_interval": attack_interval,
 		"move_speed": move_speed,
 		"attack_range": attack_range,
+		"attack_type": attack_type,
+		"body_height": body_height,
+		"projectile_texture_path": projectile_texture_path,
+		"projectile_speed": projectile_speed,
+		"projectile_arc_height": projectile_arc_height,
 		"faction_id": faction_id,
 		"family_id": family_id,
 		"current_party_id": current_party_id,
@@ -95,6 +113,14 @@ static func from_dict(data: Dictionary) -> UnitData:
 	unit.attack_interval = float(data.get("attack_interval", 1.0))
 	unit.move_speed = float(data.get("move_speed", 60.0))
 	unit.attack_range = float(data.get("attack_range", 20.0))
+	# 以下字段是旧存档没有的派生缓存；读档后由 UnitManager 按装备重算。
+	unit.attack_type = int(data.get("attack_type", EquipmentConfig.AttackType.MELEE))
+	unit.body_height = maxf(1.0, float(data.get("body_height", 48.0)))
+	unit.projectile_texture_path = str(data.get("projectile_texture_path", ""))
+	unit.projectile_speed = maxf(1.0, float(data.get("projectile_speed", 480.0)))
+	unit.projectile_arc_height = maxf(
+		0.0, float(data.get("projectile_arc_height", 70.0))
+	)
 	unit.faction_id = str(data.get("faction_id", ""))
 	unit.family_id = str(data.get("family_id", ""))
 	unit.current_party_id = str(data.get("current_party_id", ""))

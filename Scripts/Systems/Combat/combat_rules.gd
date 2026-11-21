@@ -98,6 +98,44 @@ static func can_attack(attacker: Variant, target: Variant) -> bool:
 	return can_attack_with_direction(attacker, target, direction)
 
 
+# ---------------------------------------------------------------------------
+# 远程攻击规则
+# ---------------------------------------------------------------------------
+
+
+## 远程武器的有效射程。直接使用 UnitData.attack_range：
+## StatCalculator 已把 WEAPON.weapon_attack_range 与等级成长合并到该值。
+static func ranged_attack_range(attacker_unit_data: UnitData) -> float:
+	if attacker_unit_data == null:
+		return 0.0
+	return maxf(0.0, attacker_unit_data.attack_range)
+
+
+## 目标地面位置是否在远程射程内。远程攻击不要求目标位于攻击者前方，
+## 也不使用近战的定向矩形；命中由箭矢的固定目标坐标与高度检测决定。
+static func is_in_ranged_range(attacker: Variant, target: Variant) -> bool:
+	if attacker == null or target == null:
+		return false
+	if attacker.unit_data == null or attacker.state == null or target.state == null:
+		return false
+	var distance: float = attacker.get_position().distance_to(target.get_position())
+	return distance <= ranged_attack_range(attacker.unit_data)
+
+
+## 远程攻击前置条件：存活、敌对、冷却结束、目标在射程内。
+## 这里只判断“能否开始一次射击”，不预判箭矢是否会命中。
+static func can_ranged_attack(attacker: Variant, target: Variant) -> bool:
+	if attacker == null or target == null:
+		return false
+	if not attacker.is_alive() or not target.is_alive():
+		return false
+	if not is_hostile(attacker, target):
+		return false
+	if float(attacker.get_attack_cooldown()) > 0.0:
+		return false
+	return is_in_ranged_range(attacker, target)
+
+
 ## 单次有效攻击的伤害。骑乘移动加成由 StatCalculator 统一提供。
 static func compute_attack_damage(attacker: Variant) -> int:
 	if attacker == null or attacker.unit_data == null:

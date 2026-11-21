@@ -157,6 +157,8 @@ WorldSimulation 更新 PartyData.world_position
 
 ### 4.1 鼠标悬浮信息
 
+> 阶段 6 后续改为默认只显示名称，按住左 Alt 展开详细构成，见 12.2。
+
 鼠标悬浮在部队图标 30 像素范围内时显示简易面板：
 
 - 部队名称；
@@ -439,6 +441,8 @@ WorldSimulation 更新 PartyData.world_position
 
 ### 11.3 固定屏幕地点名称
 
+> 阶段 6 后续已改为原始村庄美术 + 徽章/名称组合，见第 12 节。
+
 - `SettlementIcon` 不再创建 `NameLabel`；`SettlementNameTag` 只显示文本。
 - `SettlementNameTag` 位于大地图固定 UI 层，每帧跟随地点世界坐标转换后的屏幕位置；文字大小不受缩放影响。
 - 名称水平居中，整体位于圆形标记正上方；间距 = 标记半径 × 相机缩放 + 10 屏幕像素，不会显示在标记下方。
@@ -458,3 +462,33 @@ WorldSimulation 更新 PartyData.world_position
 - 两支家族骑士：巴里骑士、墨西西骑士，`FACTION_LOCAL`，各自 `family_id`，专属巡逻点。
 - 两支新强盗：东路强盗、荒野强盗，沿用 BANDIT 阵营与 AI，拥有独立出生点与路线。
 - `WorldInitializer` 只在新游戏创建时生成；读档不调用初始化，不会重复生成。
+
+## 12. 地点原始美术、徽章名称组合与悬浮 Alt（阶段 6 后续）
+
+### 12.1 三个独立元素
+
+| 元素 | 层级 | 职责 |
+|---|---|---|
+| `SettlementIcon` | 世界层（`world_entities`） | 原始村庄/城堡美术；位置、缩放、点击判定不变 |
+| `SettlementNameTag` | 屏幕 UI 层（`SettlementNameLayer`） | 固定 240×36 的徽章 + 名称组合 |
+| `SettlementNameTag.FamilyBadge` | 名称组合内部 | 左侧圆形家族徽章，颜色来自 `FamilyConfig` |
+
+- 世界层不再绘制圆形村庄标记或旗帜，也不再携带名称。
+- 名称组合整体位于地点世界坐标转换后的屏幕位置上方，按 `SettlementIcon.get_name_anchor_radius()` × 相机缩放 + 10 屏幕像素定位。
+- 徽章读取 `SettlementData.family_id`；无家族隐藏徽章，只显示名称。
+- 名称组合与徽章均为 `MOUSE_FILTER_IGNORE`。
+
+### 12.2 悬浮信息简单/详细模式
+
+- 默认：只显示部队名称。
+- 按住左 Alt：增加“总人数”与按兵种/骑乘分组的构成（玩家角色单独统计）。
+- 输入集中在 `world_map._input()`：只响应 `KEY_ALT` 且 `location != KEY_LOCATION_RIGHT`；忽略 echo，不标记事件已处理。
+- 模式改变时立即重建当前悬浮面板并重新定位，不需要移动鼠标；松开左 Alt 立即恢复简单模式。
+- 测试钩子：`set_alt_detail_active()`、`is_alt_detail_active()`。
+
+### 12.3 战斗汇总按战斗侧分列
+
+- `BattleSummaryContent` 为 `HBoxContainer`；每个 `side_index` 生成一列 `VBoxContainer`。
+- 列头为“战斗侧 N”；同侧部队在列内纵向排列，伤亡实时刷新。
+- 第三侧起自动增加列，面板宽度按列数扩展；战斗结束移除所有列并清空文本。
+- 提供 `get_battle_summary_column_count()` 与 `get_battle_summary_side_indices()` 供自动化验证。

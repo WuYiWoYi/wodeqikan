@@ -12,6 +12,13 @@ enum Slot {
 	MOUNT,
 }
 
+## 武器攻击方式。近战沿用现有定向矩形；远程锁定目标坐标并生成箭矢。
+## 是否能够远程攻击由武器配置决定，不通过兵种名称或 unit_class 判断。
+enum AttackType {
+	MELEE,
+	RANGED,
+}
+
 ## 槽位字符串是 UnitData.equipment 的唯一键格式，与 Slot 顺序一一对应。
 const SLOT_NAMES: Array[String] = ["WEAPON", "OFFHAND", "HEAD", "BODY", "MOUNT"]
 const SLOT_DISPLAY_NAMES: Array[String] = ["武器", "副手", "头盔", "盔甲", "坐骑"]
@@ -29,6 +36,18 @@ const SLOT_DISPLAY_NAMES: Array[String] = ["武器", "副手", "头盔", "盔甲
 ## 0 表示不覆盖（例如非武器槽或旧配置）。最终战斗矩形还会叠加
 ## CombatRules 的身体尺寸与武器向前加成。
 @export var weapon_attack_range: float = 0.0
+## 武器攻击方式；非 WEAPON 槽忽略。
+@export var attack_type: AttackType = AttackType.MELEE
+## >0 时覆盖 UnitConfig.attack_interval；弓统一为 3 秒攻击冷却。
+@export var attack_interval_override: float = 0.0
+
+@export_category("Projectile")
+## 远程武器生成的箭矢贴图；空字符串表示使用代码绘制的最小回退表现。
+@export var projectile_texture_path: String = ""
+## 箭矢地面飞行速度（像素/秒）。
+@export var projectile_speed: float = 480.0
+## 抛物线最大视觉高度（像素）；地面深度不受该值影响。
+@export var projectile_arc_height: float = 70.0
 
 @export_category("Visual")
 ## 对应 UnitVisual 中的部件名，例如 "RightHandWeapon"。
@@ -45,6 +64,11 @@ const SLOT_DISPLAY_NAMES: Array[String] = ["武器", "副手", "头盔", "盔甲
 @export var allowed_unit_config_ids: Array[String] = []
 
 
+## 是否为远程武器。调用方应通过本方法判断攻击方式，而不是检查兵种名称。
+func is_ranged_weapon() -> bool:
+	return slot == Slot.WEAPON and attack_type == AttackType.RANGED
+
+
 func validate() -> bool:
 	if equipment_id.strip_edges().is_empty():
 		push_error("EquipmentConfig 缺少 equipment_id: %s" % resource_path)
@@ -55,6 +79,16 @@ func validate() -> bool:
 	if slot_to_string(slot).is_empty():
 		push_error("EquipmentConfig 槽位非法: %s" % equipment_id)
 		return false
+	if slot == Slot.WEAPON and attack_type == AttackType.RANGED:
+		if projectile_speed <= 0.0:
+			push_error("远程武器 projectile_speed 必须大于 0: %s" % equipment_id)
+			return false
+		if projectile_arc_height < 0.0:
+			push_error("远程武器 projectile_arc_height 不能为负数: %s" % equipment_id)
+			return false
+		if attack_interval_override <= 0.0:
+			push_error("远程武器必须配置攻击间隔覆盖值: %s" % equipment_id)
+			return false
 	return true
 
 

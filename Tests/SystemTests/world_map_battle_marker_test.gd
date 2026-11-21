@@ -144,6 +144,31 @@ func _run() -> void:
 		"战斗结束后恢复参战部队普通图标"
 	)
 
+	# 三方战斗：每个 side_index 一列，第三列自动出现。
+	var three_sides := _context.battle_manager.start_battle_by_sides(
+		[[_player.party_id], [_merchant.party_id], [_bandit.party_id]],
+		_battle_position,
+		true
+	)
+	_check(three_sides != null, "创建三方离屏战斗")
+	if three_sides != null:
+		await _wait_frames(3)
+		_check(
+			int(_map.call("get_battle_summary_column_count")) == 3,
+			"三方战斗按 side_index 生成三列"
+		)
+		var side_indices: Array = _map.call("get_battle_summary_side_indices")
+		_check(side_indices == [0, 1, 2], "汇总列顺序对应战斗侧顺序")
+		_context.battle_manager.finish_battle(
+			three_sides.battle_id, BattleSession.BattleResult.ABORTED
+		)
+		await _wait_frames(3)
+		_check(
+			int(_map.call("get_battle_summary_column_count")) == 0,
+			"战斗结束后清理所有汇总列"
+		)
+		_check(_map.call("get_battle_summary_text") == "", "三方战斗结束后清空汇总")
+
 
 func _wait_frames(count: int) -> void:
 	for i: int in range(count):

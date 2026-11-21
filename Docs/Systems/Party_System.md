@@ -288,7 +288,7 @@ Milestone 1 使用简单固定值：
 | 大地图部队遭遇对话 | 已实现 |
 | 战斗锁定 / 解锁 | 已实现 |
 | 阵亡成员结算 | 已实现（移除归属并删除 UnitData；全员阵亡→DISABLED） |
-| 初始测试兵力 | 玩家 5 民兵 + 6 职业步兵（4 名骑乘）+ 1 玩家角色（12 人）；其余三方各 3 民兵 + 2 职业步兵 |
+| 初始测试兵力 | 玩家 5 民兵 + 6 职业步兵（4 名骑乘）+ 3 弓箭手 + 1 玩家角色（15 人）；其余三方各 3 民兵 + 2 职业步兵 |
 | 玩家角色 Unit | 已实现：属于玩家部队、普通 UnitData、可参与战斗 |
 | 骑乘成员 | 已实现：普通职业步兵装备马匹；成员关系不变，控制权转移列表显示“骑乘” |
 | AI 行为字段与序列化 | 已实现（`ai_type` / `ai_route_index` / 路线 ID） |
@@ -306,10 +306,10 @@ Milestone 1 使用简单固定值：
 | 拆分/合并 | TODO(阶段7) |
 
 新游戏会通过 `WorldInitializer.create_test_battle_forces()` 配置临时兵力：
-- 玩家部队：5 民兵 + 6 职业步兵（其中 4 名装备马匹）+ 1 玩家角色（`player_hero`），共 12 人；
+- 玩家部队：5 民兵 + 6 职业步兵（其中 4 名装备马匹）+ 3 弓箭手（2 名 `archer_militia` + 1 名 `archer_trained`）+ 1 玩家角色（`player_hero`），共 15 人；弓箭手默认装备 `weapon_bow_01`；
 - 商队、治安队、强盗：各 3 民兵 + 2 职业步兵，共 5 人。
 
-人数与兵种分配集中在 `WorldInitializer` 的 `PLAYER_MILITIA_COUNT`、`PLAYER_TRAINED_COUNT`、`PLAYER_MOUNTED_TRAINED_COUNT` 与 `PLAYER_TOTAL_MEMBER_COUNT`；不在多个脚本重复写人数。玩家部队在初始化时向 `PlayerProfile` 加入 5 匹测试马匹：4 匹由职业步兵装备，1 匹留在背包用于验收上马/下马（`TEST_MOUNT_STOCK = 骑乘人数 + 1`）。4 名骑乘单位仍是普通 `infantry_trained` 成员，只是 `equipment["MOUNT"]` 存在；不新增骑兵兵种、不改变部队成员关系。阶段 6 同时给予 2 个晋升凭证用于验证晋升流程。单位标记 `recruit_source = "milestone2_test"`，后续由招募系统替换（KI121）。玩家角色是普通 `UnitData`，使用 `is_player_character` 标记身份并属于玩家部队。旧存档若已有成员则不会补兵或重复生成；没有玩家角色时战斗场景退化到第一名存活友军作为控制对象。
+人数与兵种分配集中在 `WorldInitializer` 的 `PLAYER_MILITIA_COUNT`、`PLAYER_TRAINED_COUNT`、`PLAYER_MOUNTED_TRAINED_COUNT`、`PLAYER_ARCHER_MILITIA_COUNT`、`PLAYER_ARCHER_TRAINED_COUNT`、`PLAYER_ARCHER_COUNT` 与 `PLAYER_TOTAL_MEMBER_COUNT`；不在多个脚本重复写人数。弓箭手与其他成员一样分配唯一 `unit_id`，写入 `member_unit_ids` 与 `current_party_id`；旧存档不会获得弓箭手（不补兵、不重复生成）。玩家部队在初始化时向 `PlayerProfile` 加入 5 匹测试马匹：4 匹由职业步兵装备，1 匹留在背包用于验收上马/下马（`TEST_MOUNT_STOCK = 骑乘人数 + 1`）。4 名骑乘单位仍是普通 `infantry_trained` 成员，只是 `equipment["MOUNT"]` 存在；不新增骑兵兵种、不改变部队成员关系。阶段 6 同时给予 2 个晋升凭证用于验证晋升流程。单位标记 `recruit_source = "milestone2_test"`，后续由招募系统替换（KI121）。玩家角色是普通 `UnitData`，使用 `is_player_character` 标记身份并属于玩家部队。旧存档若已有成员则不会补兵或重复生成；没有玩家角色时战斗场景退化到第一名存活友军作为控制对象。
 
 阵营关系由 `FactionManager` 统一维护（玩家-商队中立、玩家-强盗敌对、玩家-治安队中立、商队-治安队友好、商队-强盗敌对、强盗-治安队敌对）；部队实例只保存 `faction_id`，不保存关系表。
 
@@ -352,7 +352,7 @@ Milestone 1 使用简单固定值：
 
 | 部队 | 阵营 | 人数 | AI |
 |---|---|---|---|
-| 玩家部队 | 玩家 | 12 | 玩家控制 |
+| 玩家部队 | 玩家 | 15 | 玩家控制 |
 | 河畔商队 | 商队 | 5 | 商队往返 |
 | 北境巡逻队 | 治安队 | 5 | 守卫/巡逻 |
 | 山道强盗 | 强盗 | 5 | 强盗游荡 |
@@ -364,3 +364,27 @@ Milestone 1 使用简单固定值：
 家族骑士编制：1 领袖（三级）+ 1 骑乘侍从（三级）+ 3 骑乘军士（二级）+ 2 军士（二级）+ 3 步兵（一级）。规格表格明细合计为 8，正文与验收要求 10，按验收目标补足 1 名骑乘军士与 1 名步兵，见 D086。
 
 家族骑士使用 `FACTION_LOCAL`，家族身份由 `family_id` 区分；玩家与本地势力保持中立，不新增外交关系。
+
+## 13. 运行时交战冷却、读档清理与领袖校验（阶段 6 后续）
+
+### 13.1 `engagement_cooldown_until`
+
+- `PartyData` 运行时字段（float，默认 0），单位为 `TimeManager.world_elapsed_seconds`。
+- 战斗结束后存活部队获得 30 秒冷却；不进入 `to_dict()`/`from_dict()`。
+- 由 `BattleManager` 设置，`AIManager` 与 `EncounterManager` 读取。
+
+### 13.2 `sanitize_loaded_runtime_state()`
+
+读档后、成员关系校验前调用，清理不可能成立的状态：
+
+- 清零 `attack_intent`、`focus_party_id`、`engagement_cooldown_until`；
+- 无活动战斗会话时 `IN_BATTLE`/`RETURNING` 回落为 `AVAILABLE`（无成员则 `DISABLED`）；
+- 清除 `BATTLE` 指令；失效追击目标与 `FOLLOW_PARTY` 指令清除并停止移动。
+
+### 13.3 枚举与领袖校验
+
+- `PartyData.from_dict()` 对 `current_order`、`movement_state`、`battle_state` 做范围校验，非法值回退默认。
+- `PartyManager.validate_membership_consistency()` 额外要求：
+  - `leader_unit_id` 非空时必须出现在本部队 `member_unit_ids`；
+  - 领袖单位必须存在于 `UnitManager`。
+- 校验失败仍保留现场并拒绝读档，不静默修正。

@@ -117,6 +117,9 @@ func update_encounters() -> bool:
 			var b := parties[j]
 			if not _has_encounter_presence(b):
 				continue
+			# 刚结束战斗的部队优先脱离接触，不能被同一对手立刻拖回战斗。
+			if _is_engagement_cooling(a) or _is_engagement_cooling(b):
+				continue
 			if not _faction_manager.is_hostile(a.faction_id, b.faction_id):
 				continue
 			if a.world_position.distance_to(b.world_position) > AI_ENCOUNTER_RADIUS:
@@ -195,6 +198,13 @@ func update_encounters() -> bool:
 			ai_target.attack_intent = false
 			return false
 	return false
+
+
+## 战斗结束后的短暂冷却；与 AIManager 使用同一 PartyData 字段。
+func _is_engagement_cooling(party: PartyData) -> bool:
+	if party == null:
+		return false
+	return party.engagement_cooldown_until > TimeManager.world_elapsed_seconds
 
 
 func _begin_pending_player_encounter(
