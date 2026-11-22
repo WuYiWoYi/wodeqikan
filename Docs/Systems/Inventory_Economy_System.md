@@ -140,6 +140,14 @@
 - 采邑征召：不消耗金币，消耗村庄 `fief_recruitment_stock` 1 组、人口、繁荣度；马匹由配置直接装备，不消耗玩家背包。
 - 工资仍只统计，不因征召或税收自动扣除。
 
+## 4.1.1 每日收支预览（阶段 13 后续）
+
+- `WorldContext.get_daily_balance_preview()` 提供只读预览，供顶栏金币悬浮使用。
+- 收入项来自玩家授权封地的 `SettlementData.tax_income_per_day` 缓存；支出项来自
+  `PartyManager.get_total_wage(player_party_id)`。
+- 返回 `income_total`、`expense_total`、`net` 与逐项 `items`（标签 + 带符号金额）。
+- 该接口只汇总现有缓存，不新增经济公式，也不实际扣除金币；工资与税收的定期结算仍为未实现项。
+
 ## 4.2 玩家背包 UI（阶段 11 新增）
 
 - 入口：大地图顶栏“背包”按钮（`InventoryButton`）。
@@ -244,6 +252,7 @@
 | 士兵工资与部队总额 | 已实现（统计/显示，不扣除） |
 | 工资定期扣除 | 未实现 |
 | 封地税收缓存 | 已实现（统一 `TaxCalculator`，只展示不扣除） |
+| 每日收支预览 | 已实现（`WorldContext.get_daily_balance_preview`，复用工资与税收缓存，不结算） |
 | 冒险者金币招募 | 已实现（1 金币，失败回滚） |
 | 采邑征召资源成本 | 已实现（储备/人口/繁荣度） |
 | 完整玩家背包 UI | 已实现（阶段 11，只读） |

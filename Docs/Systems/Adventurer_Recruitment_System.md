@@ -87,6 +87,8 @@
 ## 6. 村庄表现与对话
 
 - 每个可招募候选人生成一个运行时 NPC 表现节点，位置来自 `candidate.world_position`，外观来自持久化 `appearance`。
+- 表现节点与名称标签必须使用 `candidate.world_position`（为空时按 `CANDIDATE_POSITIONS` 回退）；不得使用村庄场景根节点的 `position`，否则所有候选人会叠在世界原点、正常镜头内不可见。
+- 村庄场景只读取候选人数据生成表现，不在打开界面时生成新候选人；重复进入村庄不会重复创建。
 - 点击半径与头人一致：鼠标点击候选 NPC 且玩家距离 <= 130 像素才打开对话。
 - 对话选项 action 为 `recruit_adventurer`；显示费用与候选人姓名。
 - 招募成功后关闭对话并刷新候选 NPC 的“已招募”标签；失败显示 `last_error`。

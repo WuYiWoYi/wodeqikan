@@ -6,6 +6,8 @@ extends Control
 ## 多支部队从左到右排列，超过一行宽度后换行，不同地点各自独立。
 ## 只负责表现，不读取/修改任何权威数据；纹理与颜色由 WorldMap 转入。
 
+const TextureRegion = preload("res://Scripts/Core/World/texture_region_utils.gd")
+
 const BANNER_SIZE: Vector2 = Vector2(26.0, 32.0)
 const BANNER_GAP: float = 4.0
 const ROW_GAP: float = 4.0
@@ -119,6 +121,8 @@ func _draw() -> void:
 		var texture := entry.get("texture") as Texture2D
 		if texture == null:
 			continue
+		# 透明留白不参与排版：裁切到非透明像素区域后等比放入徽章内边距。
+		texture = TextureRegion.get_trimmed_texture(texture)
 		# 旗帜保持原始宽高比，放在徽章内边距以内；不做圆形裁剪。
 		var inner_size := BANNER_SIZE - Vector2(FLAG_INSET, FLAG_INSET) * 2.0
 		var texture_size := texture.get_size()

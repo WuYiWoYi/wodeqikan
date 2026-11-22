@@ -10,6 +10,7 @@ extends Node2D
 const PLAYER_MARKER_COLOR: Color = Color("#2f7fdd")
 const ENEMY_MARKER_COLOR: Color = Color("#b94b42")
 const CIRCLE_FLAG_SHADER_PATH: String = "res://Shaders/map_flag_circle.gdshader"
+const TextureRegion = preload("res://Scripts/Core/World/texture_region_utils.gd")
 
 var party: PartyData = null
 var is_player: bool = false
@@ -17,6 +18,8 @@ var is_player: bool = false
 var _style: PartyMarkerStyle = null
 var _marker_color: Color = ENEMY_MARKER_COLOR
 var _flag_texture: Texture2D = null
+## 原始旗帜路径；缩略裁切后仍用于测试/调试读取配置来源。
+var _flag_texture_path: String = ""
 var _flag_sprite: Sprite2D = null
 var _count_label: Label = null
 var _last_count: int = -1
@@ -45,6 +48,7 @@ func setup(
 	else:
 		_marker_color = ENEMY_MARKER_COLOR
 	_flag_texture = flag_texture
+	_flag_texture_path = flag_texture.resource_path if flag_texture != null else ""
 	position = data.world_position
 	_create_flag_sprite()
 	_create_count_label()
@@ -126,9 +130,7 @@ func get_marker_radius() -> float:
 
 
 func get_flag_texture_path() -> String:
-	if _flag_texture == null:
-		return ""
-	return _flag_texture.resource_path
+	return _flag_texture_path
 
 
 ## 部队上方的一次性浮动提示（例如“招募了1组采邑”）。
@@ -184,15 +186,17 @@ func _create_flag_sprite() -> void:
 	if _flag_texture == null:
 		return
 
+	# 透明留白不参与缩放：先按非透明像素区域裁切，再以有效尺寸等比放大。
+	var trimmed := TextureRegion.get_trimmed_texture(_flag_texture)
+	var texture_size: Vector2 = trimmed.get_size()
 	_flag_sprite = Sprite2D.new()
 	_flag_sprite.name = "FamilyFlag"
-	_flag_sprite.texture = _flag_texture
+	_flag_sprite.texture = trimmed
 	_flag_sprite.centered = true
 	_flag_sprite.position = Vector2(0.0, _style.flag_vertical_offset)
 	_flag_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_flag_sprite.z_index = 1
-	# 等比缩放：取宽高中较大边，保持原始宽高比；再由圆形遮罩裁剪边缘。
-	var texture_size: Vector2 = _flag_texture.get_size()
+	# 等比缩放：取有效宽高中较大边，保持原始宽高比；再由圆形遮罩裁剪边缘。
 	var longest_side: float = maxf(texture_size.x, texture_size.y)
 	if longest_side > 0.0:
 		var factor: float = _style.flag_max_size / longest_side
@@ -205,6 +209,9 @@ func _create_flag_sprite() -> void:
 			# 裁剪半径贴近边框内缘：旗帜允许大于内径，但不会盖住外圈边框。
 			mask_material.set_shader_parameter(
 				"uv_radius", _style.get_flag_clip_uv_radius()
+			)
+			mask_material.set_shader_parameter(
+				"uv_aspect", texture_size.x / maxf(1.0, texture_size.y)
 			)
 			_flag_sprite.material = mask_material
 	add_child(_flag_sprite)

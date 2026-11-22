@@ -218,7 +218,8 @@ func _test_tavern_menu_and_selling() -> void:
 	) as Button
 	tavern_button.pressed.emit()
 	_check(_tavern.visible, "点击进入酒馆后界面显示")
-	_check(not _settlement_panel.visible, "酒馆覆盖城镇信息面板")
+	# 酒馆内容嵌入原地点面板，窗口本身保持可见、位置与尺寸不变。
+	_check(_settlement_panel.visible, "酒馆内容复用城镇信息面板，不打开第二个窗口")
 	_check(_tavern.is_menu_visible(), "酒馆默认显示菜单")
 
 	# 雇佣兵占位界面。

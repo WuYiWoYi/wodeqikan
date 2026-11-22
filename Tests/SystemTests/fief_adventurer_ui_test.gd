@@ -69,6 +69,25 @@ func _test_village_candidates() -> void:
 		_village.get_candidate_visual(candidate.candidate_id) != null,
 		"候选人 NPC 绑定权威候选人 ID"
 	)
+	_check(
+		_village.get_candidate_position(candidate.candidate_id).distance_to(
+			candidate.world_position
+		) < 0.01,
+		"候选人 NPC 使用持久化位置，而不是村庄根节点坐标"
+	)
+	# 同一村庄的候选人必须分散在各自位置上，不能全部叠在世界原点。
+	var candidate_positions: Dictionary = {}
+	var distinct_positions: bool = true
+	for entry: AdventurerCandidateData in _player_village.adventurer_candidates:
+		if entry == null:
+			continue
+		var entry_position: Vector2 = _village.get_candidate_position(
+			entry.candidate_id
+		)
+		if candidate_positions.has(entry_position):
+			distinct_positions = false
+		candidate_positions[entry_position] = true
+	_check(distinct_positions, "同村候选人 NPC 位置互不重叠")
 
 	_village.set_player_position(
 		_village.get_candidate_position(candidate.candidate_id) + Vector2(60.0, 0.0)

@@ -111,11 +111,17 @@ func _test_open_and_overview() -> void:
 func _test_member_list_and_switch() -> void:
 	if _panel == null:
 		return
-	var list := _panel.find_child("PartyMemberList", true, false) as VBoxContainer
+	var list := _panel.find_child("PartyMemberList", true, false) as GridContainer
 	_check(list != null, "存在士兵列表")
 	if list == null:
 		return
+	_check(list.columns == 2, "士兵列表使用双列排列")
 	_check(list.get_child_count() == _player.member_unit_ids.size(), "列表人数与 PartyData 一致")
+	var prisoner_list := _panel.find_child("PartyPrisonerList", true, false) as GridContainer
+	_check(
+		prisoner_list != null and prisoner_list.columns == 2,
+		"俘虏列表使用双列排列"
+	)
 
 	var seen: Dictionary = {}
 	for child: Node in list.get_children():
@@ -130,11 +136,33 @@ func _test_member_list_and_switch() -> void:
 	var first_unit := _context.unit_manager.get_unit(first_id)
 	_check(_panel.get_selected_unit_id() == first_id, "默认选中第一名士兵")
 
+	var first_item := _panel.find_child("MemberItem_%s" % first_id, true, false) as PartyMemberItem
+	_check(first_item != null, "第一名士兵列表项存在")
+	if first_item != null:
+		var member_name := first_item.find_child("MemberName", true, false) as Label
+		var member_exp := first_item.find_child("MemberCombatExperience", true, false) as Label
+		var member_hp := first_item.find_child("MemberHp", true, false) as Label
+		_check(member_name != null and member_name.text == first_unit.display_name, "列表显示姓名")
+		_check(
+			member_exp != null
+				and member_exp.text == "战斗经验：%s" % CombatExperience.tier_name_for_level(
+					first_unit.level
+				),
+			"列表显示战斗经验文本等级"
+		)
+		_check(
+			member_hp != null
+				and member_hp.text.contains("%d / %d" % [first_unit.current_hp, first_unit.max_hp]),
+			"列表显示当前生命值"
+		)
+		_check(first_item.find_child("MemberClass", true, false) == null, "列表不再显示兵种文字")
+		_check(first_item.find_child("MemberStats", true, false) == null, "列表不再显示攻击等额外属性")
+		_check(first_item.get_thumbnail() != null, "列表保留头像缩略图")
+
 	var detail_name := _panel.find_child("DetailUnitName", true, false) as Label
 	var detail_class := _panel.find_child("DetailUnitClass", true, false) as Label
 	var detail_class_type := _panel.find_child("DetailUnitClassType", true, false) as Label
-	var detail_level := _panel.find_child("DetailLevel", true, false) as Label
-	var detail_exp := _panel.find_child("DetailExp", true, false) as Label
+	var detail_combat_exp := _panel.find_child("DetailCombatExperience", true, false) as Label
 	var detail_hp := _panel.find_child("DetailHp", true, false) as Label
 	var detail_attack := _panel.find_child("DetailAttack", true, false) as Label
 	var detail_interval := _panel.find_child("DetailAttackInterval", true, false) as Label
@@ -143,8 +171,15 @@ func _test_member_list_and_switch() -> void:
 	_check(detail_name != null and detail_name.text == first_unit.display_name, "默认显示第一名士兵名称")
 	_check(detail_class != null and detail_class.text.contains("民兵"), "兵种名称正确")
 	_check(detail_class_type != null and detail_class_type.text.contains("步兵"), "兵种类型正确")
-	_check(detail_level != null and detail_level.text.contains("1"), "等级显示正确")
-	_check(detail_exp != null and detail_exp.text.contains("0 / 100"), "经验显示正确")
+	_check(
+		detail_combat_exp != null
+			and detail_combat_exp.text == "战斗经验：新兵",
+		"详情以文本显示战斗经验"
+	)
+	_check(_panel.find_child("DetailLevel", true, false) == null, "详情不再显示数值等级")
+	_check(_panel.find_child("DetailExp", true, false) == null, "详情不再显示经验数值")
+	_check(_panel.find_child("DetailExpProgress", true, false) == null, "详情不再显示经验进度条")
+	_check(_panel.find_child("DetailUnitId", true, false) == null, "详情不再显示内部 ID")
 	_check(
 		detail_hp != null and detail_hp.text.contains("%d / %d" % [first_unit.current_hp, first_unit.max_hp]),
 		"HP 显示正确"
@@ -205,10 +240,15 @@ func _test_equipment_display() -> void:
 func _test_preview() -> void:
 	if _panel == null:
 		return
-	var preview := _panel.find_child("PreviewUnitVisual", true, false)
+	var preview := _panel.find_child("PreviewUnitVisual", true, false) as UnitVisual
 	_check(preview != null, "士兵详情包含美术预览")
+	_check(
+		_panel.find_child("DetailPreviewTitle", true, false) == null,
+		"详情不再显示美术预览标题"
+	)
 	if preview == null:
 		return
+	_check(preview.scale.x > 2.0, "详情美术预览图片已放大")
 	_check(preview.get_human_visual() != null, "预览使用人物表现组")
 	_check(preview.get_horse_visual() != null, "预览使用马匹表现组")
 	_check(preview.has_part("Body"), "预览显示人物身体")
@@ -290,6 +330,10 @@ func _test_preview() -> void:
 		),
 		"骑兵预览人物跟随马身起伏并保持 15 像素基础偏移"
 	)
+	_check(
+		is_equal_approx(preview.get_human_visual().position.x, 3.0),
+		"骑兵预览人物相对马匹向右偏移 3 像素"
+	)
 
 	# 骑乘预览播放马匹/骑手待机动画，且两者周期同步。
 	var horse_rig: Node2D = preview.get_horse_visual().get_body_rig()
@@ -364,7 +408,7 @@ func _test_invalid_member_reference() -> void:
 	_player.member_unit_ids.append("UNIT_999999")
 	_panel.refresh()
 	await get_tree().process_frame
-	var list := _panel.find_child("PartyMemberList", true, false) as VBoxContainer
+	var list := _panel.find_child("PartyMemberList", true, false) as GridContainer
 	_check(
 		list != null and list.get_child_count() == valid_count,
 		"无效成员引用不会导致 UI 崩溃"

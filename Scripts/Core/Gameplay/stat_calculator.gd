@@ -100,7 +100,7 @@ static func compute_final_stats(
 	var body_height: float = config.body_height + (
 		MOUNTED_BODY_HEIGHT_BONUS if has_mount else 0.0
 	)
-	return {
+	var final_stats := {
 		"max_hp": maxi(1, max_hp),
 		"attack": maxi(0, attack),
 		"attack_interval": attack_interval,
@@ -112,6 +112,9 @@ static func compute_final_stats(
 		"projectile_speed": projectile_speed,
 		"projectile_arc_height": projectile_arc_height,
 	}
+	# 战斗经验加成与兵种基础属性、等级成长、装备加成保持独立；
+	# 加成表由 CombatExperience 统一维护，当前为空，不改变现有数值。
+	return CombatExperience.apply_stat_bonuses(final_stats, level)
 
 
 ## 骑乘且正在移动时的额外攻击力。

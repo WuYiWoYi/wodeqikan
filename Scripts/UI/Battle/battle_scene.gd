@@ -8,6 +8,7 @@ extends Node2D
 const ProjectileManagerScript = preload(
 	"res://Scripts/Systems/Combat/projectile_manager.gd"
 )
+const TextureRegion = preload("res://Scripts/Core/World/texture_region_utils.gd")
 
 ## 有效战场面积约为旧 1280×720 的 2 倍（1800×1024 ≈ 1.999 倍）。
 ## 士兵像素尺寸、动画比例与相机视野（960×540）保持不变，扩大的只是可移动区域。
@@ -52,6 +53,8 @@ const CONTACT_DISTANCE: float = 220.0
 const CONTACT_SPACING_MULTIPLIER: float = 1.35
 
 @onready var characters: Node2D = $World/Characters
+## 所有士兵影子统一放在角色层之下；角色按实时 Y 排序时影子仍保持最底层。
+@onready var shadows: Node2D = $World/Shadows
 @onready var camera: Camera2D = $Camera2D
 
 var _context: WorldContext = null
@@ -1064,7 +1067,9 @@ func _build_reinforcement_message(party_id: String, noble_id: String) -> Diction
 				if _context.family_registry != null else null
 			if family != null and not family.banner_texture_path.is_empty() \
 					and ResourceLoader.exists(family.banner_texture_path):
-				banner = load(family.banner_texture_path) as Texture2D
+				banner = TextureRegion.get_trimmed_texture(
+					load(family.banner_texture_path) as Texture2D
+				)
 
 	var text: String = ""
 	if banner != null and not house_name.is_empty():
@@ -1347,7 +1352,11 @@ func _create_unit_controller(
 	var actor := UnitActor.new()
 	characters.add_child(actor)
 	actor.setup(
-		unit, state, player_side, _visual_equipment_configs(unit)
+		unit,
+		state,
+		player_side,
+		_visual_equipment_configs(unit),
+		shadows
 	)
 
 	var controller := UnitController.new()

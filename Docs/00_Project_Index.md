@@ -1,9 +1,10 @@
 # 我的骑砍 · 项目总索引
 
-**文档版本：** V0.34（阶段 13：大地图部队展示、伤兵恢复与俘虏系统）
-**更新日期：** 2026-11-22
+**文档版本：** V0.35（2026-11-22 记忆整理）
 **引擎：** Godot 4.6.1 / GDScript
-**源规划：** [2D 中世纪沙盒战略游戏核心架构设计与开发规划 V0.2](../md/2D%20中世纪沙盒战略游戏核心架构设计与开发规划.md)
+**当前阶段：** 阶段 13 及后续优化已完成
+**入口：** 每次任务先读仓库根目录 [CLAUDE.md](../CLAUDE.md)（核心记忆）；本文件是稳定事实与文档索引。
+**源规划：** [2D 中世纪沙盒战略游戏核心架构设计与开发规划 V0.2](../md/2D%20中世纪沙盒战略游戏核心架构设计与开发规划.md)（只读）
 
 ---
 
@@ -20,165 +21,89 @@
 | 攻击朝向 | 武器攻击判定支持 360°；人物贴图仍左右镜像，默认朝左 |
 | 静态配置 | Godot `Resource`（`Data/**/*.tres`） |
 | 运行时实体 | `RefCounted` 纯数据类（`UnitData`、`PartyData` 等） |
-| 存档 | JSON，带 `schema_version`，只保存持久化数据 |
+| 存档 | JSON，带 `schema_version`（当前 v7），只保存持久化数据 |
 | 世界时间 | 固定步长 0.1 秒，由 `TimeManager` 统一推进 |
 | 全局单例 | 仅 5 个 Autoload：`EventBus`、`TimeManager`、`SaveManager`、`SceneManager`、`GameManager` |
 | 代码规范 | 静态类型 GDScript；标识符英文，注释与文档中文 |
 | 版本管理 | Git，私有远程 [WuYiWoYi/wodeqikan](https://github.com/WuYiWoYi/wodeqikan) |
 
+> 已确认规则与“暂定/待确认”规则的区分、冲突判断顺序见 [CLAUDE.md](../CLAUDE.md) 第 5 节。
+
 ## 3. 架构速览
 
 ```text
-Autoload（全局）
+Autoload（全局，仅 5 个）
 ├── EventBus        事实广播
-├── TimeManager     WorldTime 固定步长 tick
+├── TimeManager     WorldTime 固定步长 tick / 暂停栈
 ├── SaveManager     JSON 存档读写
 ├── SceneManager    表现场景切换
 └── GameManager     会话状态、WorldContext 生命周期
 
-WorldContext（一局游戏，跨场景常驻）
-├── IdGenerator
-├── UnitManager
-├── ItemManager      消耗品/杂物静态配置
-├── MarketManager    村庄/城镇市场库存与交易唯一业务入口
-├── SupplyManager    每日补给消耗与采购需求
-├── WoundedHealingManager  WorldTime 整小时伤兵治疗
-├── PrisonerTradeManager   城镇酒馆出售俘虏
-├── PartyManager
-├── SettlementManager
-├── NobleManager     贵族（继承 LordManager）
-├── HouseManager     家族
-├── KingdomManager   王国
-├── LordManager      领主与封地归属（兼容入口）
-├── FiefRecruitmentManager     采邑储备/征召
-├── AdventurerRecruitmentManager 村庄候选人
-├── FactionManager   阵营关系
-├── FamilyRegistry   家族视觉配置（旗帜/罩袍/缨饰）
-├── SettlementEconomyConfig 采邑/税收/候选人参数（只读）
-├── VisionManager    视野查询
-├── WorldMapManager  移动/跟随
-├── EncounterManager 统一遭遇/中途参战
-├── WorldLogManager  世界事件日志
-├── AIManager
-├── BattleManager
-├── DialogueManager
-└── WorldSimulation  ← 消费 TimeManager.world_tick
+WorldContext（一局游戏，跨场景常驻；持有全部世界管理器）
+└── WorldSimulation（只消费 world_tick，按固定顺序推进世界）
+
+表现层（Scenes / UI / UnitVisual / 大地图图标）
+└── 只读 WorldContext 数据，通过 EventBus 监听事实，不回写权威数据
 ```
 
-完整依赖与写权限见 [01_Core_Architecture.md](01_Core_Architecture.md)。
+管理器职责、依赖方向、数据权威、更新管线与事件契约见 [01_Core_Architecture.md](01_Core_Architecture.md)。本文件不复制管理器清单，避免两处失同步。
 
 ## 4. 文档地图
 
-### 顶层文档
+### 核心与规范
 
-| 文档 | 职责 |
+| 文档 | 读取级别 | 职责 |
+|---|---|---|
+| [../CLAUDE.md](../CLAUDE.md) | 每次任务 | 核心记忆：硬约束、读取流程、冲突规则、文档更新规则 |
+| `00_Project_Index.md`（本文件） | 需要时 | 稳定基础决策、文档导航 |
+| [01_Core_Architecture.md](01_Core_Architecture.md) | 架构相关任务 | 分层、依赖方向、更新管线、数据权威、事件契约 |
+| [03_Design_Conventions.md](03_Design_Conventions.md) | 编写/修改代码或文档时 | 命名、GDScript、数据、场景、UI、AI、测试规范 |
+
+### 系统专题（按任务选读，不必全读）
+
+| 领域 | 文档 |
 |---|---|
-| [01_Core_Architecture.md](01_Core_Architecture.md) | 分层、依赖方向、更新管线、数据权威、事件契约 |
-| [02_Development_Roadmap.md](02_Development_Roadmap.md) | 阶段 0–13 的任务、依赖与验收标准 |
-| [03_Design_Conventions.md](03_Design_Conventions.md) | 命名、代码、数据、场景、文档规范 |
-| [04_Change_Log.md](04_Change_Log.md) | 重要变更历史 |
+| 世界、时间、场景 | [World_Map_System.md](Systems/World_Map_System.md)、[Time_System.md](Systems/Time_System.md)、[Scene_System.md](Systems/Scene_System.md) |
+| 单位、部队 | [Unit_System.md](Systems/Unit_System.md)、[Party_System.md](Systems/Party_System.md) |
+| 战斗、伤兵/俘虏 | [Combat_System.md](Systems/Combat_System.md)、[Wounded_Prisoner_System.md](Systems/Wounded_Prisoner_System.md) |
+| AI、政治层级、领主 | [AI_System.md](Systems/AI_System.md)、[Political_Hierarchy_System.md](Systems/Political_Hierarchy_System.md)、[Lord_System.md](Systems/Lord_System.md) |
+| 地点、村庄、封地、冒险者 | [Settlement_System.md](Systems/Settlement_System.md)、[Village_System.md](Systems/Village_System.md)、[Fief_Recruitment_System.md](Systems/Fief_Recruitment_System.md)、[Adventurer_Recruitment_System.md](Systems/Adventurer_Recruitment_System.md) |
+| 经济、马匹、补给 | [Inventory_Economy_System.md](Systems/Inventory_Economy_System.md)、[Mount_System.md](Systems/Mount_System.md)、[Supply_System.md](Systems/Supply_System.md) |
+| 对话、日志、百科、存档 | [Dialogue_System.md](Systems/Dialogue_System.md)、[World_Log_System.md](Systems/World_Log_System.md)、[Encyclopedia_System.md](Systems/Encyclopedia_System.md)、[Save_System.md](Systems/Save_System.md) |
 
-### 系统文档
+### 开发状态与历史
 
-| 文档 | 职责 |
-|---|---|
-| [Systems/World_Map_System.md](Systems/World_Map_System.md) | 大地图坐标、移动、视野、遭遇、战斗标记与日志面板 |
-| [Systems/World_Log_System.md](Systems/World_Log_System.md) | 世界事件日志、类型、上限与 UI 数据来源 |
-| [Systems/Time_System.md](Systems/Time_System.md) | 时间域、倍率、暂停栈、固定步长 |
-| [Systems/Scene_System.md](Systems/Scene_System.md) | 大小场景切换与场景职责 |
-| [Systems/Unit_System.md](Systems/Unit_System.md) | UnitData、表现层级、UnitController、攻击 |
-| [Systems/Party_System.md](Systems/Party_System.md) | 部队数据、成员关系、编队接口 |
-| [Systems/Combat_System.md](Systems/Combat_System.md) | BattleSession、援军、战斗结算 |
-| [Systems/AI_System.md](Systems/AI_System.md) | 单位/部队/领主三层 AI 与调度频率 |
-| [Systems/Lord_System.md](Systems/Lord_System.md) | 领主数据、封地归属与 AI 战略决策 |
-| [Systems/Political_Hierarchy_System.md](Systems/Political_Hierarchy_System.md) | 贵族/家族/王国层级、选举、战争传播与统一关系查询 |
-| [Systems/Encyclopedia_System.md](Systems/Encyclopedia_System.md) | 百科入口、三级导航、动态刷新与暂停规则 |
-| [Systems/Settlement_System.md](Systems/Settlement_System.md) | 村庄/城镇/城堡数据、封地信息与交互 |
-| [Systems/Fief_Recruitment_System.md](Systems/Fief_Recruitment_System.md) | 采邑储备、成组征召、资源成本与 AI 征召 |
-| [Systems/Adventurer_Recruitment_System.md](Systems/Adventurer_Recruitment_System.md) | 村庄冒险者候选人、刷新、1 金币招募与清理 |
-| [Systems/Dialogue_System.md](Systems/Dialogue_System.md) | 对话数据、条件、效果与时间规则 |
-| [Systems/Village_System.md](Systems/Village_System.md) | 村庄场景、NPC、对话 UI、越界返回 |
-| [Systems/Inventory_Economy_System.md](Systems/Inventory_Economy_System.md) | 背包 UI、金币、工资、三级兵种、晋升与村庄/城镇交易 |
-| [Systems/Mount_System.md](Systems/Mount_System.md) | 马匹独立实例、毛色/马鞍、装备卸下、市场逐匹交易与旧档迁移 |
-| [Systems/Supply_System.md](Systems/Supply_System.md) | 每日面包/草料消耗、缺口、采购需求与 NPC 补给采购 |
-| [Systems/Wounded_Prisoner_System.md](Systems/Wounded_Prisoner_System.md) | 伤兵判定、顺序治疗、俘虏分配/接收与酒馆出售 |
-| [Systems/Save_System.md](Systems/Save_System.md) | 存档结构、版本、迁移与限制 |
-
-### 开发状态文档
-
-| 文档 | 职责 |
-|---|---|
-| [Development/Current_Status.md](Development/Current_Status.md) | 当前实际进度 |
-| [Development/Technical_Decisions.md](Development/Technical_Decisions.md) | 技术决策记录（ADR） |
-| [Development/Known_Issues.md](Development/Known_Issues.md) | 已知问题与待确认事项 |
+| 文档 | 读取级别 | 职责 |
+|---|---|---|
+| [Development/Current_Status.md](Development/Current_Status.md) | 依赖当前进度时 | 当前阶段、已实现/未实现、下一步、当前风险、测试状态 |
+| [Development/Known_Issues.md](Development/Known_Issues.md) | 评估限制/风险时 | 未决问题、实现缺口、技术风险、已解决索引 |
+| [Development/Technical_Decisions.md](Development/Technical_Decisions.md) | 需要设计原因时（按 D 编号检索） | 技术决策记录（ADR） |
+| [Development/Test_Commands.md](Development/Test_Commands.md) | 运行测试时 | 单测/系统测试/跨进程/视觉探针命令 |
+| [02_Development_Roadmap.md](02_Development_Roadmap.md) | 规划/验收时（非默认） | 阶段目标、历史任务与验收记录；当前缺口以 `Current_Status` 为准 |
+| [04_Change_Log.md](04_Change_Log.md) | 追溯变更时（非默认） | 重要变更历史 |
+| [Archive/Status_History.md](Archive/Status_History.md) | 追溯阶段细节时（非默认） | 阶段 1–13 的详细实现、测试清单与手动验收步骤 |
 
 ## 5. 每次开发的标准流程
 
-开发前：
+1. 读 [CLAUDE.md](../CLAUDE.md)；用第 4 节表格选 1–2 份专题文档。
+2. 若任务依赖当前进度，读 `Current_Status.md`；若涉及已知限制，读 `Known_Issues.md`。
+3. 只读直接相关代码 3–5 个，必要时做一轮精确符号搜索；确认改动范围后停止探索。
+4. 写出本次改动的接口、数据结构与验收方式，并按 L1–L4 说明将运行和明确不运行的测试。
+5. 实施后更新对应系统文档；状态变化覆盖更新 `Current_Status.md`，重要变更追加到 `04_Change_Log.md`；最后检查本索引与链接。
 
-1. 阅读本索引，确认版本与当前阶段。
-2. 阅读 `Development/Current_Status.md` 和 `Development/Known_Issues.md`。
-3. 阅读任务对应的系统文档。
-4. 检查相关代码与 `Technical_Decisions.md`。
-5. 写出本次改动的接口、数据结构与验收方式，再动手。
-6. 按改动影响确定测试级别（L1–L4），明确将执行和明确不执行的测试。
+规则：禁止不同 Markdown 文件长期保存互相矛盾的设计。冲突处理见 [CLAUDE.md](../CLAUDE.md) 第 5 节。
 
-开发后：
+## 6. 当前状态
 
-1. 更新 `Current_Status.md`。
-2. 更新对应系统文档（接口、字段、流程、未实现项）。
-3. 记录重要架构变化与技术决策。
-4. 更新 `Known_Issues.md` 与 `04_Change_Log.md`。
-5. 检查本索引的导航是否需要调整。
-6. 汇报实际执行的测试、结果与未验证的关联风险。
-
-规则：禁止让不同 Markdown 文件长期保存互相矛盾的设计。冲突处理见 [01_Core_Architecture.md](01_Core_Architecture.md) 第 12 节。
-
-## 6. 当前状态快照
-
-- 阶段 0：完成。
-- 阶段 1（Milestone 1）：完成。主菜单、初始世界、大地图移动、时间控制、地点交互、保存/读取闭环已实现。
-- 阶段 2：部分完成。世界固定 tick、直线移动、NPC 商队往返与巡逻循环、视野/追击/遭遇、玩家时间快捷键已实现；更大规模空间索引待开发。
-- 阶段 3：部分完成。士兵数据层、属性重算、装备/马匹、部队查看 UI、临时部件美术已实现；招募与正式美术未开始。
-- 阶段 4：部分完成。双方/多方实时战斗、按小时离屏结算、中途加入、玩家角色、控制权转移、基础队形、结果/经验/奖励已实现；高级指挥/士气/正式动画未开始。
-- 阶段 5（战斗结算与战后处理）：完成。统一 BattleResult、玩家角色、攻击判定/多人围攻、临时部件美术、骑乘系统、控制权转移、经验/奖励、撤退与返回大地图均已自动化验证。
-- 阶段 6（合并原阶段 6/7）：村庄小场景与交互、追逐焦点保护、背包/马匹、金币与工资、三级兵种/晋升、世界日历与大地图部队 UI 已实现；城镇/城堡小场景、普通招募、工资扣除未实现。
-- 阶段 5（原路线图 AI 领主）：部分完成。领主数据/仓储、玩家领主分离、封地归属与 AI 征召已实现；战略攻击/撤退与性格权重未开始。
-- 阶段 7：部分完成。封地所有权、采邑征召、村庄人口/税收缓存、冒险者候选人、共享日志与 Schema v4 已实现；任务、训练、外交、城堡攻防、领地管理、军团与世界战争未开始。
-- 阶段 8：完成。战场扩至 1800×1024 并参数化；新遭遇与增援分流，增援加入既有会话并在后方展开；贵族/家族/王国数据与管理器、领袖死亡选举、战争传播与统一关系查询；世界地图 5000×3000，新增伯克纳尼亚/奥林两王国与城镇/城堡/村庄；百科三级导航；Schema v5。
-- 阶段 9：完成。9 个地点按王国/家族重新聚类，缩短跨区域距离并同步道路与 AI 巡逻点；部队圆形标记内部旗帜由 30 放大到 38，圆形底盘、边框、点击区域与移动表现不变。
-- 阶段 10：完成。修复战后追击/遭遇卡死与冷却恢复；强盗统一对所有政治家族敌对；AI 通过视野发现并加入既有战斗（全敌对不建第三侧）；增援按初始战斗侧锚点部署；新增行动意图悬浮、战斗摘要悬浮、WASD 自由镜头、主动攻击二次确认，部队旗帜由 38 放大到 44。
-- 阶段 5（动作表现与攻击体验）：完成。协调步兵步态、马匹整体动态、玩家自由空挥、长矛攻击后保持 4 秒、骑乘战斗速度 0.84、部署间距约 906 已自动化与动画截图验证。
-- 阶段 5（待机与动作表现二次优化）：完成。克制腿幅、部队 UI 待机动画、跃马式前后腿分组、长矛方向性前摇/戳击已自动化与真实渲染验证。
-- 最近验证：克制步态/跃马动画、UI 待机动画、长矛前摇/戳击/保持、自由攻击、骑乘战斗速度、战斗结算与 Milestone 2 全流程全部通过。
-- 2026-11-21 修复：士兵部件被战场背景整体覆盖导致完全不可见；`UnitActor` 提升到背景之上，骑乘保留人体双腿并由马身/马鞍按层级遮挡。
-- 2026-11-21 优化：人物/马匹分组 + `VisualLayers` 最终层级、骑乘 15 像素偏移、四条独立马腿、影子互斥、长矛枢轴/攻击/恢复动画、部队面板 SubViewport 预览；玩家部队改为 7 人（3 名骑乘职业步兵）。
-- 2026-11-21 优化：马腿移到马身之前；步兵/骑兵待机/移动动画；战斗移动 ×0.6、部署边距 220；1920×1080 原生显示 + 战斗相机 2 倍；武器决定攻击距离；360°定向矩形攻击（单次单目标）；最小间距实体碰撞。
-- 2026-11-21 优化：步兵等幅反相步态；马身主导的跑步动态与克制马腿；玩家无敌人也可自由出矛；攻击后长矛保持 4 秒再恢复；骑乘战斗速度 0.84；部署边距 160（质心间距约 906）。
-- 2026-11-21 优化：步兵腿幅降至 1.5/0.6/0.04；部队 UI 复用 UnitVisual 播放步兵/骑兵待机；马腿改为前后成组跃马；长矛增加方向性后移前摇与 6 px 前伸戳击。
-- 2026-11-21 修复：世界上已有离屏战斗时，普通部队对话不再只显示“无法开始战斗”；无关部队禁用按钮并显示占用原因，参战方可直接“加入战斗”。
-- 2026-11-21 阶段 6：村庄进入/对话/越界返回；大地图追逐不被打断；部队图标只显示人数与悬浮构成；三级兵种（10/50、20/100、25/180）、工资、金币、背包马匹上下马、消耗凭证晋升；世界时间从 1103-01-01 起，6 秒 = 1 小时，显示年月日 + 时间段。
-- 2026-11-21 阶段 6（大地图战斗与小地图视角）：村庄/战斗共用 `SceneCameraRig`（960×540 统一视野、跟随、F 自由视角、边界）；离屏 AI 战斗每游戏小时按战力/等级/骑乘/剩余生命与随机波动结算；玩家追击同向目标可在 50 世界单位内接触且不回弹；同场战斗合并为单标记并按 `side_index` 分组汇总；遭遇面板提供战斗/撤退（后续改为底部 NPC 对话，敌对追击禁止离开）。
-- 2026-11-21 阶段 6（世界日志/美术层级/战斗表现）：大地图左下角世界日志（战斗、胜负、消灭、遭遇、进出村庄，100 条上限与滚动）；右手武器 `-10`、左手武器 `-45` 独立层级；人物头部与头盔分离并接入装备视觉字段；中立/无关部队不再按距离自动弹窗，自动遭遇要求实际追击关系；单位名称与满血隐藏的生命条拆为独立节点。
-- 2026-11-21 阶段 6（家族领袖/NPC 部队/地图表现）：新增 `FamilyConfig`/`FamilyRegistry` 与两家族美术配置；`UnitAppearance` 按 tier 生成并持久化头盔/罩袍/领袖缨饰/家族长矛；巴里、墨西西两村与各 10 人 NPC 家族骑士；新增东路/荒野强盗；`PartyData.leader_unit_id` 统一玩家与 NPC 领袖；部队图标改为圆形家族旗帜标记；地点名称迁移到固定屏幕 UI；大地图实际速度统一 ×0.5。
-- 2026-11-21 阶段 6 后续（统一部队架构与遭遇交互）：`PartyData` 增加 `control_type`/`party_kind`/`banner_texture_path`，旧存档读取时推断且不改位置/路线/成员；`AIManager` 只调度 AI 控制部队；遭遇面板迁至屏幕下方并复用 `UnitVisual` 显示领袖头像/默认剪影；`EncounterReason` 区分 `ENEMY_PURSUIT` 等来源，敌对追击成功时禁止离开；对白来自 `EncounterTextConfig`。
-- 2026-11-21 阶段 6 后续（村庄表现/玩家扩编/战斗集群）：部队标记恢复 18/30 原尺寸；村庄改用半径 32、旗帜 76 的独立圆形标记，名称固定显示在标记正上方；玩家初始部队扩编为 12 人（1 英雄 + 5 民兵 + 6 职业步兵，4 名骑乘）；小地图战斗初始阵线间距 1100，双方半场列阵、接敌后队形放松，并通过目标占用、包围角度与局部分离减少扎堆。
-- 2026-11-21 阶段 6 后续（大地图表现/AI 恢复/存档/战斗 UI）：`SettlementIcon` 恢复原始村庄美术，家族徽章与名称合并为固定屏幕组合（徽章在左）；战斗结束给存活部队 30 世界秒运行时交战冷却并恢复路线/巡逻，不重置移动目标；存档 Schema v3 持久化世界日志，读档清理 `IN_BATTLE`/失效追击并校验领袖；玩家胜利结果面板延迟 3 物理秒；战斗汇总按 `side_index` 分列；悬浮默认只显示名称，按住左 Alt 显示总人数与兵种构成。
-- 2026-11-22 阶段 7 第一步：新增 `LordData`/`LordManager`、封地 `owner_lord_id` 与玩家领主/玩家角色分离；新游戏新增玩家村庄“青禾村”与玩家家族，玩家角色改为 180 HP/25 攻击；每村采邑储备 4、6 人成组征召、真实马匹装备、按人口/繁荣度补充、失败原子回滚；村庄最多 5 名冒险者候选人，1 金币招募并持久化外观；玩家地点面板/头人对话共用统一入口；AI 领主低于 12 人时前往自有封地征召；`TaxCalculator` 统一税收；世界日志新增采邑/冒险者事件并在村庄复用共享面板；存档 Schema v4 持久化领主/封地/候选人并校验所有权。
-- 2026-11-22 阶段 8：战场 1800×1024（初始距离 1580、边距 110）并参数化；新遭遇/增援分流，增援加入既有 `BattleSession`、后方 240 像素展开、逐单位 `is_reinforcement`/`reinforcement_battle_id`/`reinforcement_arrival_time`；仅 NPC 加入玩家侧时显示家族旗帜增援提示并排队；新增 `NobleData`/`NobleManager`、`HouseData`/`HouseManager`、`KingdomData`/`KingdomManager`，贵族独立部队、爵位/宗主/国王标记、领袖死亡选举；`FactionManager` 统一关系查询与战争传播；世界地图 5000×3000，新增伯克纳尼亚（城镇+村庄）与奥林（城堡+村庄）两王国，墨西西/巴里分别附庸，两王国交战、玩家中立；地点 1/2/3 级，仅村庄征召；百科三级屏幕面板；存档 Schema v5。
-- 2026-11-22 阶段 9：世界保持 5000×3000，9 个地点按王国/家族聚类——伯克纳尼亚在上部（墨西西 2500,700、伯克纳尼亚 2900,750、北境村 2250,1000、伯克纳 3200,1000），奥林在下部（奥林德斯堡 2950,1850、奥林 3250,2050、巴里 2600,2100、灰石城堡 2900,2350），青禾村中立位于 (1600,1500)；地点 ID/名称/类型/归属/交互与征召不变；`flag_max_size` 30 → 38，圆形半径 18/边框 2/点击区域/移动动画不变；新增 `world_map_layout_test`。
-- 2026-11-22 阶段 10：遭遇检测不再要求 MOVING，玩家追击焦点跨目标移动/战斗保留并在战后冷却结束后恢复；战后冷却继续由 `BattleManager` 统一写入；`FactionManager` 统一强盗对所有政治家族贵族敌对；AI 通过 `VisionManager`（含战斗参战方）发现并加入既有战斗，检查全部战斗侧且不自动创建第三侧；增援按初始侧锚点 + 3 列网格部署，排满时半场扫描；大地图新增行动意图悬浮、仅悬浮显示的战斗摘要、WASD 自由镜头与主动攻击二次确认；`flag_max_size` 38 → 44；新增 `faction_bandit_hostility_test`、`party_intent_hover_test`、`party_attack_confirmation_test`。
-- 2026-11-22 阶段 11：新增只读玩家背包 UI（金币/名称/类型/数量/描述）；城镇地点面板按 `SettlementType.TOWN` 显示交易市场入口；新增 `MarketGoodsConfig`/`MarketData`/`MarketManager` 与 `SaveData.markets`，市场库存按城镇独立初始化、存档与恢复；双栏交易界面只修改预览，确认时由 `MarketManager.execute_player_trade()` 原子结算背包/库存/金币并写入 `PLAYER_TRADE` 世界日志；世界日志上限 100 → 20，保存/读档同步裁剪；新游戏初始金币 500；NPC 交易来源接口已预留但不写世界日志；新增 `market_manager_test`、`town_market_ui_test`。
-- 2026-11-22 阶段 12：马匹改为 `MountInstanceData` 独立实例，创建时随机黑/白/棕毛色与 8 种马鞍之一并随存档持久化；背包/市场/装备统一按 `instance_id` 移动，旧数量确定性迁移；新增面包/草料与 10/50 批量购买；`SupplyManager` 按 `WorldTime` 日边界结算玩家与 NPC 每日消耗，缺口不为负；`AIManager` 低补给时前往最近有库存的村庄/城镇（不含城堡），用自有金币补至 7 天并浮字提示，不写玩家日志；市场范围扩展为村庄（面包/草料）与城镇（面包/草料/马匹），村庄新增大地图与村长对话入口；交易 UI 改为左右直接移动、每行图标、马匹逐匹显示，重置恢复打开时快照；存档 Schema v5 → v6，新增补给结算日、NPC 背包/金币、市场马匹实例与 `initialized_items`；新增 `mount_instance_test`、`supply_manager_test`、`ai_supply_purchase_test`。
-- 2026-11-22 阶段 13：地点标记按所属家族显示旗帜并在地点下方显示停留部队旗帜条；部队圆形标记内部旗帜独立放大，玩家 UI 与悬浮显示统一最终移动速度；新增村庄初始冒险者候选人；战斗结算按 tier 概率产生伤兵（保留 Unit 身份与数据）；`WoundedHealingManager` 按 `WorldTime` 整小时顺序治疗，支持溢出与存档续算；战败方伤兵成为俘虏池，按实际参战单位数用最大余数法分给胜利方，玩家在战后选择界面确认接收；城镇酒馆可按等级出售俘虏；存档 Schema v6 → v7，新增伤兵状态、俘虏归属/列表、治疗结算小时与村庄候选人字段；新增 `wounded_healing_test`、`stage13_prisoner_test`、`stage13_tavern_test`、`stage13_prisoner_ui_flow_test` 等。
-
-详见 [Development/Current_Status.md](Development/Current_Status.md)。
+- 当前阶段：阶段 13 已完成；存档 Schema v7。
+- 已实现能力、明确未做项、当前风险与测试状态的**唯一权威位置**是 [Development/Current_Status.md](Development/Current_Status.md)；本索引不维护状态快照，避免与状态文档失同步。
 
 ## 7. 文档权威性
 
-- `Docs/` 是唯一持续维护、作为开发依据的文档体系。
-- `md/` 下的 V0.2 规划文档是原始需求来源，保持只读；新的实现细节以 `Docs/` 为准。
-- 如果两者冲突：先找出原设计意图，再在 `Technical_Decisions.md` 记录变更原因，最后同步修改相关文档。
+- `Docs/` 是唯一持续维护、作为开发依据的文档体系；`md/` 下的 V0.2 规划保持只读。
+- 当前实现状态以 `Docs/Development/Current_Status.md` 为准；历史细节以 `Docs/04_Change_Log.md` 与 `Docs/Archive/` 为准。
+- 如果源规划与 `Docs/` 冲突：先找出原设计意图，再在 `Technical_Decisions.md` 记录变更原因，最后同步修改相关文档与代码。
+- 文档之间的冲突判断顺序与状态标记见 [CLAUDE.md](../CLAUDE.md) 第 5 节。
 
 ## 8. 常用命令
 
@@ -186,84 +111,9 @@ WorldContext（一局游戏，跨场景常驻）
 # 无头导入
 Godot_v4.6.1-stable_win64.exe --headless --path . --import
 
-# 士兵/部队数据层单元测试
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/unit_manager_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/party_manager_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/stat_calculator_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/unit_party_serialization_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/unit_controller_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/combat_attack_rules_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/mounted_unit_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/unit_visual_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/formation_manager_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/battle_result_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/player_character_data_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/battle_manager_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/ai_manager_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/faction_vision_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/multi_party_battle_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/unit_tier_wage_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/time_calendar_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/offscreen_battle_hourly_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/world_log_manager_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/market_manager_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/mount_instance_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/supply_manager_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/wounded_system_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/wounded_healing_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/stage13_village_candidates_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/stage13_world_map_ui_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/stage13_prisoner_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/stage13_prisoner_ui_flow_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/stage13_tavern_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/town_market_ui_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/ai_supply_purchase_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/world_log_ui_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/family_appearance_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/party_architecture_test.tscn
-
-# 系统测试套件
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/skeleton_smoke_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/milestone1_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/milestone1_flow_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/party_panel_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/ai_encounter_flow_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/player_encounter_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/player_battle_interaction_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/party_dialogue_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/world_map_input_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/battle_scene_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/player_control_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/battle_formation_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/battle_side_result_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/battle_retreat_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/milestone2_flow_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/main_menu_ui_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/village_scene_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/village_flow_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/world_map_milestone6_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/party_economy_ui_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/small_scene_camera_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/player_pursuit_encounter_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/world_map_battle_marker_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/world_log_ui_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/neutral_party_interaction_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/encounter_dialogue_ui_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/fief_adventurer_system_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/fief_adventurer_ui_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/player_party_expansion_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/battle_cluster_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/battle_occupancy_ui_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/political_hierarchy_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/battle_reinforcement_test.tscn
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/encyclopedia_ui_test.tscn
-
-# 跨进程存档：先保存退出，再新进程读取
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/milestone1_restart_test.tscn -- save
-Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/milestone1_restart_test.tscn -- load
-
-# 手动视觉验收（非 headless，打开战斗窗口并保存截图到 user://）
-Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/visual_probe.tscn
-Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/party_preview_probe.tscn
-Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/main_menu_probe.tscn
+# 运行单个测试（测试清单以 Tests/ 目录为准）
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/<name>.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/<name>.tscn
 ```
+
+跨进程存档、手动视觉探针与测试枚举命令见 [Development/Test_Commands.md](Development/Test_Commands.md)。

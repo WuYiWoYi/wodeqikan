@@ -3,7 +3,7 @@
 **所属层：** 玩法逻辑 / 表现
 **核心脚本：** `Scripts/Systems/WorldMap/world_map_manager.gd`、`Scripts/UI/WorldMap/world_map.gd`
 **场景：** `Scenes/WorldMap/world_map.tscn`
-**状态：** 基础移动、NPC 自主商队/巡逻/强盗/治安队、统一 Party 数据、恢复原尺寸的圆形部队标记、放大的村庄圆形标记与位于上方的固定屏幕名称、部队跟随、视野查询、地点交互与村庄入口、底部 NPC 遭遇对话（领袖头像/对白/动态选项）、遭遇原因与敌对追击禁离开、玩家追击接触、追逐焦点保护、人数图标与悬浮信息、日期/时间段 UI、按战斗 ID 独立的多战斗标记与多方战斗汇总、世界日志面板、封地信息与采邑征召入口、部队浮动提示、5000×3000 地图与城镇图标、百科入口、阶段 9 地点区域化布局与部队内部旗帜放大、阶段 13 地点家族旗帜与停留部队旗帜条、统一最终移动速度显示已实现
+**状态：** 基础移动、NPC 自主商队/巡逻/强盗/治安队、统一 Party 数据、恢复原尺寸的圆形部队标记、放大的村庄圆形标记与位于上方的固定屏幕名称、部队跟随、视野查询、地点交互与村庄入口、底部 NPC 遭遇对话（领袖头像/对白/动态选项）、遭遇原因与敌对追击禁离开、玩家追击接触、追逐焦点保护、人数图标与悬浮信息、日期/时间段 UI、按战斗 ID 独立的多战斗标记与多方战斗汇总、世界日志面板、封地信息与采邑征召入口、部队浮动提示、5000×3000 地图与城镇图标、百科入口、阶段 9 地点区域化布局与部队内部旗帜放大、阶段 13 地点家族旗帜与停留部队旗帜条、统一最终移动速度显示、玩家移动目标标记与动态虚线已实现
 
 ---
 
@@ -140,6 +140,18 @@ set_party_follow(follower, target)
 - 不推进位置；
 - 图标仍可显示，但进入战斗/返回中的状态由 UI 表现。
 
+### 3.5 目标点标记与动态虚线（纯表现）
+
+实现：`Scripts/Systems/WorldMap/move_target_guide.gd`（`MoveTargetGuide`），由 `world_map.gd` 的 `MoveTargetGuide` 子节点承载。
+
+- 不新增移动状态：只读取 `PartyData.target_position`、`current_order`、`movement_state` 与 `current_target_id`。
+- `movement_state == MOVING` 时显示；抵达（`IDLE`）、`stop_party()`、战斗切换或部队不可用时清除。
+- 普通移动的终点为 `target_position`；`FOLLOW_PARTY` 时终点取被跟随部队的最新位置。
+- 连线起点使用玩家图标的显示位置（`_player_icon.position`），因此与图标插值同步；目标点保持世界坐标。
+- 节点固定在世界原点，绘制使用世界坐标，镜头平移/缩放不会改变目标点数据坐标。
+- 虚线、线宽、标记半径与滚动速度按 `camera.zoom` 换算，保持稳定的屏幕视觉尺寸与速度。
+- 反复点击地图只更新同一个表现节点，不累积旧标记。
+
 ## 4. 表现同步
 
 ```text
@@ -203,6 +215,7 @@ WorldSimulation 更新 PartyData.world_position
 
 - 顶栏只显示年月日 + 时间段，不显示小时/分钟，例如“世界时间：1103 年 1 月 1 日 深夜”。
 - 时间段文字来自 `TimeManager.get_time_period()`；具体区间集中配置。
+- 世界时间始终位于顶栏水平中心；金币与移速在左侧独立显示，见 18.1–18.3。
 - 倍率仍显示暂停 / 1x / 2x。
 
 ## 5. 地点交互（Milestone 1，阶段 7 修订）
@@ -662,6 +675,7 @@ WorldSimulation 更新 PartyData.world_position
 - 地点没有家族归属时，继续使用原有建筑美术与名称，不生成空白徽章。
 - 每帧检查 `tag.get_bound_family_id()` 与当前 `settlement.family_id`，归属变化后重建徽章，避免继续显示旧家族旗帜。
 - 名称标签整体忽略鼠标；底板只包裹“徽章 + 名称”内容，尺寸随内容变化，不改变地点点击/悬浮判定。
+- 圆形徽章使用 `CLIP_CHILDREN_AND_DRAW`：父节点自身的圆形底盘与边框必须绘制，同时把旗帜裁进圆内；使用 `CLIP_CHILDREN_ONLY` 会隐藏底盘，只剩图标与名称。
 
 ### 16.2 地点下方停留部队旗帜条
 
@@ -673,6 +687,18 @@ WorldSimulation 更新 PartyData.world_position
 - 旗帜纹理优先取 `PartyData.banner_texture_path`，否则回退家族旗帜；缺失纹理时回退为颜色/默认图形。
 - 只读表现层：`WorldMap` 每帧根据 `PartyManager` 与 `BattleManager` 数据重建条目，不修改权威部队状态。
 
+### 16.3 旗帜非透明区域裁切（阶段 13 后续）
+
+- 地点家族徽章、部队圆形标记、停留部队旗帜条、百科房屋徽章与战斗增援旗帜统一通过 `TextureRegionUtils.get_trimmed_texture()` 在运行时按 PNG 非透明像素边界裁切，不改动源美术。
+- 旗帜缩放、圆形遮罩与布局尺寸基于裁切后的有效区域计算；`map_flag_circle.gdshader` 的 `uv_aspect` 按有效宽高比设置，保证圆形徽章不变形、不丢边缘像素。
+- 裁切结果按资源路径缓存；同一贴图只在首次使用时计算一次。
+
+### 16.4 城镇酒馆内嵌地点面板（阶段 13 后续）
+
+- 酒馆内容嵌入原 `SettlementPanel` 的 `SettlementTavernHost`，切换时只改变 `SettlementInfoView` 与酒馆内容的可见性；不创建第二个弹窗，窗口位置、尺寸与 `ui_panel` 暂停原因保持不变。
+- `TavernPanel` 只实例化一次，打开时复用同一实例与业务数据；离开酒馆后由 `closed` 信号切回城镇信息并刷新金币/背包显示。
+- 关闭地点、进入村庄或切换地点时调用 `TavernPanel.reset()` 清理出售预览与选中状态；`reset()` 不广播 `closed`，避免收尾阶段误切视图。
+
 ## 17. 统一最终移动速度显示（阶段 13）
 
 - `WorldMapManager.get_effective_movement_speed(party)` 是大地图最终速度的唯一读取入口，返回 `party.movement_speed * WORLD_MAP_SPEED_SCALE`。
@@ -680,3 +706,46 @@ WorldSimulation 更新 PartyData.world_position
 - 显示与实际移动使用同一数据来源；部队停止、待命或战斗中仍显示当前最终速度，不显示 0 或隐藏该行。
 - 悬浮内容为只读，不修改移动速度、装备或 AI 状态；速度相关配置变化后悬浮面板自动刷新。
 - 新节点名：悬浮行 `PartyHoverSpeed`，供自动化测试读取。
+
+## 18. 顶栏金币/移速、事件中心与建筑面板权限（阶段 13 后续）
+
+### 18.1 顶栏布局
+
+- 顶栏内容分为 `TopBarLeft`、`TopBarCenter`、`TopBarRight` 三个锚定区域。
+- `WorldTimeLabel` 位于 `TopBarCenter` 并保持屏幕水平居中；左右区域新增内容不会推离中心。
+- 左侧显示 `MoneyLabel`（金币）与 `PartySpeedLabel`（部队移速），右侧保留暂停/1x/2x/事件/部队/背包/百科/保存/主菜单。
+- 顶栏入口使用紧凑尺寸（52×30、字号 13），在 1280 宽度下不与中间时间区域重叠。
+- 视口宽度小于 1400 时，居中时间文本降到字号 11；时间与倍率文本保持完整。视口尺寸变化通过 `size_changed` 立即重排。
+
+### 18.2 金币与移速实时显示
+
+- 金币每帧读取 `PlayerProfile.gold`，显示为 `金币：<值>`；购买、征召、工资与税收变化后下一帧更新。
+- 移速每帧调用 `WorldMapManager.get_effective_movement_speed(party)`，显示为 `部队移速：%.1f`，与其他悬浮/移动结算共用同一入口。
+
+### 18.3 悬浮提示与 ALT 明细
+
+- 悬浮金币简述显示 `预计每日收入：<带符号净额>`；数据来自 `WorldContext.get_daily_balance_preview()`。
+- `get_daily_balance_preview()` 复用现有缓存：`PartyManager.get_total_wage()` 与玩家封地 `SettlementData.tax_income_per_day`，不另写经济公式。
+- 按住 ALT 时切换为明细：`每日收支`、`总计`、逐项 `标签 + 带符号金额`；无项目时显示空状态。
+- 悬浮移速简述显示 `当前部队移速：%.1f`；ALT 明细来自 `WorldMapManager.get_movement_speed_breakdown(party)`，包含基础移速、大地图移动系数与最终移速，最终值复用实际有效移速。
+- ALT 松开立即恢复简述；鼠标移出关闭提示。ALT 处理集中在 `world_map._input()`，与地点悬浮 Alt 共用 `set_alt_detail_active()`。
+
+### 18.4 主界面事件中心
+
+- 顶栏 `EventCenterButton` 打开 `EventCenterOverlay`（`EventCenterPanel`）。
+- `WorldContext.event_center` 是只读聚合层，事件来自现有系统状态：
+  - 任务：当前无任务系统，保留 `QUEST` 入口并返回空；
+  - 封地：玩家授权封地且采邑储备 > 0；
+  - 补给：玩家部队面包/草料不足；
+  - 伤兵：玩家部队存在伤兵；
+  - 冒险者：村庄存在可招募候选人。
+- 事件 ID 按“类型:来源 ID”确定性生成，重复打开不会创建重复事件；状态消失后事件自动从列表移除。
+- 左侧按“已接取任务 / 待处理事项”分组，右侧显示与所选事件同源详情；面板不生成、不结算、不保存事件副本。
+
+### 18.5 建筑信息面板打开时的 UI 权限
+
+- 建筑信息面板（地点面板）打开时，仍可使用百科、部队、背包、事件中心等普通功能入口。
+- 这些入口使用 `_has_open_modal(true)` 判断，忽略地点面板自身的阻塞；其他覆盖层之间仍互相阻塞。
+- 世界时间控制使用 `_has_open_modal(false)`：地点面板或任意覆盖层打开时，暂停/1x/2x 按钮与快捷键均不可用。
+- 关闭百科/部队/背包/事件后，地点面板保持打开、世界保持暂停、时间按钮保持禁用；离开地点后按钮恢复可用。
+- `TimeManager.push_pause/pop_pause` 按暂停原因计数，嵌套界面关闭不会提前恢复世界时间。

@@ -235,6 +235,27 @@ func _test_locomotion_animation(unit: UnitData) -> void:
 	var horse_back_leg2: Sprite2D = mounted_horse.get_part("MountLegBack2")
 	var mount_shadow: Sprite2D = mounted_horse.get_part("MountShadow")
 	var mounted_upper: Node2D = mounted_human.get_upper_body()
+	# 骑马朝向偏移：朝左保持 +3；朝右在旧位置基础上再向左 6（净值 -3）。
+	# 镜像只改变缩放，不翻转节点坐标，因此必须按朝向分别计算。
+	mounted.set_facing(-1.0)
+	mounted.update_locomotion(0.0, false)
+	_check(
+		is_equal_approx(mounted_human.position.x, 3.0),
+		"骑马朝左贴图保持 +3 横向偏移"
+	)
+	mounted.set_facing(1.0)
+	mounted.update_locomotion(0.0, false)
+	_check(
+		is_equal_approx(mounted_human.position.x, -3.0),
+		"骑马朝右在旧位置基础上向左调整 6 像素"
+	)
+	mounted.set_facing(-1.0)
+	mounted.update_locomotion(0.0, false)
+	_check(
+		is_equal_approx(mounted_human.position.x, 3.0),
+		"切回朝左恢复原横向偏移"
+	)
+	_check(is_zero_approx(human.position.x), "未骑马贴图位置不受朝向偏移影响")
 	_check_leg_pivot(horse_leg, HorseVisualScript.LEG_PIVOT_DROP_Y, "马前腿1")
 	_check_leg_pivot(horse_leg2, HorseVisualScript.LEG_PIVOT_DROP_Y, "马前腿2")
 	_check_leg_pivot(horse_back_leg, HorseVisualScript.LEG_PIVOT_DROP_Y, "马后腿1")

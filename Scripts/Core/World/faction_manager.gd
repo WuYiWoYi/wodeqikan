@@ -173,6 +173,79 @@ func are_houses_hostile(a: String, b: String) -> bool:
 	return get_house_relation(a, b) == Relation.HOSTILE
 
 
+## 家族当前敌对的所有王国。
+## - 属于王国的家族：直接使用王国战争关系（权威且对称）；
+## - 独立家族：只有一个王国的任一成员家族与其存在显式敌对关系时才算敌对。
+## UI 与百科只调用本接口，不自行解析 enemy_kingdom_ids 或关系表。
+func get_hostile_kingdoms_for_house(house_id: String) -> Array[KingdomData]:
+	var result: Array[KingdomData] = []
+	if _house_manager == null or _kingdom_manager == null:
+		return result
+	var house := _house_manager.get_house(house_id)
+	if house == null:
+		return result
+	if not house.kingdom_id.is_empty():
+		return _kingdom_manager.get_enemy_kingdoms(house.kingdom_id)
+	for kingdom: KingdomData in _kingdom_manager.get_all_kingdoms():
+		if _is_house_hostile_to_kingdom(house_id, kingdom.kingdom_id):
+			result.append(kingdom)
+	return result
+
+
+## 与指定王国敌对的所有独立家族（不属于任何王国）。
+## 当前战争关系不会自动把独立家族卷入；只有显式家族关系会产生结果。
+func get_hostile_independent_houses_for_kingdom(
+	kingdom_id: String
+) -> Array[HouseData]:
+	var result: Array[HouseData] = []
+	if _house_manager == null or _kingdom_manager == null:
+		return result
+	if _kingdom_manager.get_kingdom(kingdom_id) == null:
+		return result
+	for candidate: HouseData in _house_manager.get_all_houses():
+		if candidate == null or not candidate.kingdom_id.is_empty():
+			continue
+		if _is_house_hostile_to_kingdom(candidate.house_id, kingdom_id):
+			result.append(candidate)
+	result.sort_custom(func(a: HouseData, b: HouseData) -> bool:
+		return a.house_id < b.house_id
+	)
+	return result
+
+
+## 与指定家族敌对的其他独立家族。
+## 使用统一家族关系表；同家族/同王国默认友好，玩家家族默认中立。
+func get_hostile_independent_houses_for_house(
+	house_id: String
+) -> Array[HouseData]:
+	var result: Array[HouseData] = []
+	if _house_manager == null:
+		return result
+	if _house_manager.get_house(house_id) == null:
+		return result
+	for candidate: HouseData in _house_manager.get_all_houses():
+		if candidate == null or not candidate.kingdom_id.is_empty():
+			continue
+		if candidate.house_id == house_id:
+			continue
+		if get_house_relation(house_id, candidate.house_id) == Relation.HOSTILE:
+			result.append(candidate)
+	result.sort_custom(func(a: HouseData, b: HouseData) -> bool:
+		return a.house_id < b.house_id
+	)
+	return result
+
+
+## 独立家族是否与某王国敌对：只检查显式家族关系。
+func _is_house_hostile_to_kingdom(house_id: String, kingdom_id: String) -> bool:
+	if _kingdom_manager == null or house_id.is_empty() or kingdom_id.is_empty():
+		return false
+	for member: HouseData in _kingdom_manager.get_all_houses_of_kingdom(kingdom_id):
+		if member != null and get_house_relation(house_id, member.house_id) == Relation.HOSTILE:
+			return true
+	return false
+
+
 ## 部队级统一关系查询。拥有有效家族时走家族/王国政治关系，
 ## 无家族部队（商队、强盗、治安队等）继续使用原有阵营关系。
 ##

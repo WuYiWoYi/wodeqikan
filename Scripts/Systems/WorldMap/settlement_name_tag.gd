@@ -8,6 +8,8 @@ extends Control
 ## 名称只绑定 SettlementData.settlement_id，同名村庄不会合并。
 ## 整个组合忽略鼠标，不参与地点点击、选择或悬浮判定。
 
+const TextureRegion = preload("res://Scripts/Core/World/texture_region_utils.gd")
+
 const TAG_WIDTH: float = 240.0
 const TAG_HEIGHT: float = 36.0
 const BADGE_GAP: float = 8.0
@@ -57,8 +59,9 @@ class FamilyBadge extends Control:
 		custom_minimum_size = Vector2(BADGE_SIZE, BADGE_SIZE)
 		size = custom_minimum_size
 		# 旗帜是子节点；把子节点裁剪到徽章圆形绘制区域内，避免方形四角
-		# 越出圆形可视范围。外圈半径与点击区域仍由本控件决定。
-		clip_children = CanvasItem.CLIP_CHILDREN_ONLY
+		# 越出圆形可视范围。必须同时绘制本控件（圆形剪影底框），
+		# 否则只会剩下旗帜图标与名称，圆形底板丢失。
+		clip_children = CanvasItem.CLIP_CHILDREN_AND_DRAW
 		_refresh_flag_texture()
 
 	func _draw() -> void:
@@ -94,9 +97,13 @@ class FamilyBadge extends Control:
 			_flag_rect = null
 		if flag_texture_path.is_empty() or not ResourceLoader.exists(flag_texture_path):
 			return
-		var texture := load(flag_texture_path) as Texture2D
-		if texture == null:
+		var loaded := load(flag_texture_path) as Texture2D
+		if loaded == null:
 			return
+		# 去掉 PNG 透明留白后再排版；像素画的有效范围按运行时计算结果裁切，
+		# 不修改源美术。不同家族的旗帜因此拥有统一的实际视觉大小。
+		var texture := TextureRegion.get_trimmed_texture(loaded)
+		var effective_size := texture.get_size()
 		_flag_rect = TextureRect.new()
 		_flag_rect.name = "FamilyFlag"
 		_flag_rect.texture = texture
@@ -113,13 +120,16 @@ class FamilyBadge extends Control:
 				var mask_material := ShaderMaterial.new()
 				mask_material.shader = mask_shader
 				mask_material.set_shader_parameter("uv_radius", 0.5)
+				mask_material.set_shader_parameter(
+					"uv_aspect",
+					effective_size.x / maxf(1.0, effective_size.y)
+				)
 				_flag_rect.material = mask_material
 		add_child(_flag_rect)
 
 	func get_flag_texture_path() -> String:
-		if _flag_rect == null or _flag_rect.texture == null:
-			return ""
-		return _flag_rect.texture.resource_path
+		# 返回配置中的原始路径（裁切纹理是运行时 AtlasTexture，没有 resource_path）。
+		return flag_texture_path
 
 	func get_draw_center() -> Vector2:
 		return Vector2(RADIUS, RADIUS)

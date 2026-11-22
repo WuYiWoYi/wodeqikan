@@ -1,6 +1,6 @@
 # 设计与代码规范
 
-**文档版本：** V0.5
+**文档版本：** V0.6
 **适用范围：** 所有 GDScript、场景、数据资源与 Markdown 文档
 
 ---
@@ -87,8 +87,9 @@ GameplayScene (Node2D)
 
 ### 4.2 横版带纵深的绘制
 
-- 战斗场景中的单位按 `world_position.y` 做 Y 排序（`y_sort_enabled`）。
-- 单位内部部件用 `z_index` 调整前后关系：阴影 < 马/身体 < 武器 < 头盔装饰。
+- 战斗场景中 `World/Characters` 开启 `y_sort_enabled`，士兵根节点保持 `z_index = 0`，按实时 `position.y` 排序；Y 越大越靠前。
+- 士兵内部部件用相对 `z_index` 调整前后关系：马/身体 < 武器 < 头盔装饰；整个人物/马匹子树作为一个原子单位参与 Y 排序。
+- 影子统一放在 `World/Shadows`（低于 `Characters` 的独立层），不依赖士兵伪 Z；任何影子都不得覆盖其他士兵的身体或武器。
 - 单位默认朝左；目标在右侧时对 `UnitVisual` 的 Sprite2D 设置 `flip_h`，不复制一套美术资源。
 - 相机跟随玩家单位，不直接修改世界数据。
 
@@ -138,10 +139,27 @@ GameplayScene (Node2D)
 
 - 系统接口变更：修改对应 `Docs/Systems/*.md`。
 - 架构变更：修改 `01_Core_Architecture.md` 并新增 ADR。
-- 进度变更：修改 `Development/Current_Status.md`。
+- 进度变更：修改 `Development/Current_Status.md`（覆盖式更新当前快照）。
 - 未决问题：写入 `Development/Known_Issues.md`，不要只留在代码注释里。
-- 所有重要变更：写入 `04_Change_Log.md`。
+- 所有重要变更：追加到 `04_Change_Log.md`；阶段详细实现与历史测试清单归入 `Archive/`。
 - 文档之间不得长期保留互相矛盾的规则。
+
+### 9.1 文档分层与读取
+
+| 层 | 文件 | 维护方式 |
+|---|---|---|
+| 核心记忆 | `CLAUDE.md` | 只保留硬约束、读取流程与导航，保持短小 |
+| 稳定事实/索引 | `00_Project_Index.md` | 基础决策与文档地图 |
+| 专题 | `Docs/Systems/*.md` | 按系统维护字段、接口、规则 |
+| 当前状态 | `Development/Current_Status.md` | 覆盖式更新，不累积历史 |
+| 未决问题 | `Development/Known_Issues.md` | 只保留未解决项；已解决项转历史 |
+| 决策记录 | `Development/Technical_Decisions.md` | 追加编号，过时决策标注替代关系 |
+| 历史 | `04_Change_Log.md`、`Archive/` | 追加式记录，默认不读 |
+
+- 同一条规则只保留一个权威位置，其他文档用相对链接引用。
+- 内容状态统一标记为 `已确认`、`暂定`、`待确认`、`已过时`。
+- 无法判定的新旧冲突保留两种说法并标记 `待确认`，不自行合并。
+- 读取顺序、最小上下文预算与冲突优先级见 `CLAUDE.md` 第 3、5 节。
 
 ## 10. 测试规范
 
@@ -174,6 +192,6 @@ GameplayScene (Node2D)
 
 - 纯数据逻辑优先写单元测试（序列化、属性计算、ID 生成）。
 - 跨系统流程写系统测试（时间 tick、存档往返、世界上下文装配）。
-- 现有测试入口：`Tests/SystemTests/skeleton_smoke_test.tscn`、`milestone1_test.tscn`、`milestone1_flow_test.tscn`、`main_menu_ui_test.tscn`、`milestone1_restart_test.tscn`。
+- 测试入口以 `Tests/UnitTests/` 与 `Tests/SystemTests/` 下的实际文件为准，不在文档里维护逐测试清单；运行命令见 `Development/Test_Commands.md`。
 - 新增系统至少提供一种可重复执行的验证方式。
 - UI 使用程序化构建时，必须为关键控件设置稳定 `name`，便于测试查找。

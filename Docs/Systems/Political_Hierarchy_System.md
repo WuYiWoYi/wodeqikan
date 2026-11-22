@@ -68,10 +68,10 @@
 
 - `SettlementData.owner_house_id` / `owner_noble_id` / `family_id` 表达所有权。
 - 仅村庄可征召采邑。
-- `FiefRecruitmentManager.can_recruit()` 授权条件：
+- `FiefRecruitmentManager.is_authorized_owner(settlement, lord_id)` 是唯一授权判断，条件：
   - `settlement.owner_noble_id == lord_id`，或
   - 请求者是 `owner_house_id` 家族的领袖。
-- 地点面板与头人对话共用该授权结果。
+- `can_recruit()` 先调用该授权判断；地点面板、事件中心与头人对话共用同一结果，不各自复制规则。
 
 ## 6. 关系与战争
 
@@ -85,6 +85,15 @@
 | `is_party_hostile(a, b)` | 部队是否敌对 |
 | `is_party_friendly(a, b)` | 部队是否友好 |
 | `is_party_neutral(a, b)` | 部队是否中立 |
+| `get_hostile_kingdoms_for_house(house_id)` | 某家族（含其所属王国）的敌对王国列表 |
+| `get_hostile_independent_houses_for_kingdom(kingdom_id)` | 与某王国敌对的独立家族列表 |
+| `get_hostile_independent_houses_for_house(house_id)` | 与某家族敌对的独立家族列表 |
+
+敌对聚合查询只组合上述统一关系判定，不维护第二套敌对数据：
+
+- 属于王国的家族，其敌对王国来自 `KingdomManager.get_enemy_kingdoms(kingdom_id)`。
+- 独立家族按 `get_house_relation()` 逐一检查王国成员家族，只有明确敌对才计入。
+- 结果按 ID 稳定排序，供百科等只读 UI 使用。
 
 优先级：
 

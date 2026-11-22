@@ -213,7 +213,8 @@ func _build_adventurer_candidates() -> void:
 
 		var visual := UnitVisualScript.new()
 		visual.name = "AdventurerCandidateVisual_%s" % candidate.candidate_id
-		visual.position = position
+		# 必须使用候选人数据中的候选位置；节点自身的 position 是村庄根节点坐标。
+		visual.position = spawn_position
 		visual.z_index = 100
 		add_child(visual)
 		visual.setup(unit)
@@ -223,7 +224,7 @@ func _build_adventurer_candidates() -> void:
 
 		var label := _make_label("", 14)
 		label.name = "AdventurerCandidateName_%s" % candidate.candidate_id
-		label.position = position + Vector2(-70.0, -78.0)
+		label.position = spawn_position + Vector2(-70.0, -78.0)
 		label.size = Vector2(140.0, 20.0)
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		add_child(label)

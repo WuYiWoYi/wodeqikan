@@ -146,14 +146,18 @@ func _run() -> void:
 	)
 	# headless 的根 Viewport 尺寸不保证等于窗口尺寸，实际分辨率由非 headless 探针截图验证。
 
+	# 士兵根节点保持 z_index = 0 以便 Characters 层做 Y 排序；
+	# 实际画布层级 = Characters.z + 根节点 z + 部件相对 z。
+	var characters_layer := _battle_scene.get_node("World/Characters") as CanvasItem
+	var characters_z: int = characters_layer.z_index if characters_layer != null else 0
 	var mounted_visual_found: bool = false
-	var all_visuals_above_background: bool = true
+	var all_visuals_above_background: bool = characters_z > 0
 	var all_bodies_loaded: bool = true
 	for child: Node in actors:
 		var actor := child as UnitActor
 		if actor == null or actor.visual == null:
 			continue
-		if actor.z_index <= 0:
+		if characters_z + actor.z_index <= 0:
 			all_visuals_above_background = false
 		if not actor.visual.has_part("Body") or not actor.visual.has_part("Head"):
 			all_bodies_loaded = false
@@ -161,7 +165,12 @@ func _run() -> void:
 			var part := actor.visual.get_part(str(part_name)) as Sprite2D
 			if part == null or not part.is_visible_in_tree():
 				continue
-			if actor.z_index + actor.visual.get_part_effective_z(str(part_name)) <= 0:
+			var effective_z: int = (
+				characters_z
+				+ actor.z_index
+				+ actor.visual.get_part_effective_z(str(part_name))
+			)
+			if effective_z <= 0:
 				all_visuals_above_background = false
 		if actor.unit_data != null and actor.unit_data.is_mounted:
 			if actor.visual.has_part("MountBody") and actor.visual.has_part("LegLeft"):

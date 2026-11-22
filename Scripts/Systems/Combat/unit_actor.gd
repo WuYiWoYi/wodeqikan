@@ -11,9 +11,11 @@ const UnitVisualScript = preload("res://Scripts/Systems/Combat/unit_visual.gd")
 const SELECTION_RADIUS: float = 20.0
 const SELECTION_RADIUS_MOUNTED: float = 27.0
 
-## 整个 UnitActor 必须高于战场背景（BattleScene 根节点 z_index = 0）。
-## UnitVisual 的部件使用相对负 z_index，因此实际 canvas z = 本值 + 部件 z。
-const ACTOR_Z_INDEX: int = 200
+## YSort 只对 z_index = 0 的直接子节点按实时 Y 排序，因此士兵根节点保持 0；
+## 高于战场背景的层级由父节点 Characters（z_index = 200）统一提供。
+## UnitVisual 的部件使用相对负 z_index，士兵整体作为原子子树随 Y 排序，
+## 内部部件层级保持固定。实际 canvas z = Characters.z + 本值 + 部件 z。
+const ACTOR_Z_INDEX: int = 0
 
 ## 实际位移速度高于阈值视为跑动；停止后保留短暂缓冲，避免待机/跑动抖动。
 const MOVE_SPEED_THRESHOLD: float = 8.0
@@ -31,13 +33,17 @@ var _health_bar: UnitHealthBar = null
 var _attack_flash: float = 0.0
 var _visual_moving: bool = false
 var _move_buffer: float = 0.0
+## 独立的影子根节点：所有士兵影子统一位于角色层之下的 Shadow 层，
+## 避免角色按 Y 排序后，前排影子覆盖后排身体。
+var _shadow_root: Node2D = null
 
 
 func setup(
 	data: UnitData,
 	state: BattleUnitState,
 	player_side: bool,
-	equipment_configs: Dictionary = {}
+	equipment_configs: Dictionary = {},
+	shadow_parent: Node2D = null
 ) -> void:
 	unit_data = data
 	battle_state = state
@@ -46,10 +52,20 @@ func setup(
 	position = state.battle_position
 	z_index = ACTOR_Z_INDEX
 
+	if shadow_parent != null and is_instance_valid(shadow_parent):
+		_shadow_root = Node2D.new()
+		_shadow_root.name = "UnitShadow_%s" % data.unit_id
+		_shadow_root.position = position
+		shadow_parent.add_child(_shadow_root)
+
 	visual = UnitVisualScript.new()
 	visual.name = "Visual"
 	add_child(visual)
+	if _shadow_root != null:
+		visual.set_shadow_layer(_shadow_root)
 	visual.setup(data, equipment_configs)
+	if _shadow_root != null:
+		_shadow_root.scale.x = _facing
 
 	_create_label()
 	_create_health_bar()
@@ -64,6 +80,8 @@ func _process(delta: float) -> void:
 	var moved_distance: float = position.distance_to(new_position)
 	var speed: float = moved_distance / maxf(delta, 0.0001)
 	position = new_position
+	if _shadow_root != null and is_instance_valid(_shadow_root):
+		_shadow_root.position = position
 
 	if speed >= MOVE_SPEED_THRESHOLD:
 		_visual_moving = true
@@ -152,11 +170,24 @@ func set_facing(direction_x: float) -> void:
 		_facing = new_facing
 		if is_instance_valid(visual):
 			visual.set_facing(_facing)
+		if _shadow_root != null and is_instance_valid(_shadow_root):
+			_shadow_root.scale.x = _facing
 		queue_redraw()
 
 
 func play_death() -> void:
 	queue_free()
+
+
+func _exit_tree() -> void:
+	# 影子属于独立层级，必须随士兵表现节点一起清理，避免残留。
+	if _shadow_root != null and is_instance_valid(_shadow_root):
+		_shadow_root.queue_free()
+		_shadow_root = null
+
+
+func get_shadow_root() -> Node2D:
+	return _shadow_root
 
 
 func _draw() -> void:

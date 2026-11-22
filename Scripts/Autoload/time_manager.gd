@@ -52,6 +52,8 @@ var is_world_running: bool = false
 
 var _base_world_speed: float = SPEED_NORMAL
 var _battle_mode_active: bool = false
+## { reason: 引用计数 }。多个界面可以同时使用同一个暂停原因，
+## 必须成对 push/pop；只有计数归零时世界才恢复。
 var _pause_reasons: Dictionary = {}
 var _world_accumulator: float = 0.0
 
@@ -131,14 +133,21 @@ func set_battle_mode(active: bool) -> void:
 
 
 ## 使用“暂停原因栈”而不是布尔值，避免多个系统互相覆盖暂停状态。
+## 同一原因允许嵌套：先打开的界面后关闭时不会意外恢复世界时间。
 func push_pause(reason: StringName) -> void:
-	_pause_reasons[reason] = true
+	_pause_reasons[reason] = int(_pause_reasons.get(reason, 0)) + 1
 	_emit_speed_changed()
 
 
 func pop_pause(reason: StringName) -> void:
-	if _pause_reasons.erase(reason):
-		_emit_speed_changed()
+	var count: int = int(_pause_reasons.get(reason, 0))
+	if count <= 0:
+		return
+	if count <= 1:
+		_pause_reasons.erase(reason)
+	else:
+		_pause_reasons[reason] = count - 1
+	_emit_speed_changed()
 
 
 func clear_pauses() -> void:

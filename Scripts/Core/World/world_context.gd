@@ -31,6 +31,8 @@ var supply_manager: SupplyManager = SupplyManager.new()
 var wounded_healing_manager: WoundedHealingManager = WoundedHealingManager.new()
 ## 阶段 13：俘虏出售统一业务入口（价格集中配置、原子结算）。
 var prisoner_trade_manager: PrisonerTradeManager = PrisonerTradeManager.new()
+## 事件中心脚本用 preload 引用，避免新增 class_name 尚未进入编辑器缓存时无法解析。
+const EventCenterScript = preload("res://Scripts/Core/World/event_center.gd")
 var party_manager: PartyManager = PartyManager.new()
 var settlement_manager: SettlementManager = SettlementManager.new()
 var faction_manager: FactionManager = FactionManager.new()
@@ -56,6 +58,8 @@ var world_log_manager: WorldLogManager = WorldLogManager.new()
 var ai_manager: AIManager = AIManager.new()
 var battle_manager: BattleManager = BattleManager.new()
 var dialogue_manager: DialogueManager = DialogueManager.new()
+## 事件中心是只读聚合层：事件由现有系统状态实时推导，不保存独立副本。
+var event_center = EventCenterScript.new()
 var world_simulation: WorldSimulation = WorldSimulation.new()
 
 var world_id: String = ""
@@ -120,6 +124,51 @@ func get_player_unit() -> UnitData:
 		if member != null and member.is_player_character:
 			return member
 	return null
+
+
+## 玩家当前拥有的全部封地。所有权规则与征召授权共用同一判断：
+## 明确指定 owner_noble_id 时只认该贵族；未指定时认所有者家族的领袖。
+func get_player_owned_settlements() -> Array[SettlementData]:
+	var result: Array[SettlementData] = []
+	var noble := get_player_noble()
+	if noble == null:
+		return result
+	for settlement: SettlementData in settlement_manager.get_all_settlements():
+		if settlement == null:
+			continue
+		if fief_recruitment_manager.is_authorized_owner(settlement, noble.lord_id):
+			result.append(settlement)
+	return result
+
+
+## 下一游戏日的预计收支预览。只复用现有税收缓存与工资统计，不执行结算。
+## items 中收入为正、支出为负；顺序为支出在前、收入在后。
+func get_daily_balance_preview() -> Dictionary:
+	var items: Array[Dictionary] = []
+	var expense_total: int = 0
+	var income_total: int = 0
+
+	var wage: int = party_manager.get_total_wage(player_party_id) \
+		if not player_party_id.is_empty() else 0
+	if wage > 0:
+		items.append({"label": "部队工资", "amount": -wage})
+		expense_total += wage
+
+	for settlement: SettlementData in get_player_owned_settlements():
+		if settlement.tax_income_per_day <= 0:
+			continue
+		items.append({
+			"label": "%s税收" % settlement.display_name,
+			"amount": settlement.tax_income_per_day,
+		})
+		income_total += settlement.tax_income_per_day
+
+	return {
+		"income_total": income_total,
+		"expense_total": expense_total,
+		"net": income_total - expense_total,
+		"items": items,
+	}
 
 
 func is_valid_world() -> bool:
@@ -657,3 +706,4 @@ func _wire_managers() -> void:
 		supply_manager,
 		wounded_healing_manager
 	)
+	event_center.setup(self)

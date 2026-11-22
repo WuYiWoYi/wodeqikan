@@ -1,6 +1,124 @@
 # 变更日志
 
-只记录重要变更、架构调整和接口变化。日常小改动由 Git 历史承担。
+**读取级别：** 历史记录，默认不读；只在追溯“何时改了什么”时按日期/阶段检索。
+
+只记录重要变更、架构调整和接口变化。日常小改动由 Git 历史承担。当前实现状态以 [Development/Current_Status.md](Development/Current_Status.md) 为准；阶段内的详细实现与测试清单见 [Archive/Status_History.md](Archive/Status_History.md)。
+
+---
+
+## 2026-11-22 · 主界面信息栏、事件中心与百科重构
+
+### 新增
+
+- `Scripts/Core/World/event_center.gd`（`EventCenter`）：只读事件聚合层，确定性事件 ID，聚合封地/补给/伤兵/冒险者状态；任务入口保留但当前为空。
+- `Scripts/UI/WorldMap/event_center_panel.gd`（`EventCenterPanel`）：左侧分组事件列表 + 右侧详情，按签名刷新。
+- `WorldContext.get_player_owned_settlements()` / `get_daily_balance_preview()`：复用授权与工资/税收缓存的只读查询。
+- `WorldMapManager.get_movement_speed_breakdown()`：基于实际有效移速的移速分解接口。
+- `FactionManager.get_hostile_kingdoms_for_house()` / `get_hostile_independent_houses_for_kingdom()` / `get_hostile_independent_houses_for_house()`：统一敌对势力聚合查询。
+- `FiefRecruitmentManager.is_authorized_owner()`：征召授权唯一判断，供事件中心与 UI 复用。
+- 测试：`main_map_info_test`、`event_center_test`；`time_calendar_test` 增加暂停计数嵌套断言。
+
+### 变更
+
+- 大地图顶栏改为 `TopBarLeft` / `TopBarCenter` / `TopBarRight`：世界时间水平居中，左侧显示金币与部队移速，右侧入口使用紧凑尺寸。
+- 金币/移速悬浮支持普通简述与按住 ALT 明细；ALT 松开恢复简述，移出关闭。金币明细复用 `WorldContext.get_daily_balance_preview()`，移速明细复用 `get_movement_speed_breakdown()`。
+- 建筑信息面板打开时，百科/部队/背包/事件中心等普通入口仍可使用；世界时间控制（按钮与快捷键）继续禁用。关闭覆盖层后地点面板、世界暂停与时间按钮禁用状态保持不变。
+- 百科改为“一级分类（王国/家族/地点）→ 条目列表 → 二级详情”，不再在一级混入具体王国详情；王国与家族详情增加敌对王国/敌对独立家族区块与空状态，条目可跳转。
+- `TimeManager.push_pause/pop_pause` 改为按原因引用计数，支持地点面板与百科/背包/部队等嵌套界面而不提前恢复世界时间。
+
+### 修复
+
+- 关闭嵌套 UI 时同一 `ui_panel` 暂停原因被提前释放，导致建筑面板仍打开但世界恢复运行的问题。
+- 百科敌对势力直接读取统一关系查询，不再由 UI 维护第二套敌我判断。
+
+### 验证
+
+- 已运行并通过：`main_map_info_test`、`event_center_test`、`encyclopedia_ui_test`、`time_calendar_test`、`settlement_interaction_test`、`stage13_world_map_ui_test`、`party_panel_test`、`fief_adventurer_ui_test`。
+
+---
+
+## 2026-11-22 · 骑马朝向偏移、大地图目标虚线、村庄候选人可见性修复
+
+### 新增
+
+- 大地图玩家移动目标标记与动态虚线：`Scripts/Systems/WorldMap/move_target_guide.gd`（`MoveTargetGuide`），由 `world_map.gd` 创建并驱动。
+- `Tests/SystemTests/world_map_move_target_test`：目标设置/更新、起点跟随、停止清理、镜头平移缩放不改变世界坐标、单标记节点。
+
+### 变更
+
+- 骑马人物贴图：朝左保持 `+3` 横向偏移；朝右在此基础上再向左 `6` 像素（净值 `-3`）。偏移按朝向在 `HumanVisual` 内统一计算，镜像只改 `scale.x`，不重复叠加。
+- 大地图移动目标虚线读取既有 `PartyData` 移动状态与 `target_position`，不新增第二套移动数据；`FOLLOW_PARTY` 时终点取被跟随部队最新位置。
+
+### 修复
+
+- 村庄冒险者候选人 NPC 与名称标签误用场景根节点 `position`，导致全部叠在世界原点、镜头内不可见；改为使用 `candidate.world_position`。
+- `Tests/SystemTests/fief_adventurer_ui_test` 增加候选人位置与互不重叠断言；`Tests/UnitTests/unit_visual_test` 增加左右朝向偏移断言。
+
+### 验证
+
+- 已运行 `unit_visual_test`、`world_map_move_target_test`、`fief_adventurer_ui_test`、`stage13_village_candidates_test`、`world_map_input_test`、`settlement_interaction_test`。
+- 新断言全部通过；`unit_visual_test` 仍存在与本次无关的既有马腿枢轴断言失败（马前腿2/马后腿2）。
+
+---
+
+## 2026-11-22 · 部队面板双列布局与战斗经验文本等级
+
+### 新增
+
+- `CombatExperience`：战斗经验五级文本映射（新兵 / 一般士兵 / 老兵 / 精锐 / 百战精锐）与属性加成扩展入口。
+- `Tests/UnitTests/combat_experience_test`：等级映射、边界与加成接口测试。
+
+### 变更
+
+- 部队管理面板扩大到 1280×660；士兵列表与俘虏列表改为每行两个条目的双列布局。
+- 列表条目精简为头像缩略图、姓名、战斗经验与当前/最大生命值。
+- 士兵详情移除“美术预览”标题、内部 ID、数值等级与经验进度条；预览图片在原有视口内放大，详情面板总高度不增加。
+- 骑乘人物贴图在原有 15 像素上移基础上再向右移动 3 像素；马匹位置与步行状态不变。
+- `StatCalculator.compute_final_stats()` 统一叠加战斗经验属性加成；当前五级加成为空，不改变现有数值。
+
+### 接口
+
+- `CombatExperience.TIER_NAMES` / `TIER_MIN_LEVELS` / `TIER_STAT_BONUSES`。
+- `CombatExperience.tier_name_for_level()` / `stat_bonuses_for_level()` / `apply_stat_bonuses()`。
+
+### 验证
+
+- 已运行 `combat_experience_test`、`party_panel_test`、`party_economy_ui_test`、`stage13_prisoner_ui_flow_test`、`wounded_system_test`，均通过。
+- 非 headless 截图确认：双列列表、详情无 ID/无预览标题、美术预览放大、骑乘预览右移。
+
+### 未决
+
+- 五个战斗经验级别对应的具体攻击力/生命值加成数值未确认，仅预留接口。
+
+---
+
+## 2026-11-22 · 大地图 UI、部队面板与小地图战斗视觉优化
+
+### 新增
+
+- `TextureRegionUtils`：按 PNG 非透明像素边界裁切贴图的运行时工具，带结果缓存。
+- `PartyUnitThumbnail`：部队面板列表项的 48×56 `SubViewport` 士兵缩略图，复用 `UnitVisual`，无单位时绘制默认剪影。
+- `SettlementTavernHost` 与酒馆内嵌模式：城镇酒馆内容复用原地点面板。
+- 部队面板俘虏列表：位于成员列表下方，点击进入只读俘虏详情。
+
+### 变更
+
+- 地点名称标签圆形徽章恢复完整绘制：`CLIP_CHILDREN_AND_DRAW` 同时绘制底盘并裁剪旗帜；圆形遮罩支持宽高比。
+- 地点徽章、部队标记、停留旗帜条、百科房屋徽章、战斗增援旗帜改用裁切后的有效区域缩放，视觉尺寸统一。
+- 城镇酒馆不再打开二级弹窗；返回酒馆/离开地点/进入村庄时清理酒馆状态。
+- 战斗场景改为统一伪 Z：`World/Characters` 的 YSort 负责士兵前后顺序，士兵根节点 `z_index = 0`。
+- 所有士兵影子移入 `World/Shadows`（z_index = 100），始终位于全部士兵主体之下；影子动画仍由 `HumanVisual`/`HorseVisual` 驱动。
+- 部队面板成员条目增加缩略图，成员与俘虏共用同一列表项与选中逻辑。
+
+### 决策
+
+- D158：战斗伪 Z 由 YSort 统一排序，影子独立置于角色层之下。
+- D159：透明边距运行时裁切与酒馆内嵌地点面板。
+
+### 验证
+
+- 已运行 `battle_scene_test`、`archer_battle_test`、`unit_visual_test`、`party_panel_test`、`stage13_prisoner_ui_flow_test`、`stage13_tavern_test`、`stage13_world_map_ui_test`、`world_map_milestone6_test`，均通过。
+- 非 headless 截图确认：地点圆形徽章恢复、旗帜有效区域放大、部队面板缩略图/俘虏列表、酒馆内嵌布局、战斗 Y 排序与阴影层。
 
 ---
 

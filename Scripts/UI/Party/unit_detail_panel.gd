@@ -11,9 +11,11 @@ const UnitVisualScript = preload("res://Scripts/Systems/Combat/unit_visual.gd")
 ## 通过管理器完成装备/晋升后发出，由 PartyPanel 刷新概览与成员列表。
 signal unit_changed
 
+## 移除“美术预览”标题后，在不增加预览区域高度与面板总高度的前提下，
+## 用满原有 180×200 视口：放大缩放比例并下移脚底锚点。
 const PREVIEW_VIEWPORT_SIZE := Vector2i(180, 200)
-const PREVIEW_SCALE: float = 1.6
-const PREVIEW_FEET_POSITION := Vector2(90.0, 180.0)
+const PREVIEW_SCALE: float = 2.8
+const PREVIEW_FEET_POSITION := Vector2(90.0, 194.0)
 
 var _context: WorldContext = null
 var _preview_viewport: SubViewport = null
@@ -21,16 +23,19 @@ var _preview_visual: UnitVisual = null
 
 var _selected_unit_id: String = ""
 
+var _title_label: Label = null
+var _prisoner_notice_label: Label = null
+var _mount_section: VBoxContainer = null
+var _promotion_section: VBoxContainer = null
+var _recruit_section: VBoxContainer = null
 var _name_label: Label = null
 var _class_label: Label = null
 var _class_type_label: Label = null
 var _tier_label: Label = null
 var _mount_state_label: Label = null
 var _wage_label: Label = null
-var _id_label: Label = null
-var _level_label: Label = null
-var _exp_label: Label = null
-var _exp_progress: ProgressBar = null
+## 战斗经验文本等级（新兵 / 一般士兵 / …）；不展示数值等级或内部 ID。
+var _combat_exp_label: Label = null
 
 var _hp_label: Label = null
 var _attack_label: Label = null
@@ -71,9 +76,13 @@ func show_unit(unit_id: String) -> void:
 		return
 
 	var config := _context.unit_manager.get_unit_config(unit.config_id)
-	var max_level: int = maxi(config.max_level, 1) if config != null else 1
+	var prisoner: bool = unit.is_prisoner()
 
 	_selected_unit_id = unit_id
+	_title_label.text = "俘虏详情" if prisoner else "士兵详情"
+	_prisoner_notice_label.visible = prisoner
+	_prisoner_notice_label.text = "俘虏：仅可查看，不可装备、晋升或招募。"
+	_set_management_sections_visible(not prisoner)
 	_mount_status_label.text = ""
 	_promotion_status_label.text = ""
 	_name_label.text = unit.display_name if not unit.display_name.is_empty() else "未命名士兵"
@@ -88,18 +97,10 @@ func show_unit(unit_id: String) -> void:
 	)
 	_mount_state_label.text = _mounted_state_text(unit)
 	_wage_label.text = "每日工资：%d" % maxi(0, unit.wage)
-	_id_label.text = "ID：%s" % unit.unit_id
-	_level_label.text = "等级：%d / %d" % [unit.level, max_level]
-
-	var required: int = _context.unit_manager.get_exp_to_next_level(unit.unit_id)
-	if required <= 0:
-		_exp_label.text = "经验：已满级"
-		_exp_progress.max_value = 1
-		_exp_progress.value = 1
-	else:
-		_exp_label.text = "经验：%d / %d" % [unit.exp, required]
-		_exp_progress.max_value = float(required)
-		_exp_progress.value = float(clampi(unit.exp, 0, required))
+	# 只展示文本等级，不展示数值等级、经验进度或内部 ID；底层经验数据保持不变。
+	_combat_exp_label.text = "战斗经验：%s" % CombatExperience.tier_name_for_level(
+		unit.level
+	)
 
 	_hp_label.text = "生命：%d / %d" % [unit.current_hp, unit.max_hp]
 	_attack_label.text = "攻击力：%d" % unit.attack
@@ -108,9 +109,12 @@ func show_unit(unit_id: String) -> void:
 	_attack_range_label.text = "攻击距离：%.1f" % unit.attack_range
 
 	_refresh_equipment(unit)
-	_refresh_mount_controls(unit)
-	_refresh_promotion(unit, config)
-	_refresh_recruit_info(unit)
+	if prisoner:
+		_reset_management_controls()
+	else:
+		_refresh_mount_controls(unit)
+		_refresh_promotion(unit, config)
+		_refresh_recruit_info(unit)
 	_refresh_preview(unit)
 
 
@@ -118,17 +122,16 @@ func clear() -> void:
 	if _name_label == null:
 		return
 	_selected_unit_id = ""
+	_title_label.text = "士兵详情"
+	_prisoner_notice_label.visible = false
+	_set_management_sections_visible(false)
 	_name_label.text = "未选择士兵"
 	_class_label.text = ""
 	_class_type_label.text = ""
 	_tier_label.text = ""
 	_mount_state_label.text = ""
 	_wage_label.text = ""
-	_id_label.text = ""
-	_level_label.text = ""
-	_exp_label.text = ""
-	_exp_progress.max_value = 1
-	_exp_progress.value = 0
+	_combat_exp_label.text = ""
 	_hp_label.text = ""
 	_attack_label.text = ""
 	_attack_interval_label.text = ""
@@ -156,10 +159,39 @@ func clear() -> void:
 	_clear_preview()
 
 
+func _set_management_sections_visible(value: bool) -> void:
+	if _mount_section != null:
+		_mount_section.visible = value
+	if _promotion_section != null:
+		_promotion_section.visible = value
+	if _recruit_section != null:
+		_recruit_section.visible = value
+
+
+## 俘虏不允许操作：清空坐骑选项、禁用晋升与招募相关按钮。
+func _reset_management_controls() -> void:
+	if _mount_option != null:
+		_mount_option.clear()
+		_mount_option.add_item("俘虏不可操作")
+		_mount_option.set_item_disabled(0, true)
+		_mount_option.select(0)
+	if _equip_mount_button != null:
+		_equip_mount_button.disabled = true
+	if _unequip_mount_button != null:
+		_unequip_mount_button.disabled = true
+	_mount_status_label.text = ""
+	_promotion_label.text = "俘虏不可晋升"
+	_promotion_button.disabled = true
+	_promotion_status_label.text = ""
+	_recruit_source_label.text = ""
+	_recruit_settlement_label.text = ""
+	_recruit_time_label.text = ""
+
+
 func _build() -> void:
-	var title := _make_label("士兵详情", 20)
-	title.name = "DetailTitle"
-	add_child(title)
+	_title_label = _make_label("士兵详情", 20)
+	_title_label.name = "DetailTitle"
+	add_child(_title_label)
 
 	_build_preview()
 
@@ -175,6 +207,12 @@ func _build() -> void:
 	_class_type_label.name = "DetailUnitClassType"
 	add_child(_class_type_label)
 
+	_prisoner_notice_label = _make_label("", 14)
+	_prisoner_notice_label.name = "DetailPrisonerNotice"
+	_prisoner_notice_label.visible = false
+	_prisoner_notice_label.modulate = Color(0.62, 0.78, 0.95)
+	add_child(_prisoner_notice_label)
+
 	_tier_label = _make_label("", 14)
 	_tier_label.name = "DetailTier"
 	add_child(_tier_label)
@@ -187,28 +225,12 @@ func _build() -> void:
 	_wage_label.name = "DetailWage"
 	add_child(_wage_label)
 
-	_id_label = _make_label("", 12)
-	_id_label.name = "DetailUnitId"
-	_id_label.modulate = Color(0.75, 0.75, 0.75)
-	add_child(_id_label)
-
 	add_child(HSeparator.new())
 
-	_level_label = _make_label("", 15)
-	_level_label.name = "DetailLevel"
-	add_child(_level_label)
-
-	_exp_label = _make_label("", 14)
-	_exp_label.name = "DetailExp"
-	add_child(_exp_label)
-
-	_exp_progress = ProgressBar.new()
-	_exp_progress.name = "DetailExpProgress"
-	_exp_progress.show_percentage = false
-	_exp_progress.custom_minimum_size = Vector2(0.0, 10.0)
-	_exp_progress.max_value = 1
-	_exp_progress.value = 0
-	add_child(_exp_progress)
+	# 战斗经验使用统一的文本等级，不展示数值等级、经验进度条或内部 ID。
+	_combat_exp_label = _make_label("", 15)
+	_combat_exp_label.name = "DetailCombatExperience"
+	add_child(_combat_exp_label)
 
 	add_child(HSeparator.new())
 	add_child(_make_label("战斗属性", 16))
@@ -243,18 +265,23 @@ func _build() -> void:
 		add_child(label)
 		_equipment_labels[slot] = label
 
-	add_child(HSeparator.new())
-	add_child(_make_label("坐骑管理", 16))
+	# 坐骑/晋升/招募区只在普通士兵详情中显示；俘虏仅展示只读信息。
+	_mount_section = VBoxContainer.new()
+	_mount_section.name = "DetailMountSection"
+	_mount_section.add_theme_constant_override("separation", 6)
+	add_child(_mount_section)
+	_mount_section.add_child(HSeparator.new())
+	_mount_section.add_child(_make_label("坐骑管理", 16))
 
 	_mount_option = OptionButton.new()
 	_mount_option.name = "DetailMountOption"
 	_mount_option.custom_minimum_size = Vector2(0.0, 32.0)
 	_mount_option.focus_mode = Control.FOCUS_NONE
-	add_child(_mount_option)
+	_mount_section.add_child(_mount_option)
 
 	var mount_buttons := HBoxContainer.new()
 	mount_buttons.add_theme_constant_override("separation", 8)
-	add_child(mount_buttons)
+	_mount_section.add_child(mount_buttons)
 
 	_equip_mount_button = Button.new()
 	_equip_mount_button.name = "DetailEquipMountButton"
@@ -275,15 +302,19 @@ func _build() -> void:
 	_mount_status_label = _make_label("", 12)
 	_mount_status_label.name = "DetailMountStatus"
 	_mount_status_label.modulate = Color(1.0, 0.86, 0.55)
-	add_child(_mount_status_label)
+	_mount_section.add_child(_mount_status_label)
 
-	add_child(HSeparator.new())
-	add_child(_make_label("兵种晋升", 16))
+	_promotion_section = VBoxContainer.new()
+	_promotion_section.name = "DetailPromotionSection"
+	_promotion_section.add_theme_constant_override("separation", 6)
+	add_child(_promotion_section)
+	_promotion_section.add_child(HSeparator.new())
+	_promotion_section.add_child(_make_label("兵种晋升", 16))
 
 	_promotion_label = _make_label("", 13)
 	_promotion_label.name = "DetailPromotionInfo"
 	_promotion_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	add_child(_promotion_label)
+	_promotion_section.add_child(_promotion_label)
 
 	_promotion_button = Button.new()
 	_promotion_button.name = "DetailPromotionButton"
@@ -291,36 +322,36 @@ func _build() -> void:
 	_promotion_button.focus_mode = Control.FOCUS_NONE
 	_promotion_button.custom_minimum_size = Vector2(0.0, 34.0)
 	_promotion_button.pressed.connect(_on_promotion_pressed)
-	add_child(_promotion_button)
+	_promotion_section.add_child(_promotion_button)
 
 	_promotion_status_label = _make_label("", 12)
 	_promotion_status_label.name = "DetailPromotionStatus"
 	_promotion_status_label.modulate = Color(1.0, 0.86, 0.55)
-	add_child(_promotion_status_label)
+	_promotion_section.add_child(_promotion_status_label)
 
-	add_child(HSeparator.new())
-	add_child(_make_label("招募信息", 16))
+	_recruit_section = VBoxContainer.new()
+	_recruit_section.name = "DetailRecruitSection"
+	_recruit_section.add_theme_constant_override("separation", 6)
+	add_child(_recruit_section)
+	_recruit_section.add_child(HSeparator.new())
+	_recruit_section.add_child(_make_label("招募信息", 16))
 
 	_recruit_source_label = _make_label("", 13)
 	_recruit_source_label.name = "DetailRecruitSource"
-	add_child(_recruit_source_label)
+	_recruit_section.add_child(_recruit_source_label)
 
 	_recruit_settlement_label = _make_label("", 13)
 	_recruit_settlement_label.name = "DetailRecruitSettlement"
-	add_child(_recruit_settlement_label)
+	_recruit_section.add_child(_recruit_settlement_label)
 
 	_recruit_time_label = _make_label("", 13)
 	_recruit_time_label.name = "DetailRecruitTime"
-	add_child(_recruit_time_label)
+	_recruit_section.add_child(_recruit_time_label)
 
 
 ## 复用战斗表现层的 UnitVisual，但放进独立 SubViewport，不创建真实单位。
+## 不显示“美术预览”标题：释放出的空间用于放大图片，预览区域高度保持不变。
 func _build_preview() -> void:
-	var preview_title := _make_label("美术预览", 14)
-	preview_title.name = "DetailPreviewTitle"
-	preview_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	add_child(preview_title)
-
 	var preview_panel := PanelContainer.new()
 	preview_panel.name = "DetailPreviewPanel"
 	preview_panel.custom_minimum_size = Vector2(200.0, 220.0)

@@ -1,7 +1,12 @@
 # 核心架构
 
-**文档版本：** V0.5
-**状态：** 阶段 7 第一步已实现并通过全量自动化测试
+**文档版本：** V0.6
+**状态：** 与阶段 13 完成后的实现一致
+**读取指引：**
+
+- 一般功能任务只需读第 1–5 节，了解分层、依赖方向与禁止事项。
+- 涉及数据归属、更新时序、场景生命周期、事件契约或新增管理器时，读第 6–12 节。
+- 各系统的字段、接口与规则不在本文重复，见 `Systems/`。
 
 本文定义全局结构、依赖方向与写权限。各系统的细节见 `Systems/`。
 
@@ -110,7 +115,6 @@ GameManager (Autoload)
 | `SupplyManager` | 按 `TimeManager` 日边界统一结算玩家/NPC 面包与草料、剩余天数与采购需求查询 | 市场交易、价格计算、路线决策、UI |
 | `WoundedHealingManager` | 按 `WorldTime` 整小时生成治疗点、按成员顺序治疗、恢复伤兵状态与仅伤兵部队 | 战斗内 HP、补给、工资、UI |
 | `PrisonerTradeManager` | 城镇酒馆出售俘虏的校验、集中定价、原子结算与售出状态写入 | 直接修改 Unit 状态、UI 预览逻辑 |
-| `BattleManager`（阶段 13 扩展） | 负伤判定、俘虏池构建、最大余数分配、玩家份额挂起与原子提交 | UI 直接写入俘虏归属 |
 | `PartyManager` | `PartyData` 增删查、成员关系维护、工资汇总 | 部队 AI |
 | `SettlementManager` | `SettlementData` 增删查、场景路径与序列化 | 地点图标、交互面板 |
 | `LordManager` | `LordData` 增删查、玩家领主查询、部队引用校验、序列化 | AI 决策、封地分配、UI |
@@ -129,8 +133,7 @@ GameManager (Autoload)
 | `EncounterManager` | 统一遭遇判定、玩家追击/被动拦截、战斗创建/加入委托 | 场景表现、UI 排版 |
 | `WorldLogManager` | 监听事件、生成受限日志历史、序列化预留 | 修改战斗/部队、操作 UI |
 | `AIManager` | 三层决策调度 | 直接改场景、UI |
-| `BattleManager` | 多场 `BattleSession` 注册表、部队唯一参战归属、锁定、独立推进与结算 | 直接修改大地图节点；把 `current_battle` 当作世界唯一战斗 |
-| `DialogueManager` | 对话会话与节点跳转 | UI 排版 |
+| `BattleManager` | 多场 `BattleSession` 注册表、部队唯一参战归属、锁定、独立推进与结算；负伤判定、俘虏池分配、玩家份额挂起与原子提交 | 直接修改大地图节点或 UI；把 `current_battle` 当作世界唯一战斗 |
 | `FormationManager` | 阵型定义与站位计算 | 单位攻击行为 |
 
 ## 5. 依赖方向
@@ -162,11 +165,14 @@ Manager → EventBus（只发事实）
 每一帧（真实时间）
 ├── TimeManager._process
 │   └── 累积 WorldTime，每满 0.1 秒发出 world_tick
-│       └── WorldSimulation.on_world_tick
+│       └── WorldSimulation.on_world_tick（固定顺序）
+│           ├── BattleManager.tick（离屏战斗按游戏小时推进）
 │           ├── WorldMapManager.update_party_movement
 │           ├── WorldMapManager.update_visibility（视野由 VisionManager 提供）
 │           ├── FiefRecruitmentManager.tick（采邑储备补充）
 │           ├── AdventurerRecruitmentManager.tick（候选人刷新）
+│           ├── SupplyManager.update_daily（跨日时结算补给）
+│           ├── WoundedHealingManager.tick（整小时顺序治疗）
 │           ├── EncounterManager 遭遇检测 / 中途参战
 │           └── AIManager.tick（按内部分频；待处理遭遇/交互时跳过）
 │
@@ -214,6 +220,14 @@ Manager → EventBus（只发事实）
 | 封地征召/候选人招募权限 | `FiefRecruitmentManager` / `AdventurerRecruitmentManager` | 场景与 UI 只调用接口 |
 | `SettlementData` 驻军 | `SettlementManager` / 未来的战斗系统 | 地点交互只读 |
 | 世界时间、倍率 | `TimeManager` | 其他系统只能请求 |
+| `UnitData.status`（ACTIVE/WOUNDED 等） | `UnitManager`（战斗结算时由 `BattleManager`） | 伤兵保留身份，治疗/结算走管理器接口 |
+| `UnitData.prisoner_owner_party_id` / `sold_to_settlement_id` | `PartyManager` / `PrisonerTradeManager` | 成员与俘虏互斥；售出单位退出玩家控制 |
+| `PartyData.prisoner_unit_ids` | `PartyManager` | 与 `UnitData.prisoner_owner_party_id` 双向一致 |
+| `PartyData.inventory_data`、`PlayerProfile` 金币/物品 | `PartyManager` / `PlayerProfile` / `MarketManager`（结算） | NPC 与玩家共用背包结构；交易由 `MarketManager` 原子结算 |
+| 补给结算日、剩余补给 | `SupplyManager` | 只在 `WorldTime` 日边界结算 |
+| `healing_last_settled_hour` | `WoundedHealingManager` | 只在 `WorldTime` 整小时边界治疗 |
+| 村庄/城镇市场库存、市场马匹实例 | `MarketManager` | 地点与 UI 只读 |
+| `MountInstanceData.instance_id` / 外观 | 创建时由 `UnitManager`/`MarketManager` 生成，之后只读 | 马匹是独立实例，不按数量堆叠 |
 | 战斗临时状态 | `BattleSession` | 结算后写回 `UnitData` |
 
 任何新系统都必须先声明：它写哪些字段、通过谁写。禁止两个系统同时写同一权威字段。
@@ -229,9 +243,9 @@ MainMenu → GameManager.start_new_game()
   ├── 创建 WorldContext（装配管理器）
   ├── WorldInitializer.create_new_world()
   │     ├── 生成 WORLD ID、世界尺寸
-  │     ├── 玩家部队 + 两支 NPC 部队
-  │     ├── 玩家领主 / NPC 领主 / 家族归属
-  │     └── 五个初始地点（含玩家村庄“青禾村”）
+  │     ├── 玩家部队 + NPC 部队（商队/巡逻/强盗/家族骑士等）
+  │     ├── 玩家领主 / NPC 领主 / 贵族/家族/王国归属
+  │     └── 九个初始地点（含玩家村庄“青禾村”）
   └── SceneManager.change_scene(WorldMap)
 ```
 
@@ -243,7 +257,7 @@ Continue / Load Game
   → GameManager 创建新的 WorldContext
   → WorldContext.load_from_save_data(save)
       ├── 恢复 IdGenerator 计数
-      ├── 恢复 Unit / Party / Lord / Settlement / WorldLog
+      ├── 恢复 Unit / Party / Settlement / Noble / House / Kingdom / Market / WorldLog 等
       ├── 恢复世界 ID、尺寸、玩家部队、玩家领主与玩家角色 ID
       ├── 修正采邑/候选人边界并重算属性与税收
       └── 校验成员关系、领主引用与封地所有权
@@ -320,6 +334,8 @@ Continue / Load Game
 | `battle_finished` | `battle_id`, `result` | `BattleManager` | UI、世界模拟 |
 | `battle_participant_joined` | `battle_id`, `party_id`, `side_index` | `BattleManager` | UI、统计、后续战斗场景 |
 | `party_reinforced` | `battle_id`, `party_id`, `noble_id`, `side_index` | `BattleManager`（`try_join_battle` / `add_reinforcement`） | 战斗场景增援表现、日志、统计 |
+| `fief_recruited` | `recruiter_party_id`, `settlement_id`, `groups`, `is_player_recruiter` | `FiefRecruitmentManager` | 世界日志、部队 UI |
+| `adventurer_recruited` | `settlement_id`, `unit_id`, `unit_name` | `AdventurerRecruitmentManager` | 世界日志、村庄 UI |
 | `battle_participants_updated` | `battle_id` | `BattleManager` | 大地图战斗标记/汇总 UI |
 | `entry_added`（WorldLogManager 自定义信号） | `WorldLogEntry` | `WorldLogManager` | 大地图世界日志面板 |
 | `player_encounter_requested` | `encounter_id`, `attacker_party_id`, `target_party_id` | `EncounterManager` | WorldMap 强制遭遇对话 |

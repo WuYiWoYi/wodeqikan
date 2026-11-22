@@ -16,6 +16,8 @@ const ROW_MIN_HEIGHT := 34.0
 
 var _context: WorldContext = null
 var _settlement: SettlementData = null
+## 嵌入模式：作为城镇信息面板的一段内容，不再创建独立二级窗口。
+var _embedded: bool = false
 ## 进入出售界面时的玩家俘虏快照。
 var _initial_prisoner_ids: Array[String] = []
 ## 本次预览中准备出售的俘虏（尚未提交）。
@@ -36,8 +38,9 @@ var _feedback_label: Label = null
 var _confirm_button: Button = null
 
 
-func setup(context: WorldContext) -> void:
+func setup(context: WorldContext, embedded: bool = false) -> void:
 	_context = context
+	_embedded = embedded
 	visible = false
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_set_full_rect(self)
@@ -67,6 +70,18 @@ func close() -> void:
 	closed.emit()
 
 
+## 面板被整体关闭/切换地点时清理显示状态，不广播 closed，
+## 避免调用方在收尾阶段又被信号切回城镇信息视图。
+func reset() -> void:
+	visible = false
+	_settlement = null
+	_sell_ids.clear()
+	_initial_prisoner_ids.clear()
+	_feedback_text = ""
+	if _menu_view != null:
+		_show_menu()
+
+
 func get_settlement_id() -> String:
 	return _settlement.settlement_id if _settlement != null else ""
 
@@ -85,36 +100,49 @@ func is_menu_visible() -> bool:
 
 
 func _build() -> void:
-	var dim := ColorRect.new()
-	dim.name = "TavernDim"
-	dim.color = Color(0.0, 0.0, 0.0, 0.55)
-	dim.mouse_filter = Control.MOUSE_FILTER_STOP
-	_set_full_rect(dim)
-	add_child(dim)
+	var column: VBoxContainer = null
+	if _embedded:
+		# 嵌入城镇信息面板：不创建遮罩、不创建二级窗口，原面板位置/尺寸不变。
+		column = VBoxContainer.new()
+		column.name = "TavernEmbeddedContent"
+		column.add_theme_constant_override("separation", 8)
+		_set_full_rect(column)
+		add_child(column)
+	else:
+		var dim := ColorRect.new()
+		dim.name = "TavernDim"
+		dim.color = Color(0.0, 0.0, 0.0, 0.55)
+		dim.mouse_filter = Control.MOUSE_FILTER_STOP
+		_set_full_rect(dim)
+		add_child(dim)
 
-	var panel := PanelContainer.new()
-	panel.name = "TavernPanelBody"
-	panel.anchor_left = 0.5
-	panel.anchor_top = 0.5
-	panel.anchor_right = 0.5
-	panel.anchor_bottom = 0.5
-	panel.offset_left = -WINDOW_SIZE.x * 0.5
-	panel.offset_top = -WINDOW_SIZE.y * 0.5
-	panel.offset_right = WINDOW_SIZE.x * 0.5
-	panel.offset_bottom = WINDOW_SIZE.y * 0.5
-	add_child(panel)
+		var panel := PanelContainer.new()
+		panel.name = "TavernPanelBody"
+		panel.anchor_left = 0.5
+		panel.anchor_top = 0.5
+		panel.anchor_right = 0.5
+		panel.anchor_bottom = 0.5
+		panel.offset_left = -WINDOW_SIZE.x * 0.5
+		panel.offset_top = -WINDOW_SIZE.y * 0.5
+		panel.offset_right = WINDOW_SIZE.x * 0.5
+		panel.offset_bottom = WINDOW_SIZE.y * 0.5
+		add_child(panel)
 
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 22)
-	margin.add_theme_constant_override("margin_right", 22)
-	margin.add_theme_constant_override("margin_top", 18)
-	margin.add_theme_constant_override("margin_bottom", 18)
-	panel.add_child(margin)
+		var margin := MarginContainer.new()
+		margin.add_theme_constant_override("margin_left", 22)
+		margin.add_theme_constant_override("margin_right", 22)
+		margin.add_theme_constant_override("margin_top", 18)
+		margin.add_theme_constant_override("margin_bottom", 18)
+		panel.add_child(margin)
 
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 10)
-	margin.add_child(column)
+		column = VBoxContainer.new()
+		column.add_theme_constant_override("separation", 10)
+		margin.add_child(column)
 
+	_build_content(column)
+
+
+func _build_content(column: VBoxContainer) -> void:
 	_title_label = _make_label("酒馆", 24)
 	_title_label.name = "TavernTitleLabel"
 	_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -164,17 +192,24 @@ func _build_menu_view() -> void:
 	merc_button.pressed.connect(_show_mercenary_view)
 	_menu_view.add_child(merc_button)
 
-	var leave_button := _make_button("离开酒馆", "TavernLeaveButton")
+	# 内嵌时按钮语义是切回城镇信息，而不是关闭独立窗口。
+	var leave_text: String = "返回城镇" if _embedded else "离开酒馆"
+	var leave_button := _make_button(leave_text, "TavernLeaveButton")
 	leave_button.custom_minimum_size = Vector2(260.0, 44.0)
 	leave_button.pressed.connect(close)
 	_menu_view.add_child(leave_button)
 
 
 func _build_sell_view() -> void:
-	var lists := HBoxContainer.new()
+	# 嵌入城镇面板时空间较窄，两栏改为上下排列；独立窗口仍使用左右两栏。
+	var lists: BoxContainer = null
+	if _embedded:
+		lists = VBoxContainer.new()
+	else:
+		lists = HBoxContainer.new()
 	lists.name = "TavernSellLists"
 	lists.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	lists.add_theme_constant_override("separation", 16)
+	lists.add_theme_constant_override("separation", 6 if _embedded else 16)
 	_sell_view.add_child(lists)
 
 	var buyer_column := VBoxContainer.new()
@@ -394,7 +429,8 @@ func _describe_unit(unit_id: String) -> String:
 
 func _make_scroll(node_name: String, parent: Control) -> VBoxContainer:
 	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(0.0, 360.0)
+	# 嵌入城镇面板时两栏上下排列，单栏高度压缩；独立窗口保持原高度。
+	scroll.custom_minimum_size = Vector2(0.0, 110.0 if _embedded else 360.0)
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	parent.add_child(scroll)
 	var list := VBoxContainer.new()

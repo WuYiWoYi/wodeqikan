@@ -77,6 +77,22 @@ func _run() -> void:
 	TimeManager.pop_pause(&"time_test")
 	_check(is_equal_approx(TimeManager.get_effective_world_scale(), 2.0), "取消暂停恢复 2x")
 
+	# 同一暂停原因允许嵌套：先关闭的内层界面不能解除外层界面的暂停。
+	TimeManager.push_pause(&"nested_test")
+	TimeManager.push_pause(&"nested_test")
+	TimeManager.pop_pause(&"nested_test")
+	_check(
+		TimeManager.has_pause_reason(&"nested_test")
+			and is_zero_approx(TimeManager.get_effective_world_scale()),
+		"嵌套暂停释放一层后仍保持暂停"
+	)
+	TimeManager.pop_pause(&"nested_test")
+	_check(
+		not TimeManager.has_pause_reason(&"nested_test")
+			and is_equal_approx(TimeManager.get_effective_world_scale(), 2.0),
+		"嵌套暂停全部释放后恢复原倍率"
+	)
+
 
 func _check(condition: bool, message: String) -> void:
 	if condition:

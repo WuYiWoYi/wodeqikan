@@ -21,6 +21,13 @@ const PLUME_PART_NAME: String = "Plume"
 
 ## 骑乘时人物整体相对原始位置向上移动 15 像素；马匹不移动，UnitActor 世界坐标不变。
 const MOUNTED_CHARACTER_OFFSET_Y: float = -15.0
+## 骑乘时人物贴图在上移基础上再向右偏移 3 像素（默认朝左）；只影响骑马状态，
+## 马匹自身位置、步行状态与士兵世界坐标均不变。
+const MOUNTED_CHARACTER_OFFSET_X: float = 3.0
+## 骑乘且朝右时，在默认偏移基础上再向左修正 6 像素。
+## 朝右会镜像人物的父节点，但节点 position 不会随 scale 翻转，因此必须按朝向
+## 单独给出 X 偏移；净值 = 3 - 6 = -3，避免在镜像后重复叠加导致更大偏移。
+const MOUNTED_CHARACTER_RIGHT_EXTRA_X: float = -6.0
 ## 骑乘时人物整体已跟随马身上下运动，上半身只保留少量独立起伏，避免双重弹跳。
 const MOUNTED_RIDER_BOB_SCALE: float = 0.2
 
@@ -181,13 +188,38 @@ func rebuild(
 	set_process(true)
 
 
-## 骑乘时人物整体上移；影子互斥。可重复调用，切换时不重建节点。
+## 骑乘时人物整体上移并向右偏移；影子互斥。可重复调用，切换时不重建节点。
 func set_mounted(mounted: bool) -> void:
 	_mounted = mounted
-	position.y = MOUNTED_CHARACTER_OFFSET_Y if mounted else 0.0
+	_apply_mounted_position()
 	var foot_shadow := get_part("FootShadow")
 	if foot_shadow != null:
 		foot_shadow.visible = not mounted
+
+
+## 骑乘时的基础偏移：朝左为 +3，朝右在此基础上再向左 6 px。
+## 只影响人物自身，马匹与士兵世界坐标不动。
+func _mounted_offset() -> Vector2:
+	if not _mounted:
+		return Vector2.ZERO
+	var offset_x: float = MOUNTED_CHARACTER_OFFSET_X
+	if _facing > 0.0:
+		offset_x += MOUNTED_CHARACTER_RIGHT_EXTRA_X
+	return Vector2(offset_x, MOUNTED_CHARACTER_OFFSET_Y)
+
+
+## 重新应用骑乘偏移；rider_offset_y 用于跟随马身上下运动。
+func _apply_mounted_position(rider_offset_y: float = 0.0) -> void:
+	var offset := _mounted_offset()
+	position = Vector2(offset.x, offset.y + rider_offset_y)
+
+
+## 朝向切换时需要同步更新骑乘偏移：镜像只改变 scale.x，不会翻转节点 position。
+func set_facing(direction_x: float) -> void:
+	var previous_facing: float = _facing
+	super.set_facing(direction_x)
+	if not is_equal_approx(previous_facing, _facing):
+		_apply_mounted_position()
 
 
 func is_mounted_visual() -> bool:
@@ -311,10 +343,9 @@ func update_locomotion(
 ) -> void:
 	if _upper_body == null:
 		return
-	# 骑乘时整个人物视觉跟随马身；非骑乘时恢复为 0。
-	position.y = (
-		MOUNTED_CHARACTER_OFFSET_Y + rider_offset_y if _mounted else 0.0
-	)
+	# 骑乘时整个人物视觉跟随马身；非骑乘时恢复为原始位置。
+	# 朝右的额外水平修正统一由 _mounted_offset() 处理，避免叠加偏移。
+	_apply_mounted_position(rider_offset_y)
 
 	var b: float = clampf(blend, 0.0, 1.0)
 	var idle_phase: float = TAU * idle_time / IDLE_BOB_PERIOD

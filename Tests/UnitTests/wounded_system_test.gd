@@ -361,11 +361,13 @@ func _test_member_list_item() -> void:
 	var item := PartyMemberItem.new()
 	add_child(item)
 	item.setup(unit, _militia)
-	var status_label := item.find_child("MemberStatus", true, false) as Label
-	_check(status_label != null and status_label.visible, "成员列表显示伤兵状态")
+	# 列表条目只保留头像、姓名、战斗经验与生命值；伤兵通过 0 生命值体现。
+	var hp_label := item.find_child("MemberHp", true, false) as Label
+	_check(hp_label != null and hp_label.text.contains("0 / 50"), "伤兵列表项显示当前生命值")
+	var exp_label := item.find_child("MemberCombatExperience", true, false) as Label
 	_check(
-		status_label != null and status_label.text.contains("伤兵"),
-		"伤兵状态文案可识别"
+		exp_label != null and exp_label.text == "战斗经验：新兵",
+		"成员列表显示战斗经验文本等级"
 	)
 	item.queue_free()
 

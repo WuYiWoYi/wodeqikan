@@ -4,6 +4,10 @@ extends Node2D
 ## 只读取 WorldContext 的权威数据并生成表现节点；
 ## 移动、时间、存档操作全部通过管理器/GameManager 接口完成。
 
+const TextureRegion = preload("res://Scripts/Core/World/texture_region_utils.gd")
+const MoveTargetGuideScript = preload("res://Scripts/Systems/WorldMap/move_target_guide.gd")
+const EventCenterPanelScript = preload("res://Scripts/UI/WorldMap/event_center_panel.gd")
+
 const PARTY_INTERACTION_RADIUS: float = 40.0
 const PARTY_INTERACTION_EXIT_RADIUS: float = 64.0
 ## 点击部队图标的判定半径（世界像素）。
@@ -59,6 +63,8 @@ enum CameraMode {
 var _context: WorldContext = null
 var _player_party: PartyData = null
 var _player_icon: PartyIcon = null
+## 移动目标点标记与动态虚线；只表现 PartyData.target_position，不参与移动结算。
+var _move_target_guide: MoveTargetGuideScript = null
 var _camera_mode: CameraMode = CameraMode.FOLLOW_PLAYER
 var _last_player_position := Vector2.ZERO
 var _settlement_latch_id: String = ""
@@ -67,13 +73,28 @@ var _pending_settlement_interaction_id: String = ""
 
 var _ui_root: Control = null
 var _world_time_label: Label = null
+var _money_label: Label = null
+var _party_speed_label: Label = null
 var _player_info_label: Label = null
 var _pause_button: Button = null
 var _speed_one_button: Button = null
 var _speed_two_button: Button = null
 var _time_buttons: Array[Button] = []
 
+## 顶部信息栏的自定义悬浮提示；Alt 按住时展示完整构成。
+var _top_info_tooltip: PanelContainer = null
+var _top_info_content: VBoxContainer = null
+var _top_info_hover_kind: String = ""
+var _top_info_signature: String = ""
+
+## 主界面事件中心：只读聚合任务/待处理事项。
+var _event_center_panel = null
+var _event_center_pause_active: bool = false
+
 var _settlement_panel: PanelContainer = null
+## 地点面板内部的两种内容视图：城镇信息与酒馆内容在同一窗口内切换。
+var _settlement_info_view: VBoxContainer = null
+var _settlement_tavern_host: Control = null
 var _settlement_name_label: Label = null
 var _settlement_type_label: Label = null
 var _settlement_owner_label: Label = null
@@ -194,9 +215,10 @@ var _encyclopedia_subtitle: Label = null
 var _encyclopedia_list: VBoxContainer = null
 var _encyclopedia_back_button: Button = null
 var _encyclopedia_pause_active: bool = false
-var _encyclopedia_view: String = "kingdoms"
+var _encyclopedia_view: String = "home"
 var _encyclopedia_kingdom_id: String = ""
 var _encyclopedia_house_id: String = ""
+var _encyclopedia_settlement_id: String = ""
 var _encyclopedia_history: Array[Dictionary] = []
 var _encyclopedia_signature: String = ""
 
@@ -224,6 +246,7 @@ func _ready() -> void:
 
 	_build_ui()
 	_build_world_entities()
+	_build_move_target_guide()
 	_build_settlement_name_tags()
 	_connect_time_signals()
 	if not EventBus.battle_started.is_connected(_on_battle_started):
@@ -285,6 +308,9 @@ func _exit_tree() -> void:
 	if _inventory_pause_active:
 		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
 		_inventory_pause_active = false
+	if _event_center_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_event_center_pause_active = false
 	if _context != null:
 		_context.encounter_manager.clear_pending_player_encounter()
 		_context.encounter_manager.clear_pending_battle_interaction()
@@ -296,10 +322,12 @@ func _process(delta: float) -> void:
 		return
 
 	_update_camera(delta)
+	_update_move_target_guide()
 	_update_settlement_name_tags()
 	# 先计算停留部队，再更新战斗/图标显示，保证同一支部队不会同时出现在两处。
 	_update_stationed_parties()
 	_update_player_info()
+	_update_top_info()
 	_update_battle_display()
 	_update_focus_state()
 	_validate_battle_interaction()
@@ -307,6 +335,7 @@ func _process(delta: float) -> void:
 	_check_party_interaction()
 	_update_party_hover()
 	_refresh_encyclopedia_if_needed()
+	_refresh_event_center_if_needed()
 	_last_player_position = _player_party.world_position
 
 
@@ -598,6 +627,51 @@ func _build_world_entities() -> void:
 	world_entities.y_sort_enabled = true
 
 
+## 目标标记与虚线独立于 y 排序的部队/地点层，始终绘制在地图内容之上。
+func _build_move_target_guide() -> void:
+	_move_target_guide = MoveTargetGuideScript.new()
+	_move_target_guide.name = "MoveTargetGuide"
+	_move_target_guide.z_index = 20
+	add_child(_move_target_guide)
+
+
+## 只读取玩家现有移动状态，不新增第二套移动目标数据。
+## MOVING 时显示；抵达（IDLE）、停止、战斗切换或部队不可用时清除。
+func _update_move_target_guide() -> void:
+	if _move_target_guide == null:
+		return
+	if _context == null or _player_party == null \
+			or _battle_transition_started \
+			or _player_party.movement_state != PartyData.MovementState.MOVING \
+			or not _player_party.is_available_for_world():
+		_move_target_guide.clear()
+		return
+	var start: Vector2 = _player_party.world_position
+	# 连线起点贴合实际显示的部队图标，避免图标插值滞后造成脱节。
+	if _player_icon != null and is_instance_valid(_player_icon):
+		start = _player_icon.position
+	_move_target_guide.set_guide(
+		start, _resolve_move_guide_target(), camera.zoom.x
+	)
+
+
+## 普通移动直接使用 target_position；跟随部队时终点取目标的最新位置。
+func _resolve_move_guide_target() -> Vector2:
+	if _player_party.current_order == PartyData.OrderType.FOLLOW_PARTY \
+			and not _player_party.current_target_id.is_empty():
+		var focus := _context.party_manager.get_party(
+			_player_party.current_target_id
+		)
+		if focus != null:
+			return focus.world_position
+	return _player_party.target_position
+
+
+## 供自动化测试读取目标标记表现节点；正常运行时不使用。
+func get_move_target_guide() -> MoveTargetGuideScript:
+	return _move_target_guide
+
+
 func _get_family_config(family_id: String) -> FamilyConfig:
 	if _context == null or family_id.is_empty():
 		return null
@@ -836,9 +910,12 @@ func _build_ui() -> void:
 	_build_inventory_panel()
 	_build_save_panel()
 	_build_encyclopedia_panel()
+	_build_event_center_panel()
 	# 市场是覆盖层，最后加入以保证显示在地点/背包面板之上。
 	_build_market_panel()
 	_build_tavern_panel()
+	# 顶部悬浮提示必须位于所有面板之上，避免被覆盖层遮住。
+	_build_top_info_tooltip()
 
 
 func _build_top_bar() -> void:
@@ -855,61 +932,159 @@ func _build_top_bar() -> void:
 	margin.add_theme_constant_override("margin_bottom", 6)
 	top_bar.add_child(margin)
 
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 8)
-	margin.add_child(row)
+	# 左/中/右三个独立锚定区：时间始终位于屏幕水平中心，
+	# 不会被左右新增的金币、移速或功能按钮推离中心。
+	var content := Control.new()
+	content.name = "TopBarContent"
+	content.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_child(content)
+
+	var left := HBoxContainer.new()
+	left.name = "TopBarLeft"
+	left.anchor_bottom = 1.0
+	left.offset_right = 300.0
+	left.alignment = BoxContainer.ALIGNMENT_BEGIN
+	left.add_theme_constant_override("separation", 12)
+	left.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	content.add_child(left)
+
+	_money_label = _make_top_info_label("金币：0", "MoneyLabel")
+	left.add_child(_money_label)
+
+	_party_speed_label = _make_top_info_label("部队移速：0.0", "PartySpeedLabel")
+	left.add_child(_party_speed_label)
+
+	var center := HBoxContainer.new()
+	center.name = "TopBarCenter"
+	center.anchor_left = 0.5
+	center.anchor_right = 0.5
+	center.anchor_bottom = 1.0
+	center.offset_left = -260.0
+	center.offset_right = 260.0
+	center.alignment = BoxContainer.ALIGNMENT_CENTER
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	content.add_child(center)
 
 	_world_time_label = _make_label("世界时间", 15)
-	_world_time_label.custom_minimum_size = Vector2(400.0, 0.0)
-	row.add_child(_world_time_label)
+	_world_time_label.name = "WorldTimeLabel"
+	_world_time_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	center.add_child(_world_time_label)
 
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(spacer)
+	var right := HBoxContainer.new()
+	right.name = "TopBarRight"
+	right.anchor_left = 1.0
+	right.anchor_right = 1.0
+	right.anchor_bottom = 1.0
+	right.offset_left = -512.0
+	right.alignment = BoxContainer.ALIGNMENT_END
+	right.add_theme_constant_override("separation", 4)
+	content.add_child(right)
 
-	_pause_button = _make_button("暂停", "PauseButton")
+	_pause_button = _make_top_bar_button("暂停", "PauseButton")
 	_pause_button.tooltip_text = "暂停（快捷键 1）"
 	_pause_button.toggle_mode = true
 	_pause_button.pressed.connect(_on_pause_pressed)
-	row.add_child(_pause_button)
+	right.add_child(_pause_button)
 	_time_buttons.append(_pause_button)
 
-	_speed_one_button = _make_button("1x", "SpeedOneButton")
+	_speed_one_button = _make_top_bar_button("1x", "SpeedOneButton")
 	_speed_one_button.tooltip_text = "1 倍速（快捷键 2）"
 	_speed_one_button.toggle_mode = true
 	_speed_one_button.pressed.connect(_on_speed_one_pressed)
-	row.add_child(_speed_one_button)
+	right.add_child(_speed_one_button)
 	_time_buttons.append(_speed_one_button)
 
-	_speed_two_button = _make_button("2x", "SpeedTwoButton")
+	_speed_two_button = _make_top_bar_button("2x", "SpeedTwoButton")
 	_speed_two_button.tooltip_text = "2 倍速（快捷键 3）"
 	_speed_two_button.toggle_mode = true
 	_speed_two_button.pressed.connect(_on_speed_two_pressed)
-	row.add_child(_speed_two_button)
+	right.add_child(_speed_two_button)
 	_time_buttons.append(_speed_two_button)
 
-	var party_button := _make_button("部队", "PartyButton")
+	var event_button := _make_top_bar_button("事件", "EventCenterButton")
+	event_button.tooltip_text = "查看已接取任务与待处理事项"
+	event_button.pressed.connect(_on_event_center_pressed)
+	right.add_child(event_button)
+
+	var party_button := _make_top_bar_button("部队", "PartyButton")
 	party_button.tooltip_text = "查看玩家部队与士兵详情"
 	party_button.pressed.connect(_on_party_manage_pressed)
-	row.add_child(party_button)
+	right.add_child(party_button)
 
-	var inventory_button := _make_button("背包", "InventoryButton")
+	var inventory_button := _make_top_bar_button("背包", "InventoryButton")
 	inventory_button.tooltip_text = "查看玩家金币与持有物品"
 	inventory_button.pressed.connect(_on_inventory_pressed)
-	row.add_child(inventory_button)
+	right.add_child(inventory_button)
 
-	var encyclopedia_button := _make_button("百科", "EncyclopediaButton")
-	encyclopedia_button.tooltip_text = "查看王国、家族、贵族与封地"
+	var encyclopedia_button := _make_top_bar_button("百科", "EncyclopediaButton")
+	encyclopedia_button.tooltip_text = "查看王国、家族、地点与敌对势力"
 	encyclopedia_button.pressed.connect(_on_encyclopedia_pressed)
-	row.add_child(encyclopedia_button)
+	right.add_child(encyclopedia_button)
 
-	var save_button := _make_button("保存", "SaveButton")
+	var save_button := _make_top_bar_button("保存", "SaveButton")
 	save_button.pressed.connect(_on_save_pressed)
-	row.add_child(save_button)
+	right.add_child(save_button)
 
-	var menu_button := _make_button("主菜单", "MainMenuButton")
+	var menu_button := _make_top_bar_button("主菜单", "MainMenuButton")
 	menu_button.pressed.connect(_on_main_menu_pressed)
-	row.add_child(menu_button)
+	right.add_child(menu_button)
+
+
+# ---------------------------------------------------------------------------
+# 主界面事件中心
+# ---------------------------------------------------------------------------
+
+
+func _build_event_center_panel() -> void:
+	_event_center_panel = EventCenterPanelScript.new()
+	_event_center_panel.name = "EventCenterOverlay"
+	_event_center_panel.visible = false
+	_event_center_panel.closed.connect(_on_event_center_closed)
+	_ui_root.add_child(_event_center_panel)
+	_event_center_panel.setup(_context)
+
+
+func open_event_center() -> bool:
+	if _context == null or _event_center_panel == null:
+		return false
+	if _event_center_panel.visible or _battle_transition_started:
+		return false
+	# 建筑信息面板打开时仍允许查看事件；时间控制保持禁用。
+	if _has_open_modal(true):
+		return false
+	if not _event_center_pause_active:
+		TimeManager.push_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_event_center_pause_active = true
+	_event_center_panel.open()
+	_set_time_buttons_enabled(false)
+	_update_time_ui()
+	return true
+
+
+func close_event_center() -> void:
+	if _event_center_panel != null and _event_center_panel.visible:
+		_event_center_panel.close()
+
+
+func _on_event_center_pressed() -> void:
+	open_event_center()
+
+
+func _on_event_center_closed() -> void:
+	if _event_center_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_event_center_pause_active = false
+	_refresh_time_buttons()
+	_update_time_ui()
+
+
+func _refresh_event_center_if_needed() -> void:
+	if _event_center_panel != null and _event_center_panel.visible:
+		_event_center_panel.refresh_if_needed()
+
+
+func get_event_center_panel():
+	return _event_center_panel
 
 
 func _build_bottom_bar() -> void:
@@ -952,8 +1127,18 @@ func _build_settlement_panel() -> void:
 	_settlement_panel.add_child(margin)
 
 	var column := VBoxContainer.new()
+	column.name = "SettlementInfoView"
 	column.add_theme_constant_override("separation", 10)
 	margin.add_child(column)
+	_settlement_info_view = column
+
+	# 酒馆内容与城镇信息共用同一个 PanelContainer；切换时只改可见性，
+	# 不改变窗口位置、尺寸，也不创建第二个弹窗。
+	_settlement_tavern_host = Control.new()
+	_settlement_tavern_host.name = "SettlementTavernHost"
+	_settlement_tavern_host.visible = false
+	_settlement_tavern_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_child(_settlement_tavern_host)
 
 	_settlement_name_label = _make_label("", 24)
 	_settlement_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -1331,10 +1516,7 @@ func _on_player_encounter_requested(
 	if _context.battle_manager.get_battle_for_party(_context.player_party_id) != null:
 		_context.encounter_manager.clear_pending_player_encounter()
 		return
-	if _save_panel.visible or _settlement_panel.visible \
-			or _party_panel.visible or _party_manage_panel.visible \
-			or _battle_interaction_panel.visible \
-			or (_encyclopedia_panel != null and _encyclopedia_panel.visible):
+	if _has_open_modal(false):
 		_context.encounter_manager.clear_pending_player_encounter()
 		return
 
@@ -1390,7 +1572,7 @@ func cancel_player_encounter() -> void:
 		_context.encounter_manager.clear_pending_player_encounter()
 	_encounter_id = ""
 	_encounter_leave_allowed = true
-	_set_time_buttons_enabled(true)
+	_refresh_time_buttons()
 	_update_time_ui()
 
 
@@ -1460,7 +1642,7 @@ func _on_encounter_leave_pressed() -> void:
 		TimeManager.pop_pause(GameManager.PAUSE_REASON_ENCOUNTER_DIALOGUE)
 		_encounter_pause_active = false
 	_context.encounter_manager.decline_player_encounter(attacker_id)
-	_set_time_buttons_enabled(true)
+	_refresh_time_buttons()
 	_update_time_ui()
 
 
@@ -1515,7 +1697,8 @@ func open_party_panel() -> bool:
 		return false
 	if _party_manage_panel.visible:
 		return false
-	if _save_panel.visible or _settlement_panel.visible or _party_panel.visible:
+	# 地点面板打开时仍允许查看部队；世界时间控制仍由独立权限关闭。
+	if _has_open_modal(true):
 		return false
 	if not _player_party.is_available_for_world():
 		push_warning("当前部队状态不可用，无法打开部队面板")
@@ -1543,7 +1726,7 @@ func _on_party_manage_closed() -> void:
 	if _party_manage_pause_active:
 		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
 		_party_manage_pause_active = false
-	_set_time_buttons_enabled(true)
+	_refresh_time_buttons()
 	_update_time_ui()
 
 
@@ -1567,7 +1750,8 @@ func open_inventory() -> bool:
 		return false
 	if _inventory_panel.visible or _battle_transition_started:
 		return false
-	if _is_input_blocked():
+	# 地点面板打开时仍允许打开背包；只有其他覆盖层会互相阻塞。
+	if _has_open_modal(true):
 		return false
 	TimeManager.push_pause(GameManager.PAUSE_REASON_UI_PANEL)
 	_inventory_pause_active = true
@@ -1590,7 +1774,7 @@ func _on_inventory_closed() -> void:
 	if _inventory_pause_active:
 		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
 		_inventory_pause_active = false
-	_set_time_buttons_enabled(true)
+	_refresh_time_buttons()
 	_update_time_ui()
 
 
@@ -1619,12 +1803,15 @@ func get_market_panel() -> MarketPanel:
 
 
 func _build_tavern_panel() -> void:
+	if _settlement_tavern_host == null:
+		return
 	_tavern_panel = TavernPanel.new()
 	_tavern_panel.name = "TavernPanel"
 	_tavern_panel.visible = false
 	_tavern_panel.closed.connect(_on_tavern_closed)
-	_ui_root.add_child(_tavern_panel)
-	_tavern_panel.setup(_context)
+	_settlement_tavern_host.add_child(_tavern_panel)
+	# 嵌入城镇信息面板；不创建遮罩或独立二级窗口。
+	_tavern_panel.setup(_context, true)
 
 
 func get_tavern_panel() -> TavernPanel:
@@ -1641,14 +1828,13 @@ func _on_settlement_tavern_pressed() -> void:
 		return
 	if not _tavern_panel.open(settlement):
 		return
-	# 酒馆覆盖地点面板，沿用 ui_panel 暂停原因；关闭后恢复地点面板。
-	_settlement_panel.visible = false
-	if not _settlement_pause_active:
-		TimeManager.push_pause(GameManager.PAUSE_REASON_UI_PANEL)
-		_settlement_pause_active = true
+	# 同一地点面板内切换内容：保留原窗口位置/尺寸与 ui_panel 暂停原因。
+	_settlement_info_view.visible = false
+	_settlement_tavern_host.visible = true
+	_tavern_panel.visible = true
 
 
-## 离开酒馆：恢复城镇信息面板，世界保持暂停。
+## 离开酒馆：原面板直接切回城镇信息，世界保持暂停。
 func _on_tavern_closed() -> void:
 	if _inventory_panel != null:
 		_inventory_panel.refresh()
@@ -1657,16 +1843,16 @@ func _on_tavern_closed() -> void:
 	var settlement := _context.settlement_manager.get_settlement(
 		_settlement_latch_id
 	)
+	_show_settlement_info_view()
 	if settlement != null:
-		_settlement_panel.visible = true
 		_refresh_settlement_info(settlement)
-		return
-	_settlement_panel.visible = false
-	if _settlement_pause_active:
-		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
-		_settlement_pause_active = false
-	_set_time_buttons_enabled(true)
-	_update_time_ui()
+
+
+func _show_settlement_info_view() -> void:
+	if _settlement_tavern_host != null:
+		_settlement_tavern_host.visible = false
+	if _settlement_info_view != null:
+		_settlement_info_view.visible = true
 
 
 func _on_settlement_market_pressed() -> void:
@@ -1710,7 +1896,7 @@ func _on_market_closed() -> void:
 	if _settlement_pause_active:
 		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
 		_settlement_pause_active = false
-	_set_time_buttons_enabled(true)
+	_refresh_time_buttons()
 	_update_time_ui()
 
 
@@ -1853,6 +2039,9 @@ func set_alt_detail_active(active: bool) -> void:
 	if _alt_detail_active == active:
 		return
 	_alt_detail_active = active
+	# 顶部金钱/移速悬浮提示与部队图标悬浮共用同一个 Alt 状态。
+	if not _top_info_hover_kind.is_empty():
+		_refresh_top_info_tooltip()
 	if _hover_party_id.is_empty() or _context == null:
 		return
 	var party := _context.party_manager.get_party(_hover_party_id)
@@ -2638,15 +2827,13 @@ func _build_encyclopedia_panel() -> void:
 func _on_encyclopedia_pressed() -> void:
 	if _encyclopedia_panel == null or _encyclopedia_panel.visible:
 		return
-	if _settlement_panel.visible or _party_panel.visible \
-			or (_party_manage_panel != null and _party_manage_panel.visible) \
-			or (_encounter_panel != null and _encounter_panel.visible) \
-			or (_battle_interaction_panel != null and _battle_interaction_panel.visible) \
-			or (_save_panel != null and _save_panel.visible):
+	# 建筑信息面板打开时仍可查看百科；其他覆盖层会互相阻塞。
+	if _has_open_modal(true):
 		return
-	_encyclopedia_view = "kingdoms"
+	_encyclopedia_view = "home"
 	_encyclopedia_kingdom_id = ""
 	_encyclopedia_house_id = ""
+	_encyclopedia_settlement_id = ""
 	_encyclopedia_history.clear()
 	_encyclopedia_signature = ""
 	_encyclopedia_panel.visible = true
@@ -2667,33 +2854,46 @@ func _on_close_encyclopedia_pressed() -> void:
 	if _encyclopedia_pause_active:
 		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
 		_encyclopedia_pause_active = false
-	_set_time_buttons_enabled(true)
+	_refresh_time_buttons()
 	_update_time_ui()
 
 
 func _on_encyclopedia_back_pressed() -> void:
 	if _encyclopedia_history.is_empty():
-		_encyclopedia_view = "kingdoms"
+		_encyclopedia_view = "home"
 		_encyclopedia_kingdom_id = ""
 		_encyclopedia_house_id = ""
+		_encyclopedia_settlement_id = ""
 	else:
 		var previous: Dictionary = _encyclopedia_history.pop_back()
-		_encyclopedia_view = str(previous.get("view", "kingdoms"))
+		_encyclopedia_view = str(previous.get("view", "home"))
 		_encyclopedia_kingdom_id = str(previous.get("kingdom_id", ""))
 		_encyclopedia_house_id = str(previous.get("house_id", ""))
+		_encyclopedia_settlement_id = str(previous.get("settlement_id", ""))
 	_refresh_encyclopedia(true)
 
 
-func _navigate_encyclopedia(view: String, kingdom_id: String = "", house_id: String = "") -> void:
+func _navigate_encyclopedia(
+	view: String,
+	kingdom_id: String = "",
+	house_id: String = "",
+	settlement_id: String = ""
+) -> void:
 	_encyclopedia_history.append({
 		"view": _encyclopedia_view,
 		"kingdom_id": _encyclopedia_kingdom_id,
 		"house_id": _encyclopedia_house_id,
+		"settlement_id": _encyclopedia_settlement_id,
 	})
 	_encyclopedia_view = view
 	_encyclopedia_kingdom_id = kingdom_id
 	_encyclopedia_house_id = house_id
+	_encyclopedia_settlement_id = settlement_id
 	_refresh_encyclopedia(true)
+
+
+func _on_encyclopedia_category_pressed(view: String) -> void:
+	_navigate_encyclopedia(view)
 
 
 func _on_encyclopedia_kingdom_pressed(kingdom_id: String) -> void:
@@ -2701,7 +2901,11 @@ func _on_encyclopedia_kingdom_pressed(kingdom_id: String) -> void:
 
 
 func _on_encyclopedia_house_pressed(house_id: String) -> void:
-	_navigate_encyclopedia("house", _encyclopedia_kingdom_id, house_id)
+	_navigate_encyclopedia("house", "", house_id)
+
+
+func _on_encyclopedia_settlement_pressed(settlement_id: String) -> void:
+	_navigate_encyclopedia("settlement", "", "", settlement_id)
 
 
 func _refresh_encyclopedia_if_needed() -> void:
@@ -2728,86 +2932,98 @@ func _refresh_encyclopedia(force: bool) -> void:
 			_build_encyclopedia_kingdom(_encyclopedia_kingdom_id)
 		"house":
 			_build_encyclopedia_house(_encyclopedia_house_id)
+		"settlement":
+			_build_encyclopedia_settlement(_encyclopedia_settlement_id)
+		"kingdoms":
+			_build_encyclopedia_kingdom_list()
+		"houses":
+			_build_encyclopedia_house_list()
+		"locations":
+			_build_encyclopedia_location_list()
 		_:
-			_build_encyclopedia_kingdoms()
+			_build_encyclopedia_home()
 
 
 func _build_encyclopedia_signature() -> String:
-	var parts: PackedStringArray = [
-		_encyclopedia_view, _encyclopedia_kingdom_id, _encyclopedia_house_id
+	var parts: Array[String] = [
+		_encyclopedia_view, _encyclopedia_kingdom_id,
+		_encyclopedia_house_id, _encyclopedia_settlement_id,
 	]
-	match _encyclopedia_view:
-		"kingdom":
-			var kingdom := _context.kingdom_manager.get_kingdom(_encyclopedia_kingdom_id)
-			if kingdom != null:
-				parts.append("%s;%s;%s;%s" % [
-					kingdom.kingdom_id, kingdom.kingdom_name,
-					kingdom.ruling_house_id, kingdom.king_noble_id
-				])
-				for enemy_id: String in kingdom.enemy_kingdom_ids:
-					parts.append("enemy:%s" % enemy_id)
-				for house: HouseData in _context.kingdom_manager.get_all_houses_of_kingdom(
-					kingdom.kingdom_id
-				):
-					parts.append("house:%s;%s;%s" % [
-						house.house_id, house.leader_noble_id,
-						house.kingdom_id
-					])
-					for noble: NobleData in _context.house_manager.get_house_nobles(
-						house.house_id, true
-					):
-						parts.append("noble:%s;%s;%s;%s" % [
-							noble.lord_id, noble.display_name,
-							str(noble.alive), str(noble.rank)
-						])
-					for settlement: SettlementData in _context.house_manager.get_house_settlements(
-						house.house_id
-					):
-						parts.append("settlement:%s;%s" % [
-							settlement.settlement_id, settlement.owner_noble_id
-						])
-		"house":
-			var house := _context.house_manager.get_house(_encyclopedia_house_id)
-			if house != null:
-				parts.append("%s;%s;%s;%s" % [
-					house.house_id, house.house_name,
-					house.leader_noble_id, house.kingdom_id
-				])
-				for noble: NobleData in _context.house_manager.get_house_nobles(
-					house.house_id, true
-				):
-					parts.append("noble:%s;%s;%s;%s;%s" % [
-						noble.lord_id, noble.display_name, str(noble.alive),
-						str(noble.rank), noble.party_id
-					])
-				for settlement: SettlementData in _context.house_manager.get_house_settlements(
-					house.house_id
-				):
-					parts.append("settlement:%s;%s" % [
-						settlement.settlement_id, settlement.owner_noble_id
-					])
-		_:
-			for kingdom: KingdomData in _context.kingdom_manager.get_all_kingdoms():
-				parts.append("%s;%s;%s;%s;%d;%d;%s" % [
-					kingdom.kingdom_id, kingdom.kingdom_name,
-					kingdom.ruling_house_id, kingdom.king_noble_id,
-					kingdom.vassal_house_ids.size(),
-					_context.kingdom_manager.get_kingdom_settlements(
-						kingdom.kingdom_id
-					).size(),
-					",".join(PackedStringArray(kingdom.enemy_kingdom_ids))
-				])
-			for house: HouseData in _context.house_manager.get_all_houses():
-				if house.kingdom_id.is_empty():
-					parts.append("independent:%s;%s" % [
-						house.house_id, house.leader_noble_id
-					])
-	return "|".join(parts)
+	for kingdom: KingdomData in _context.kingdom_manager.get_all_kingdoms():
+		parts.append("kingdom:%s;%s;%s;%s;%s" % [
+			kingdom.kingdom_id, kingdom.kingdom_name,
+			kingdom.ruling_house_id, kingdom.king_noble_id,
+			",".join(PackedStringArray(kingdom.enemy_kingdom_ids)),
+		])
+	for house: HouseData in _context.house_manager.get_all_houses():
+		parts.append("house:%s;%s;%s;%s;%s" % [
+			house.house_id, house.house_name,
+			house.leader_noble_id, house.kingdom_id, house.banner_id,
+		])
+		for noble: NobleData in _context.house_manager.get_house_nobles(
+			house.house_id, true
+		):
+			parts.append("noble:%s;%s;%s;%s;%s" % [
+				noble.lord_id, noble.display_name, str(noble.alive),
+				str(noble.rank), noble.party_id,
+			])
+		for settlement: SettlementData in _context.house_manager.get_house_settlements(
+			house.house_id
+		):
+			parts.append("house_settlement:%s;%s" % [
+				settlement.settlement_id, settlement.owner_noble_id
+			])
+	for settlement: SettlementData in _context.settlement_manager.get_all_settlements():
+		parts.append("settlement:%s;%s;%d;%s;%s;%s;%d;%d;%d;%d" % [
+			settlement.settlement_id, settlement.display_name,
+			int(settlement.settlement_type), settlement.owner_noble_id,
+			settlement.owner_house_id, settlement.family_id,
+			settlement.population, settlement.prosperity,
+			settlement.tax_income_per_day, settlement.fief_recruitment_stock,
+		])
+	return "|".join(PackedStringArray(parts))
 
 
-func _build_encyclopedia_kingdoms() -> void:
+# ---------------------------------------------------------------------------
+# 百科一级分类
+# ---------------------------------------------------------------------------
+
+
+func _build_encyclopedia_home() -> void:
+	_encyclopedia_title.text = "百科"
+	_encyclopedia_subtitle.text = "一级：选择王国、家族或地点分类，再查看对应条目。"
+	_add_encyclopedia_label("一级分类", 18)
+	_add_encyclopedia_category_button(
+		"王国（%d）" % _context.kingdom_manager.get_all_kingdoms().size(),
+		"EncyclopediaCategory_Kingdoms",
+		"kingdoms"
+	)
+	_add_encyclopedia_category_button(
+		"家族（%d）" % _context.house_manager.get_all_houses().size(),
+		"EncyclopediaCategory_Houses",
+		"houses"
+	)
+	_add_encyclopedia_category_button(
+		"地点（%d）" % _context.settlement_manager.get_all_settlements().size(),
+		"EncyclopediaCategory_Locations",
+		"locations"
+	)
+
+
+func _add_encyclopedia_category_button(
+	text: String, node_name: String, view: String
+) -> void:
+	var button := _make_button(text, node_name)
+	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	button.custom_minimum_size = Vector2(0.0, 48.0)
+	button.add_theme_font_size_override("font_size", 17)
+	button.pressed.connect(_on_encyclopedia_category_pressed.bind(view))
+	_encyclopedia_list.add_child(button)
+
+
+func _build_encyclopedia_kingdom_list() -> void:
 	_encyclopedia_title.text = "百科 · 王国"
-	_encyclopedia_subtitle.text = "一级：王国列表。点击王国查看统治家族、附庸与封地。"
+	_encyclopedia_subtitle.text = "一级分类：王国条目。点击王国查看详情。"
 	var kingdoms := _context.kingdom_manager.get_all_kingdoms()
 	if kingdoms.is_empty():
 		_add_encyclopedia_label("世界上尚未建立王国。", 14)
@@ -2833,14 +3049,60 @@ func _build_encyclopedia_kingdoms() -> void:
 		button.pressed.connect(_on_encyclopedia_kingdom_pressed.bind(kingdom.kingdom_id))
 		_encyclopedia_list.add_child(button)
 
-	var independents: Array[HouseData] = []
-	for house: HouseData in _context.house_manager.get_all_houses():
-		if house.kingdom_id.is_empty():
-			independents.append(house)
-	if not independents.is_empty():
-		_add_encyclopedia_label("独立家族", 18)
-		for house: HouseData in independents:
-			_add_encyclopedia_house_row(house, "独立家族 · 对玩家：%s" % _encyclopedia_house_relation(house.house_id))
+
+func _build_encyclopedia_house_list() -> void:
+	_encyclopedia_title.text = "百科 · 家族"
+	_encyclopedia_subtitle.text = "一级分类：家族条目。点击家族查看详情。"
+	var houses: Array[HouseData] = _context.house_manager.get_all_houses()
+	houses.sort_custom(func(a: HouseData, b: HouseData) -> bool:
+		if a.house_name == b.house_name:
+			return a.house_id < b.house_id
+		return a.house_name < b.house_name
+	)
+	if houses.is_empty():
+		_add_encyclopedia_label("世界上尚未建立家族。", 14)
+	for house: HouseData in houses:
+		var kingdom := _context.kingdom_manager.get_kingdom_for_house(house.house_id)
+		var suffix: String = (
+			"所属王国：%s" % kingdom.kingdom_name if kingdom != null else "独立家族"
+		)
+		_add_encyclopedia_house_row(
+			house, "%s · 对玩家：%s" % [suffix, _encyclopedia_house_relation(house.house_id)]
+		)
+
+
+func _build_encyclopedia_location_list() -> void:
+	_encyclopedia_title.text = "百科 · 地点"
+	_encyclopedia_subtitle.text = "一级分类：地点条目。点击地点查看详情。"
+	var settlements: Array[SettlementData] = (
+		_context.settlement_manager.get_all_settlements()
+	)
+	settlements.sort_custom(func(a: SettlementData, b: SettlementData) -> bool:
+		if a.display_name == b.display_name:
+			return a.settlement_id < b.settlement_id
+		return a.display_name < b.display_name
+	)
+	if settlements.is_empty():
+		_add_encyclopedia_label("世界上尚未建立地点。", 14)
+	for settlement: SettlementData in settlements:
+		var button := _make_button(
+			"%s（%s）· %s" % [
+				settlement.display_name,
+				_settlement_type_text(settlement.settlement_type),
+				_encyclopedia_settlement_owner_text(settlement),
+			],
+			"EncyclopediaSettlement_%s" % settlement.settlement_id
+		)
+		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		button.pressed.connect(
+			_on_encyclopedia_settlement_pressed.bind(settlement.settlement_id)
+		)
+		_encyclopedia_list.add_child(button)
+
+
+# ---------------------------------------------------------------------------
+# 百科二级详情
+# ---------------------------------------------------------------------------
 
 
 func _build_encyclopedia_kingdom(kingdom_id: String) -> void:
@@ -2850,7 +3112,8 @@ func _build_encyclopedia_kingdom(kingdom_id: String) -> void:
 		_encyclopedia_subtitle.text = "王国数据已失效。"
 		return
 	_encyclopedia_title.text = "百科 · %s" % kingdom.kingdom_name
-	_encyclopedia_subtitle.text = "二级：统治家族、附庸家族与按家族分组的封地。%s" % _encyclopedia_war_text(kingdom)
+	_encyclopedia_subtitle.text = "二级：王国详情。统治家族、附庸、封地与敌对势力。%s" \
+		% _encyclopedia_war_text(kingdom)
 	var ruling := _context.kingdom_manager.get_ruling_house(kingdom_id)
 	var king := _context.kingdom_manager.get_king(kingdom_id)
 	if ruling != null:
@@ -2885,6 +3148,8 @@ func _build_encyclopedia_kingdom(kingdom_id: String) -> void:
 		for settlement: SettlementData in settlements:
 			_add_encyclopedia_label("  · " + _encyclopedia_settlement_text(settlement), 13)
 
+	_add_encyclopedia_hostility_section(kingdom_id, "")
+
 
 func _build_encyclopedia_house(house_id: String) -> void:
 	var house := _context.house_manager.get_house(house_id)
@@ -2894,7 +3159,7 @@ func _build_encyclopedia_house(house_id: String) -> void:
 		return
 	var kingdom := _context.kingdom_manager.get_kingdom_for_house(house.house_id)
 	_encyclopedia_title.text = "百科 · %s" % house.house_name
-	_encyclopedia_subtitle.text = "三级：家族详情。%s" % (
+	_encyclopedia_subtitle.text = "二级：家族详情。%s" % (
 		"所属王国：%s" % kingdom.kingdom_name if kingdom != null else "独立家族"
 	)
 
@@ -2922,6 +3187,95 @@ func _build_encyclopedia_house(house_id: String) -> void:
 		_add_encyclopedia_label("暂无封地。", 13)
 	for settlement: SettlementData in settlements:
 		_add_encyclopedia_label("· " + _encyclopedia_settlement_text(settlement), 13)
+
+	_add_encyclopedia_hostility_section("", house_id)
+
+
+func _build_encyclopedia_settlement(settlement_id: String) -> void:
+	var settlement := _context.settlement_manager.get_settlement(settlement_id)
+	if settlement == null:
+		_encyclopedia_title.text = "百科 · 地点"
+		_encyclopedia_subtitle.text = "地点数据已失效。"
+		return
+	_encyclopedia_title.text = "百科 · %s" % settlement.display_name
+	_encyclopedia_subtitle.text = "二级：地点详情。%s" \
+		% _settlement_type_text(settlement.settlement_type)
+	_add_encyclopedia_label("类型：%s" % _settlement_type_text(
+		settlement.settlement_type
+	), 15)
+	_add_encyclopedia_label("所有者：%s" % _encyclopedia_settlement_owner_text(
+		settlement
+	), 15)
+
+	var owner_house := _context.house_manager.get_house(settlement.owner_house_id) \
+		if not settlement.owner_house_id.is_empty() else null
+	if owner_house != null:
+		_add_encyclopedia_label("所属家族", 18)
+		_add_encyclopedia_house_row(owner_house, "地点所有者")
+		var kingdom := _context.kingdom_manager.get_kingdom_for_house(
+			owner_house.house_id
+		)
+		if kingdom != null:
+			_add_encyclopedia_label("所属王国", 18)
+			var kingdom_button := _make_button(
+				kingdom.kingdom_name,
+				"EncyclopediaKingdom_%s" % kingdom.kingdom_id
+			)
+			kingdom_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			kingdom_button.pressed.connect(
+				_on_encyclopedia_kingdom_pressed.bind(kingdom.kingdom_id)
+			)
+			_encyclopedia_list.add_child(kingdom_button)
+
+	_add_encyclopedia_label("地点数据", 18)
+	_add_encyclopedia_label("人口：%d" % settlement.population, 14)
+	_add_encyclopedia_label("繁荣度：%d" % settlement.prosperity, 14)
+	_add_encyclopedia_label("预计每日税收：%d" % settlement.tax_income_per_day, 14)
+	if settlement.settlement_type == SettlementData.SettlementType.VILLAGE:
+		_add_encyclopedia_label("采邑储备：%d / %d 组" % [
+			settlement.fief_recruitment_stock,
+			settlement.fief_recruitment_capacity,
+		], 14)
+	else:
+		_add_encyclopedia_label("采邑储备：不适用", 14)
+
+
+## 王国或家族详情的统一敌对势力区块。kingdom_id 与 house_id 二选一。
+func _add_encyclopedia_hostility_section(kingdom_id: String, house_id: String) -> void:
+	if _context.faction_manager == null:
+		return
+	_add_encyclopedia_label("敌对势力", 18)
+	var enemy_kingdoms: Array[KingdomData] = []
+	var enemy_houses: Array[HouseData] = []
+	if not kingdom_id.is_empty():
+		enemy_kingdoms = _context.kingdom_manager.get_enemy_kingdoms(kingdom_id)
+		enemy_houses = _context.faction_manager.get_hostile_independent_houses_for_kingdom(
+			kingdom_id
+		)
+	else:
+		enemy_kingdoms = _context.faction_manager.get_hostile_kingdoms_for_house(house_id)
+		enemy_houses = _context.faction_manager.get_hostile_independent_houses_for_house(
+			house_id
+		)
+
+	_add_encyclopedia_label("敌对王国（%d）" % enemy_kingdoms.size(), 15)
+	if enemy_kingdoms.is_empty():
+		_add_encyclopedia_label("没有敌对王国。", 13)
+	for enemy: KingdomData in enemy_kingdoms:
+		var button := _make_button(
+			enemy.kingdom_name, "EncyclopediaEnemyKingdom_%s" % enemy.kingdom_id
+		)
+		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		button.pressed.connect(
+			_on_encyclopedia_kingdom_pressed.bind(enemy.kingdom_id)
+		)
+		_encyclopedia_list.add_child(button)
+
+	_add_encyclopedia_label("敌对独立家族（%d）" % enemy_houses.size(), 15)
+	if enemy_houses.is_empty():
+		_add_encyclopedia_label("没有敌对独立家族。", 13)
+	for house: HouseData in enemy_houses:
+		_add_encyclopedia_house_row(house, "敌对独立家族")
 
 
 func _add_encyclopedia_label(text: String, font_size: int) -> Label:
@@ -2958,7 +3312,9 @@ func _make_house_badge(house: HouseData) -> Control:
 	if family != null and not family.banner_texture_path.is_empty() \
 			and ResourceLoader.exists(family.banner_texture_path):
 		var texture_rect := TextureRect.new()
-		texture_rect.texture = load(family.banner_texture_path) as Texture2D
+		texture_rect.texture = TextureRegion.get_trimmed_texture(
+			load(family.banner_texture_path) as Texture2D
+		)
 		texture_rect.custom_minimum_size = Vector2(30.0, 30.0)
 		texture_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		texture_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
@@ -2994,13 +3350,33 @@ func _encyclopedia_noble_text(noble: NobleData) -> String:
 
 
 func _encyclopedia_settlement_text(settlement: SettlementData) -> String:
-	var owner := _context.noble_manager.get_noble(settlement.owner_noble_id) \
-		if _context.noble_manager != null else null
 	return "%s（%s）· 所有者：%s" % [
 		settlement.display_name,
 		_settlement_type_text(settlement.settlement_type),
-		owner.display_name if owner != null else "无",
+		_encyclopedia_settlement_owner_text(settlement),
 	]
+
+
+## 地点所有者显示名：优先个人贵族，其次家族，最后视觉家族配置。
+func _encyclopedia_settlement_owner_text(settlement: SettlementData) -> String:
+	if settlement == null:
+		return "无主"
+	if not settlement.owner_noble_id.is_empty() \
+			and _context.noble_manager != null:
+		var owner := _context.noble_manager.get_noble(settlement.owner_noble_id)
+		if owner != null:
+			return owner.display_name
+	if not settlement.owner_house_id.is_empty() \
+			and _context.house_manager != null:
+		var house := _context.house_manager.get_house(settlement.owner_house_id)
+		if house != null:
+			return house.house_name
+	if not settlement.family_id.is_empty() \
+			and _context.family_registry != null:
+		var family := _context.family_registry.get_config(settlement.family_id)
+		if family != null:
+			return family.display_name
+	return "无主"
 
 
 func _encyclopedia_house_relation(house_id: String) -> String:
@@ -3034,6 +3410,9 @@ func _connect_time_signals() -> void:
 		TimeManager.world_speed_changed.connect(_on_world_speed_changed)
 	if not TimeManager.world_time_changed.is_connected(_on_world_time_changed):
 		TimeManager.world_time_changed.connect(_on_world_time_changed)
+	var viewport := get_viewport()
+	if viewport != null and not viewport.size_changed.is_connected(_update_time_ui):
+		viewport.size_changed.connect(_update_time_ui)
 
 
 func _update_camera(delta: float) -> void:
@@ -3144,7 +3523,9 @@ func _open_settlement(settlement: SettlementData) -> void:
 	_settlement_tavern_button.visible = is_town
 	_settlement_tavern_button.disabled = not is_town
 	if _tavern_panel != null:
-		_tavern_panel.visible = false
+		# 打开/切换地点时清理上一次酒馆状态，避免残留出售预览或视图。
+		_tavern_panel.reset()
+	_show_settlement_info_view()
 	_refresh_settlement_info(settlement)
 	_settlement_recruit_status_label.text = ""
 	_settlement_panel.visible = true
@@ -3249,12 +3630,15 @@ func _on_settlement_leave_pressed() -> void:
 	# 市场打开时正常流程不可见地点面板；这里兜底，避免残留覆盖层。
 	if _market_panel != null and _market_panel.visible:
 		_market_panel.close()
+	if _tavern_panel != null:
+		_tavern_panel.reset()
+	_show_settlement_info_view()
 	_settlement_panel.visible = false
 	if _settlement_pause_active:
 		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
 		_settlement_pause_active = false
 	# 不恢复时间：离开地点后仍保持暂停，玩家需主动选择 1x / 2x。
-	_set_time_buttons_enabled(true)
+	_refresh_time_buttons()
 	_update_time_ui()
 
 
@@ -3287,6 +3671,9 @@ func enter_village(settlement_id: String) -> bool:
 	# 先压入 small_scene 暂停，再释放地点面板暂停，保证切换期间世界不恢复运行。
 	TimeManager.set_base_world_speed(TimeManager.SPEED_PAUSED)
 	TimeManager.push_pause(GameManager.PAUSE_REASON_SMALL_SCENE)
+	if _tavern_panel != null:
+		_tavern_panel.reset()
+	_show_settlement_info_view()
 	_settlement_panel.visible = false
 	if _settlement_pause_active:
 		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
@@ -3349,10 +3736,7 @@ func _check_pending_settlement_interaction() -> void:
 func _check_party_interaction() -> void:
 	if _battle_transition_started or _context == null or _player_party == null:
 		return
-	if _save_panel.visible or _settlement_panel.visible or _party_panel.visible \
-			or _party_manage_panel.visible or _encounter_panel.visible \
-			or _battle_interaction_panel.visible \
-			or (_encyclopedia_panel != null and _encyclopedia_panel.visible):
+	if _has_open_modal(false):
 		return
 
 	if _party_latch_id.is_empty():
@@ -3513,7 +3897,7 @@ func _on_battle_leave_pressed() -> void:
 		_context.encounter_manager.clear_pending_battle_interaction()
 	_battle_interaction_id = ""
 	_battle_interaction_battle_id = ""
-	_set_time_buttons_enabled(true)
+	_refresh_time_buttons()
 	_update_time_ui()
 
 
@@ -3528,7 +3912,7 @@ func cancel_battle_interaction() -> void:
 		_context.encounter_manager.clear_pending_battle_interaction()
 	_battle_interaction_id = ""
 	_battle_interaction_battle_id = ""
-	_set_time_buttons_enabled(true)
+	_refresh_time_buttons()
 	_update_time_ui()
 
 
@@ -3707,7 +4091,7 @@ func _open_party_dialogue(party: PartyData) -> void:
 
 func _on_party_leave_pressed() -> void:
 	_close_party_dialogue()
-	_set_time_buttons_enabled(true)
+	_refresh_time_buttons()
 	_update_time_ui()
 
 
@@ -3974,7 +4358,7 @@ func _on_speed_two_pressed() -> void:
 
 
 func _on_save_pressed() -> void:
-	if _settlement_panel.visible:
+	if _save_panel.visible or _has_open_modal(true):
 		return
 	_save_panel.visible = true
 	_save_dim.visible = true
@@ -3993,7 +4377,7 @@ func _on_close_save_pressed() -> void:
 	if _save_pause_active:
 		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
 		_save_pause_active = false
-	_set_time_buttons_enabled(true)
+	_refresh_time_buttons()
 	_update_time_ui()
 
 
@@ -4049,6 +4433,10 @@ func _update_time_ui() -> void:
 	elif is_equal_approx(effective, TimeManager.SPEED_DOUBLE):
 		speed_text = "2x"
 
+	# 窄窗口下缩小居中时间字号，避免与右侧紧凑入口重叠；
+	# 时间与倍率文本保持完整，按钮仍显示当前状态。
+	var wide_layout: bool = get_viewport_rect().size.x >= 1400.0
+	_world_time_label.add_theme_font_size_override("font_size", 15 if wide_layout else 11)
 	_world_time_label.text = "世界时间：%s    倍率：%s" % [
 		TimeManager.get_world_time_text(), speed_text
 	]
@@ -4095,16 +4483,227 @@ func _update_player_info() -> void:
 	]
 
 
+# ---------------------------------------------------------------------------
+# 顶部信息栏：金钱、部队移速与 Alt 详细提示
+# ---------------------------------------------------------------------------
+
+
+func _build_top_info_tooltip() -> void:
+	_top_info_tooltip = PanelContainer.new()
+	_top_info_tooltip.name = "TopInfoTooltip"
+	_top_info_tooltip.visible = false
+	_top_info_tooltip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_top_info_tooltip.custom_minimum_size = Vector2(340.0, 0.0)
+	_ui_root.add_child(_top_info_tooltip)
+
+	var margin := MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_theme_constant_override("margin_left", 14)
+	margin.add_theme_constant_override("margin_right", 14)
+	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_bottom", 10)
+	_top_info_tooltip.add_child(margin)
+
+	_top_info_content = VBoxContainer.new()
+	_top_info_content.name = "TopInfoTooltipContent"
+	_top_info_content.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_top_info_content.add_theme_constant_override("separation", 3)
+	margin.add_child(_top_info_content)
+
+
+func _make_top_info_label(text: String, node_name: String) -> Label:
+	var label := _make_label(text, 15)
+	label.name = node_name
+	label.mouse_filter = Control.MOUSE_FILTER_STOP
+	label.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.mouse_entered.connect(_on_top_info_hover.bind(node_name, true))
+	label.mouse_exited.connect(_on_top_info_hover.bind(node_name, false))
+	return label
+
+
+func _on_top_info_hover(kind: String, entered: bool) -> void:
+	if entered:
+		_top_info_hover_kind = kind
+		_top_info_signature = ""
+		_refresh_top_info_tooltip()
+		_position_top_info_tooltip(get_viewport().get_mouse_position())
+		return
+	if _top_info_hover_kind == kind:
+		_hide_top_info_tooltip()
+
+
+func _hide_top_info_tooltip() -> void:
+	_top_info_hover_kind = ""
+	_top_info_signature = ""
+	if _top_info_tooltip != null:
+		_top_info_tooltip.visible = false
+
+
+## 每帧同步金币/移速；数据变化时顶部悬浮提示也随之更新。
+func _update_top_info() -> void:
+	if _context == null or _player_party == null:
+		return
+	if _money_label != null:
+		_money_label.text = "金币：%d" % _context.player_profile.gold
+	if _party_speed_label != null:
+		_party_speed_label.text = "部队移速：%.1f" % _get_party_speed(_player_party)
+	if _top_info_hover_kind.is_empty():
+		return
+	_refresh_top_info_tooltip()
+	if _top_info_tooltip != null and _top_info_tooltip.visible:
+		_position_top_info_tooltip(get_viewport().get_mouse_position())
+
+
+func _refresh_top_info_tooltip() -> void:
+	if _top_info_tooltip == null or _top_info_content == null:
+		return
+	if _top_info_hover_kind.is_empty() or _context == null or _player_party == null:
+		_hide_top_info_tooltip()
+		return
+
+	var lines: Array[String] = []
+	if _top_info_hover_kind == "MoneyLabel":
+		lines = _top_info_money_lines()
+	else:
+		lines = _top_info_speed_lines()
+
+	var signature: String = "%s|%s|%s" % [
+		"ALT" if _alt_detail_active else "NORMAL",
+		_top_info_hover_kind,
+		"\n".join(PackedStringArray(lines)),
+	]
+	if signature == _top_info_signature:
+		_top_info_tooltip.visible = true
+		return
+	_top_info_signature = signature
+
+	for child: Node in _top_info_content.get_children():
+		_top_info_content.remove_child(child)
+		child.queue_free()
+	for line: String in lines:
+		var label := _make_label(line, 14)
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_top_info_content.add_child(label)
+
+	var height: float = maxf(
+		60.0, float(lines.size()) * 21.0 + 20.0
+	)
+	_top_info_tooltip.custom_minimum_size = Vector2(340.0, height)
+	_top_info_tooltip.size = Vector2(340.0, height)
+	_top_info_tooltip.visible = true
+
+
+func _top_info_money_lines() -> Array[String]:
+	var lines: Array[String] = []
+	var preview: Dictionary = _context.get_daily_balance_preview()
+	var net: int = int(preview.get("net", 0))
+	if not _alt_detail_active:
+		lines.append("预计每日收入：%s" % _format_signed_amount(net))
+		return lines
+
+	lines.append("每日收支")
+	lines.append("总计 %s" % _format_signed_amount(net))
+	lines.append("────────────────")
+	var items: Array = preview.get("items", [])
+	if items.is_empty():
+		lines.append("暂无预计收支项目。")
+		return lines
+	for item_value: Variant in items:
+		if not item_value is Dictionary:
+			continue
+		var item: Dictionary = item_value
+		lines.append("%s    %s" % [
+			str(item.get("label", "未知项目")),
+			_format_signed_amount(int(item.get("amount", 0))),
+		])
+	return lines
+
+
+func _top_info_speed_lines() -> Array[String]:
+	var lines: Array[String] = []
+	var breakdown: Dictionary = _context.world_map_manager.get_movement_speed_breakdown(
+		_player_party
+	)
+	var effective: float = float(breakdown.get("effective", 0.0))
+	if not _alt_detail_active:
+		lines.append("当前部队移速：%.1f" % effective)
+		return lines
+
+	lines.append("部队移速：%.1f" % effective)
+	lines.append("────────────────")
+	var items: Array = breakdown.get("items", [])
+	for item_value: Variant in items:
+		if not item_value is Dictionary:
+			continue
+		var item: Dictionary = item_value
+		lines.append("%s：%s" % [
+			str(item.get("label", "未知因素")),
+			str(item.get("display", "0")),
+		])
+	lines.append("最终移速：%.1f" % effective)
+	return lines
+
+
+func _format_signed_amount(amount: int) -> String:
+	return "+%d" % amount if amount >= 0 else "-%d" % absi(amount)
+
+
+func _position_top_info_tooltip(screen_position: Vector2) -> void:
+	if _top_info_tooltip == null:
+		return
+	var viewport_size := get_viewport_rect().size
+	var panel_size := Vector2(
+		340.0, maxf(_top_info_tooltip.custom_minimum_size.y, 60.0)
+	)
+	var desired := screen_position + Vector2(18.0, 22.0)
+	desired.x = clampf(
+		desired.x, 8.0, maxf(8.0, viewport_size.x - panel_size.x - 8.0)
+	)
+	desired.y = clampf(
+		desired.y, 8.0, maxf(8.0, viewport_size.y - panel_size.y - 8.0)
+	)
+	_top_info_tooltip.position = desired
+
+
+## 测试接口：返回顶部信息提示当前文本。
+func get_top_info_tooltip_text() -> String:
+	if _top_info_content == null:
+		return ""
+	var lines: Array[String] = []
+	for child: Node in _top_info_content.get_children():
+		var label := child as Label
+		if label != null:
+			lines.append(label.text)
+	return "\n".join(PackedStringArray(lines))
+
+
+func is_top_info_tooltip_visible() -> bool:
+	return _top_info_tooltip != null and _top_info_tooltip.visible
+
+
+func set_top_info_hover_for_test(kind: String, entered: bool) -> void:
+	_on_top_info_hover(kind, entered)
+
+
 func _set_time_buttons_enabled(enabled: bool) -> void:
 	for button: Button in _time_buttons:
 		button.disabled = not enabled
 
 
 func _is_input_blocked() -> bool:
-	return _save_panel != null and (
-		_save_panel.visible
-		or _settlement_panel.visible
-		or _party_panel.visible
+	return _has_open_modal(false)
+
+
+## 是否有模态覆盖层。ignore_settlement=true 用于“建筑信息面板打开时仍允许
+## 使用百科/部队/背包/事件等功能入口”，但不影响时间控制权限。
+func _has_open_modal(ignore_settlement: bool = false) -> bool:
+	if _save_panel == null:
+		return false
+	return (
+		(_save_panel.visible)
+		or (not ignore_settlement and _settlement_panel.visible)
+		or (_party_panel != null and _party_panel.visible)
 		or (_party_manage_panel != null and _party_manage_panel.visible)
 		or (_encounter_panel != null and _encounter_panel.visible)
 		or (_battle_interaction_panel != null and _battle_interaction_panel.visible)
@@ -4112,7 +4711,15 @@ func _is_input_blocked() -> bool:
 		or (_encyclopedia_panel != null and _encyclopedia_panel.visible)
 		or (_inventory_panel != null and _inventory_panel.visible)
 		or (_market_panel != null and _market_panel.visible)
+		or (_event_center_panel != null and _event_center_panel.visible)
 	)
+
+
+## 世界时间控制独立于普通 UI 权限：建筑信息面板或任何覆盖层打开时都禁用。
+func _refresh_time_buttons() -> void:
+	if _time_buttons.is_empty():
+		return
+	_set_time_buttons_enabled(not _has_open_modal(false))
 
 
 func _set_full_rect(control: Control) -> void:
@@ -4139,6 +4746,15 @@ func _make_button(text: String, node_name: String) -> Button:
 	button.text = text
 	button.custom_minimum_size = Vector2(64.0, 30.0)
 	button.focus_mode = Control.FOCUS_NONE
+	return button
+
+
+## 顶栏入口数量多且要与居中的世界时间并存，使用更紧凑的尺寸，
+## 避免在 1280 宽度下挤压中间时间区域。
+func _make_top_bar_button(text: String, node_name: String) -> Button:
+	var button := _make_button(text, node_name)
+	button.custom_minimum_size = Vector2(52.0, 30.0)
+	button.add_theme_font_size_override("font_size", 13)
 	return button
 
 

@@ -53,7 +53,9 @@ TimeManager.pop_pause(&"ui_panel")
 ```
 
 - 任一原因存在 → 有效倍率 0。
-- 同一原因重复 push 只记一次；pop 必须成对。
+- 同一原因按引用计数嵌套：每次 `push_pause` 计数 +1，每次 `pop_pause` 计数 -1，计数归零才移除该原因。
+  因此“地点面板 + 百科/背包/部队”这类叠加界面关闭内层时不会提前恢复世界时间。
+- `pop_pause` 遇到计数为 0 的原因时静默忽略，不产生负计数。
 - 已定义原因：`main_menu`、`loading`、`ui_panel`、`world_dialogue`、`small_scene`、`battle`。
 - 新增原因写在这里，并在使用方保证成对释放。
 - 进入战斗时先压入 `battle`，再释放对话的 `ui_panel`，保证切换期间世界不恢复运行。

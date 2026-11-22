@@ -31,6 +31,10 @@ var _idle_time: float = 0.0
 var _run_time: float = 0.0
 var _locomotion_blend: float = 0.0
 var _locomotion_moving: bool = false
+## 可选的外部影子层。战斗场景把所有士兵影子集中到角色层之下，
+## 保证任何影子都不会覆盖其他士兵的身体/武器/头部。
+var _shadow_layer: Node2D = null
+var _detached_shadows: Array[Sprite2D] = []
 
 
 func setup(data: UnitData, equipment_configs: Dictionary = {}) -> void:
@@ -38,6 +42,7 @@ func setup(data: UnitData, equipment_configs: Dictionary = {}) -> void:
 	_equipment_configs = equipment_configs.duplicate()
 	_ensure_groups()
 	if unit_data == null:
+		_release_detached_shadows()
 		_human_visual.clear_parts()
 		_horse_visual.clear_parts()
 		_horse_visual.visible = false
@@ -49,11 +54,15 @@ func setup(data: UnitData, equipment_configs: Dictionary = {}) -> void:
 func rebuild() -> void:
 	_ensure_groups()
 	if unit_data == null:
+		_release_detached_shadows()
 		_human_visual.clear_parts()
 		_horse_visual.clear_parts()
 		_horse_visual.visible = false
 		_mounted = false
 		return
+
+	# 重建部件前先释放旧的外部影子，旧 Sprite 不属于 Human/Horse 子节点。
+	_release_detached_shadows()
 
 	# 外观选择（家族罩袍、领袖缨饰、等级头盔、家族长矛）在创建时一次性
 	# 写入 UnitData.appearance；本类只消费最终结果，不包含任何家族分支规则。
@@ -74,6 +83,7 @@ func rebuild() -> void:
 	_horse_visual.rebuild(coat_style_id, saddle_style_id)
 	set_mounted(unit_data.is_mounted)
 	set_facing(_facing)
+	_attach_shadows_to_layer()
 
 
 ## 根据装备槽位的视觉配置替换/增加部件；缺少贴图时保持默认表现。
@@ -130,6 +140,7 @@ func set_mounted(mounted: bool) -> void:
 		return
 	_human_visual.set_mounted(mounted)
 	_horse_visual.visible = mounted
+	_sync_shadow_visibility()
 
 
 func set_facing(direction_x: float) -> void:
@@ -145,6 +156,78 @@ func set_facing(direction_x: float) -> void:
 
 func get_facing() -> float:
 	return _facing
+
+
+## 指定外部影子层；传入 null 时影子回到人物/马匹组内部（默认行为）。
+## 影子 Sprite 仍由 HumanVisual/HorseVisual 创建和驱动动画，
+## 这里只改变它们的父节点，因此不复制任何动画逻辑。
+func set_shadow_layer(layer: Node2D) -> void:
+	if _shadow_layer == layer:
+		return
+	_release_detached_shadows()
+	_shadow_layer = layer
+	if unit_data != null:
+		_attach_shadows_to_layer()
+
+
+func get_shadow_layer() -> Node2D:
+	return _shadow_layer
+
+
+func get_detached_shadow_count() -> int:
+	return _detached_shadows.size()
+
+
+## 影子整体移出角色原子子树后，仍保留自身相对层级（同为 -99）。
+## 影子层由战斗场景统一放在角色层之下，因此不会覆盖任何士兵主体。
+func _attach_shadows_to_layer() -> void:
+	if _shadow_layer == null or not is_instance_valid(_shadow_layer):
+		return
+	if not is_inside_tree() or not _shadow_layer.is_inside_tree():
+		return
+	var groups: Array[Node2D] = [_human_visual, _horse_visual]
+	for group: Node2D in groups:
+		if group == null or not is_instance_valid(group):
+			continue
+		for part_name: String in ["FootShadow", "MountShadow"]:
+			var sprite: Sprite2D = group.get_part(part_name)
+			if sprite == null:
+				continue
+			# remove_child 不会清空 PartVisual._sprites 中的引用，
+			# 因此动画更新（马影缩放/透明度）仍会作用于同一个 Sprite。
+			group.remove_child(sprite)
+			_shadow_layer.add_child(sprite)
+			sprite.position = Vector2.ZERO
+			sprite.rotation = 0.0
+			_detached_shadows.append(sprite)
+	_sync_shadow_visibility()
+
+
+## 释放已移出的影子 Sprite；下一轮 rebuild 会重新创建并再次移出。
+func _release_detached_shadows() -> void:
+	if _detached_shadows.is_empty():
+		return
+	var groups: Array[Node2D] = [_human_visual, _horse_visual]
+	for group: Node2D in groups:
+		if group == null or not is_instance_valid(group):
+			continue
+		for part_name: String in ["FootShadow", "MountShadow"]:
+			var sprite: Sprite2D = group.get_part(part_name)
+			if sprite != null and _detached_shadows.has(sprite):
+				# remove_part 会同时从 _sprites 字典移除并 queue_free。
+				group.remove_part(part_name)
+	_detached_shadows.clear()
+
+
+## 影子移出马匹/人物组后不再继承其 visible，需要按骑乘状态单独同步。
+func _sync_shadow_visibility() -> void:
+	for sprite: Sprite2D in _detached_shadows:
+		if sprite == null or not is_instance_valid(sprite):
+			continue
+		if sprite.name == "Part_FootShadow":
+			sprite.visible = not _mounted
+		elif sprite.name == "Part_MountShadow":
+			sprite.visible = _mounted
 
 
 ## 由 UnitActor 按实际移动状态调用；人物与马匹共享时间轴，保证骑乘时动作协调。

@@ -174,6 +174,23 @@ func tick(world_delta: float) -> void:
 			settlement.fief_recruitment_elapsed = 0.0
 
 
+## 贵族是否拥有该封地；只判断所有权，不检查储备、部队状态等征召前置条件。
+## 供征召与只读经济/事件预览共用，避免 UI 复制授权规则。
+func is_authorized_owner(settlement: SettlementData, lord_id: String) -> bool:
+	if settlement == null or lord_id.strip_edges().is_empty():
+		return false
+	var lord := _lord_manager.get_lord(lord_id) if _lord_manager != null else null
+	if lord == null or not lord.is_alive:
+		return false
+	var noble := lord as NobleData
+	if settlement.owner_noble_id == lord_id:
+		return true
+	if settlement.owner_noble_id.is_empty() \
+			and not settlement.owner_house_id.is_empty() and noble != null:
+		return noble.house_id == settlement.owner_house_id and noble.is_house_leader
+	return false
+
+
 ## 贵族是否获得封地家族授权；空 ID 或无效贵族一律拒绝。
 ## 本阶段规则：只有村庄可征召；封地明确指定 owner_noble_id 时只认该贵族；
 ## 未指定个人所有者时，允许所有者家族的领袖征召。
@@ -191,13 +208,7 @@ func can_recruit(settlement_id: String, lord_id: String) -> bool:
 	if lord == null or not lord.is_alive:
 		last_error = "领主不存在或已死亡，无法征召采邑。"
 		return false
-	var noble := lord as NobleData
-	var authorized: bool = settlement.owner_noble_id == lord_id
-	if not authorized and settlement.owner_noble_id.is_empty() \
-			and not settlement.owner_house_id.is_empty() and noble != null:
-		authorized = noble.house_id == settlement.owner_house_id \
-			and noble.is_house_leader
-	if not authorized:
+	if not is_authorized_owner(settlement, lord_id):
 		last_error = "你不是该封地家族的授权贵族，无法征召采邑。"
 		return false
 	if settlement.fief_recruitment_stock <= 0:

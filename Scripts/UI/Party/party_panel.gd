@@ -11,6 +11,8 @@ var _context: WorldContext = null
 var _party: PartyData = null
 var _selected_unit_id: String = ""
 var _member_items: Dictionary = {}
+## 当前部队携带的俘虏条目；与成员列表分开管理，但共用同一选中逻辑。
+var _prisoner_items: Dictionary = {}
 
 var _party_name_label: Label = null
 var _faction_label: Label = null
@@ -21,8 +23,10 @@ var _movement_label: Label = null
 var _target_label: Label = null
 var _gold_label: Label = null
 var _wage_label: Label = null
-var _member_list: VBoxContainer = null
+var _member_list: GridContainer = null
+var _prisoner_list: GridContainer = null
 var _empty_label: Label = null
+var _prisoner_empty_label: Label = null
 var _detail_panel: UnitDetailPanel = null
 
 
@@ -52,10 +56,16 @@ func refresh() -> void:
 		_show_party_missing()
 		return
 
-	var valid_ids: Array[String] = _rebuild_member_list()
+	var member_ids: Array[String] = _rebuild_member_list()
+	var prisoner_ids: Array[String] = _rebuild_prisoner_list()
+	var valid_ids: Array[String] = []
+	valid_ids.append_array(member_ids)
+	valid_ids.append_array(prisoner_ids)
 	_party_name_label.text = _party.party_name
 	_faction_label.text = "阵营：%s" % _faction_display_name(_party.faction_id)
-	_member_count_label.text = "成员：%d" % _party.member_unit_ids.size()
+	_member_count_label.text = "成员：%d　俘虏：%d" % [
+		_party.member_unit_ids.size(), _party.prisoner_unit_ids.size()
+	]
 	_speed_label.text = "移动速度：%.1f" % _party.movement_speed
 	_state_label.text = "部队状态：%s" % _battle_state_text(_party.battle_state)
 	_gold_label.text = "金币：%d" % _context.player_profile.gold
@@ -101,10 +111,11 @@ func _build() -> void:
 	window.anchor_top = 0.5
 	window.anchor_right = 0.5
 	window.anchor_bottom = 0.5
-	window.offset_left = -480.0
-	window.offset_top = -310.0
-	window.offset_right = 480.0
-	window.offset_bottom = 310.0
+	# 横向优先扩大，为士兵/俘虏双列条目留出足够宽度；纵向只小幅增加。
+	window.offset_left = -640.0
+	window.offset_top = -330.0
+	window.offset_right = 640.0
+	window.offset_bottom = 330.0
 	add_child(window)
 
 	var margin := MarginContainer.new()
@@ -189,7 +200,7 @@ func _build() -> void:
 	column.add_child(content)
 
 	var list_column := VBoxContainer.new()
-	list_column.custom_minimum_size = Vector2(300.0, 0.0)
+	list_column.custom_minimum_size = Vector2(560.0, 0.0)
 	list_column.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content.add_child(list_column)
 
@@ -197,19 +208,48 @@ func _build() -> void:
 
 	var list_scroll := ScrollContainer.new()
 	list_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	list_scroll.size_flags_stretch_ratio = 2.2
 	list_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	list_column.add_child(list_scroll)
 
-	_member_list = VBoxContainer.new()
+	# 士兵条目每行两个；条目宽度由网格自动均分。
+	_member_list = GridContainer.new()
 	_member_list.name = "PartyMemberList"
+	_member_list.columns = 2
 	_member_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_member_list.add_theme_constant_override("separation", 6)
+	_member_list.add_theme_constant_override("h_separation", 8)
+	_member_list.add_theme_constant_override("v_separation", 8)
 	list_scroll.add_child(_member_list)
 
 	_empty_label = _make_label("部队中没有士兵", 14)
 	_empty_label.name = "PartyMemberEmptyLabel"
 	_empty_label.visible = false
 	list_column.add_child(_empty_label)
+
+	list_column.add_child(HSeparator.new())
+	list_column.add_child(_make_label("俘虏列表", 16))
+
+	var prisoner_scroll := ScrollContainer.new()
+	prisoner_scroll.name = "PartyPrisonerScroll"
+	prisoner_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	prisoner_scroll.size_flags_stretch_ratio = 1.0
+	prisoner_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	list_column.add_child(prisoner_scroll)
+
+	# 俘虏列表与士兵列表保持同样的双列排列与间距。
+	_prisoner_list = GridContainer.new()
+	_prisoner_list.name = "PartyPrisonerList"
+	_prisoner_list.columns = 2
+	_prisoner_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_prisoner_list.add_theme_constant_override("h_separation", 8)
+	_prisoner_list.add_theme_constant_override("v_separation", 8)
+	prisoner_scroll.add_child(_prisoner_list)
+
+	_prisoner_empty_label = _make_label("当前部队没有俘虏", 14)
+	_prisoner_empty_label.name = "PartyPrisonerEmptyLabel"
+	_prisoner_empty_label.visible = false
+	_prisoner_empty_label.modulate = Color(0.78, 0.78, 0.78)
+	list_column.add_child(_prisoner_empty_label)
 
 	content.add_child(VSeparator.new())
 
@@ -249,7 +289,11 @@ func _rebuild_member_list() -> Array[String]:
 			continue
 		valid_ids.append(unit_id)
 		var item := PartyMemberItem.new()
-		item.setup(unit, _context.unit_manager.get_unit_config(unit.config_id))
+		item.setup(
+			unit,
+			_context.unit_manager.get_unit_config(unit.config_id),
+			_equipment_configs_for(unit)
+		)
 		item.pressed.connect(_on_member_pressed.bind(unit_id))
 		_member_list.add_child(item)
 		_member_items[unit_id] = item
@@ -258,9 +302,49 @@ func _rebuild_member_list() -> Array[String]:
 	return valid_ids
 
 
+## 只读取当前选中部队自己的俘虏列表，不混入其他部队或全局俘虏池。
+func _rebuild_prisoner_list() -> Array[String]:
+	var valid_ids: Array[String] = []
+	for child: Node in _prisoner_list.get_children():
+		_prisoner_list.remove_child(child)
+		child.queue_free()
+	_prisoner_items.clear()
+
+	if _party == null or _context == null:
+		_prisoner_empty_label.visible = true
+		return valid_ids
+
+	var seen: Dictionary = {}
+	for unit_id: String in _party.prisoner_unit_ids:
+		if seen.has(unit_id):
+			continue
+		seen[unit_id] = true
+		var unit := _context.unit_manager.get_unit(unit_id)
+		if unit == null:
+			continue
+		valid_ids.append(unit_id)
+		var item := PartyMemberItem.new()
+		item.setup(
+			unit,
+			_context.unit_manager.get_unit_config(unit.config_id),
+			_equipment_configs_for(unit),
+			true
+		)
+		item.pressed.connect(_on_prisoner_pressed.bind(unit_id))
+		_prisoner_list.add_child(item)
+		_prisoner_items[unit_id] = item
+
+	_prisoner_empty_label.visible = valid_ids.is_empty()
+	return valid_ids
+
+
 func _apply_selection() -> void:
 	for unit_id: String in _member_items:
 		var item := _member_items[unit_id] as PartyMemberItem
+		if item != null:
+			item.set_selected(unit_id == _selected_unit_id)
+	for unit_id: String in _prisoner_items:
+		var item := _prisoner_items[unit_id] as PartyMemberItem
 		if item != null:
 			item.set_selected(unit_id == _selected_unit_id)
 	_detail_panel.show_unit(_selected_unit_id)
@@ -271,6 +355,27 @@ func _on_member_pressed(unit_id: String) -> void:
 		return
 	_selected_unit_id = unit_id
 	_apply_selection()
+
+
+func _on_prisoner_pressed(unit_id: String) -> void:
+	if not _prisoner_items.has(unit_id):
+		return
+	_selected_unit_id = unit_id
+	_apply_selection()
+
+
+## 头像缩略图与详情预览共用同一装备视觉配置来源。
+func _equipment_configs_for(unit: UnitData) -> Dictionary:
+	var configs: Dictionary = {}
+	if unit == null or _context == null:
+		return configs
+	for slot_key_value: Variant in unit.equipment.keys():
+		var slot_key := str(slot_key_value)
+		var equipment_id := str(unit.equipment.get(slot_key_value, ""))
+		var equipment := _context.unit_manager.get_equipment_config(equipment_id)
+		if equipment != null:
+			configs[slot_key] = equipment
+	return configs
 
 
 ## 装备/晋升通过管理器写入后，刷新概览、成员列表与详情。
@@ -289,6 +394,7 @@ func _show_party_missing() -> void:
 	_gold_label.text = ""
 	_wage_label.text = ""
 	_rebuild_member_list()
+	_rebuild_prisoner_list()
 	_detail_panel.clear()
 
 

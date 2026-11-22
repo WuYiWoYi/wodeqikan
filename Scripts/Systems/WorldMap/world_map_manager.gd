@@ -130,6 +130,34 @@ func get_effective_movement_speed(party: PartyData) -> float:
 	return party.movement_speed * WORLD_MAP_SPEED_SCALE
 
 
+## 当前速度的统一构成明细，供顶部信息栏与悬浮提示直接展示。
+## 不实现第二套速度公式：最终值必须等于 get_effective_movement_speed()。
+func get_movement_speed_breakdown(party: PartyData) -> Dictionary:
+	if party == null:
+		return {
+			"effective": 0.0,
+			"base": 0.0,
+			"scale": WORLD_MAP_SPEED_SCALE,
+			"items": [] as Array[Dictionary],
+		}
+	var base: float = maxf(0.0, party.movement_speed)
+	var effective: float = get_effective_movement_speed(party)
+	var items: Array[Dictionary] = [
+		{"label": "基础移速", "value": base, "display": "%.1f" % base},
+		{
+			"label": "大地图移动系数",
+			"value": WORLD_MAP_SPEED_SCALE,
+			"display": "×%.1f" % WORLD_MAP_SPEED_SCALE,
+		},
+	]
+	return {
+		"effective": effective,
+		"base": base,
+		"scale": WORLD_MAP_SPEED_SCALE,
+		"items": items,
+	}
+
+
 func stop_party(party_id: String) -> bool:
 	if _party_manager == null:
 		return false
