@@ -595,7 +595,9 @@ func add_reinforcement(party_id: String, battle_id: String) -> bool:
 
 ## 仅根据阵营关系决定新部队应加入哪一场指定战斗的哪个战斗侧。
 ## battle_id 必须显式指定，禁止在多场战斗环境下猜测目标战斗。
-## 返回 -1 表示不应加入；返回当前不存在的 side 索引表示建立新的第三方战斗侧。
+##
+## 返回 -1 表示不应加入。只有“存在敌对侧且至少有一个非敌对侧”时才允许协助；
+## 与所有战斗侧都敌对时不再自动创建第三方，避免 AI 任性卷入多方混战。
 func get_join_side(party_id: String, battle_id: String) -> int:
 	var session := get_battle(battle_id)
 	if session == null:
@@ -619,8 +621,8 @@ func get_join_side(party_id: String, battle_id: String) -> int:
 		var has_hostile: bool = false
 		for other_id: String in session.get_side_party_ids(side_index):
 			var other := _party_manager.get_party(other_id)
-			if other != null and _faction_manager.is_hostile(
-				party.faction_id, other.faction_id
+			if other != null and _faction_manager.is_party_hostile(
+				party.party_id, other.party_id
 			):
 				has_hostile = true
 				hostile_exists = true
@@ -631,8 +633,9 @@ func get_join_side(party_id: String, battle_id: String) -> int:
 		# 与任何参战方都没有敌对关系：中立部队不能自动参战。
 		return -1
 	if candidate_sides.is_empty():
-		# 与现有所有战斗侧都敌对：建立独立第三方。
-		return session.get_next_side_index()
+		# 与现有所有战斗侧都敌对：不允许以“协助其中一方”的方式加入，
+		# 也不再自动创建第三方战斗侧。
+		return -1
 
 	# 优先加入有友军的战斗侧；同分时取更早的战斗侧。
 	var best_side: int = candidate_sides[0]
@@ -641,8 +644,8 @@ func get_join_side(party_id: String, battle_id: String) -> int:
 		var friendly_count: int = 0
 		for other_id: String in session.get_side_party_ids(side_index):
 			var other := _party_manager.get_party(other_id)
-			if other != null and _faction_manager.is_friendly(
-				party.faction_id, other.faction_id
+			if other != null and _faction_manager.is_party_friendly(
+				party.party_id, other.party_id
 			):
 				friendly_count += 1
 		if friendly_count > best_friendly:
@@ -685,6 +688,10 @@ func try_join_battle(party_id: String, battle_id: String) -> bool:
 	)
 	if participant == null:
 		return false
+	# 通过本入口加入的都是既有战斗的增援；初始参战方由 start_battle_by_sides 加入。
+	participant.is_reinforcement = true
+	participant.reinforcement_battle_id = session.battle_id
+	participant.reinforcement_arrival_time = TimeManager.world_elapsed_seconds
 	_add_party_units(session, party)
 	party_battle_lookup[party_id] = session.battle_id
 	_lock_party(party)
@@ -696,6 +703,12 @@ func try_join_battle(party_id: String, battle_id: String) -> bool:
 
 	EventBus.battle_participant_joined.emit(
 		session.battle_id, party_id, participant.side_index
+	)
+	EventBus.party_reinforced.emit(
+		session.battle_id,
+		party_id,
+		party.leader_noble_id,
+		participant.side_index
 	)
 	return true
 
@@ -758,14 +771,23 @@ func _validate_side_relations(parties: Array) -> bool:
 			var a := parties[i] as PartyData
 			var b := parties[j] as PartyData
 			if a != null and b != null \
-					and _faction_manager.is_hostile(a.faction_id, b.faction_id):
-				push_warning("敌对阵营不能处于同一战斗侧: %s / %s" % [a.party_id, b.party_id])
+					and _faction_manager.is_party_hostile(a.party_id, b.party_id):
+				push_warning("敌对部队不能处于同一战斗侧: %s / %s" % [a.party_id, b.party_id])
 				return false
 	return true
 
 
+## 参战方身份相同则拒绝开战。政治部队按家族比较，无家族部队仍按阵营比较。
 func _all_same_faction(parties: Array[PartyData]) -> bool:
 	if parties.is_empty():
+		return true
+	var first_house: String = ""
+	if _faction_manager != null:
+		first_house = _faction_manager.get_party_house_id(parties[0].party_id)
+	if not first_house.is_empty():
+		for party: PartyData in parties:
+			if _faction_manager.get_party_house_id(party.party_id) != first_house:
+				return false
 		return true
 	var faction_id: String = parties[0].faction_id
 	for party: PartyData in parties:
@@ -810,6 +832,10 @@ func _add_party_units(session: BattleSession, party: PartyData) -> int:
 		state.party_id = party.party_id
 		state.battle_hp = unit.current_hp
 		state.alive = true
+		# 增援标记随参战方写入单位战斗状态，表现层据此在后方出生。
+		state.is_reinforcement = participant.is_reinforcement
+		state.reinforcement_battle_id = participant.reinforcement_battle_id
+		state.reinforcement_arrival_time = participant.reinforcement_arrival_time
 		session.add_unit_state(state)
 		added += 1
 	return added
@@ -824,6 +850,8 @@ func _lock_party(party: PartyData) -> void:
 	party.current_order = PartyData.OrderType.NONE
 	party.current_target_id = ""
 	party.attack_intent = false
+	party.battle_response_id = ""
+	party.battle_response_until = 0.0
 	EventBus.party_battle_state_changed.emit(party.party_id, int(party.battle_state))
 
 
@@ -885,11 +913,15 @@ func _unlock_session_parties(session: BattleSession) -> void:
 			party.engagement_cooldown_until = maxf(
 				party.engagement_cooldown_until, cooldown_until
 			)
-		# 不把移动目标重置为当前位置：移动状态改为 IDLE 后，
+		# 清除旧战斗残留的移动目标：移动状态改为 IDLE 后，
 		# 由 AIManager 在下一个决策周期按 AI 类型重新生成目标/路线。
+		# 保留旧 target_position 会让部队在解锁后朝失效目标短暂移动。
+		party.target_position = party.world_position
 		party.movement_state = PartyData.MovementState.IDLE
 		party.current_target_id = ""
 		party.current_order = PartyData.OrderType.NONE
 		party.attack_intent = false
 		party.focus_party_id = ""
+		party.battle_response_id = ""
+		party.battle_response_until = 0.0
 		EventBus.party_battle_state_changed.emit(party.party_id, int(party.battle_state))

@@ -71,6 +71,7 @@ func _run() -> void:
 	await _test_party_dialogue_blocks_input()
 	_test_follow_party()
 	await _test_map_click_speed()
+	await _test_camera_controls()
 	await _test_npc_runtime_movement()
 
 
@@ -259,8 +260,27 @@ func _test_follow_party() -> void:
 	_enemy.battle_state = PartyData.BattleState.IN_BATTLE
 	manager.update_party_movement(0.5)
 	_check(
+		_player.current_order == PartyData.OrderType.FOLLOW_PARTY,
+		"目标进入战斗后保留追击关系"
+	)
+	_check(
+		_player.movement_state == PartyData.MovementState.IDLE,
+		"目标战斗中追击方原地等待"
+	)
+	_enemy.battle_state = PartyData.BattleState.AVAILABLE
+	_enemy.target_position = _enemy.world_position
+	_enemy.movement_state = PartyData.MovementState.IDLE
+	manager.update_party_movement(0.5)
+	_check(
+		_player.movement_state == PartyData.MovementState.MOVING
+			and _player.current_order == PartyData.OrderType.FOLLOW_PARTY,
+		"目标战斗结束后自动恢复跟随"
+	)
+	_enemy.battle_state = PartyData.BattleState.DISABLED
+	manager.update_party_movement(0.5)
+	_check(
 		_player.current_order != PartyData.OrderType.FOLLOW_PARTY,
-		"目标进入战斗后停止跟随"
+		"目标失效后清理追击关系"
 	)
 	_enemy.battle_state = PartyData.BattleState.AVAILABLE
 
@@ -394,6 +414,130 @@ func _test_map_click_speed() -> void:
 	if close_button != null:
 		close_button.pressed.emit()
 		await get_tree().process_frame
+	TimeManager.set_base_world_speed(TimeManager.SPEED_PAUSED)
+
+
+## WASD 自由镜头：四方向平移、停止跟随、点击地图/部队恢复跟随、缩放速度与边界。
+func _test_camera_controls() -> void:
+	TimeManager.clear_pauses()
+	TimeManager.set_base_world_speed(TimeManager.SPEED_PAUSED)
+	var cam := _map.get("camera") as Camera2D
+	_check(cam != null, "大地图相机存在")
+	if cam == null:
+		return
+	cam.zoom = Vector2(1.0, 1.0)
+
+	_player.world_position = Vector2(2500.0, 1500.0)
+	_player.target_position = _player.world_position
+	_player.movement_state = PartyData.MovementState.IDLE
+	cam.position = _player.world_position
+	_check(bool(_map.call("request_player_move", Vector2(2600.0, 1500.0))), "下达移动指令")
+	_check(
+		str(_map.call("get_camera_mode_name")) == "FOLLOW_PLAYER",
+		"移动指令后镜头跟随玩家"
+	)
+
+	# 四个方向：W 上、A 左、S 下、D 右。
+	var direction_cases: Array = [
+		[Vector2.UP, "W 镜头向上"],
+		[Vector2.LEFT, "A 镜头向左"],
+		[Vector2.DOWN, "S 镜头向下"],
+		[Vector2.RIGHT, "D 镜头向右"],
+	]
+	for case: Array in direction_cases:
+		var direction: Vector2 = case[0]
+		cam.position = Vector2(2500.0, 1500.0)
+		var before := cam.position
+		cam.zoom = Vector2(1.0, 1.0)
+		_map.call("pan_camera", direction, 0.5)
+		var delta := cam.position - before
+		_check(
+			delta.normalized().dot(direction) > 0.99,
+			str(case[1])
+		)
+	_check(bool(_map.call("is_free_camera")), "按 WASD 后进入自由镜头")
+
+	# 玩家部队继续移动，自由镜头不被拉回。
+	cam.position = Vector2(2500.0, 1500.0)
+	var free_position := cam.position
+	_player.world_position += Vector2(300.0, 0.0)
+	_map.call("_update_camera", 0.5)
+	_check(
+		cam.position.distance_to(free_position) < 0.01,
+		"自由镜头期间玩家移动不会拉回镜头"
+	)
+
+	# 点击地图下达新移动指令后恢复跟随。
+	_check(
+		bool(_map.call("request_player_move", _player.world_position + Vector2(8.0, 0.0))),
+		"自由镜头下仍可点击地图移动"
+	)
+	_check(str(_map.call("get_camera_mode_name")) == "FOLLOW_PLAYER", "点击地图恢复跟随")
+	for i: int in range(12):
+		_map.call("_update_camera", 0.2)
+	_check(
+		cam.position.distance_to(_player.world_position) < 40.0,
+		"恢复跟随后镜头平滑回到玩家附近"
+	)
+
+	# 点击部队开始跟随同样恢复跟随。
+	cam.position = Vector2(1000.0, 800.0)
+	_map.call("pan_camera", Vector2.RIGHT, 0.2)
+	_enemy.battle_state = PartyData.BattleState.AVAILABLE
+	_check(
+		bool(_map.call("request_player_follow", _enemy.party_id)),
+		"自由镜头下点击部队开始跟随"
+	)
+	_check(str(_map.call("get_camera_mode_name")) == "FOLLOW_PLAYER", "点击部队恢复跟随")
+
+	# 缩放后世界平移速度按比例变化，屏幕观感接近一致。
+	cam.zoom = Vector2(1.0, 1.0)
+	cam.position = Vector2(2500.0, 1500.0)
+	_map.call("pan_camera", Vector2.RIGHT, 0.5)
+	var world_step_1x: float = cam.position.x - 2500.0
+	cam.zoom = Vector2(2.0, 2.0)
+	cam.position = Vector2(2500.0, 1500.0)
+	_map.call("pan_camera", Vector2.RIGHT, 0.5)
+	var world_step_2x: float = cam.position.x - 2500.0
+	_check(world_step_1x > 0.0, "1 倍缩放平移有效")
+	_check(
+		is_equal_approx(world_step_1x, world_step_2x * 2.0),
+		"2 倍缩放时世界平移速度按比例降低"
+	)
+
+	# 边界限制。
+	var clamped: Vector2 = _map.call(
+		"_clamp_camera_position", Vector2(99999.0, 99999.0)
+	)
+	_check(
+		clamped.x < 99999.0 and clamped.y < 99999.0,
+		"自由镜头不能移出地图边界"
+	)
+
+	# UI 打开时 WASD 不移动镜头。
+	TimeManager.set_base_world_speed(TimeManager.SPEED_DOUBLE)
+	cam.zoom = Vector2(1.0, 1.0)
+	cam.position = Vector2(2500.0, 1500.0)
+	var save_button := _map.find_child("SaveButton", true, false) as Button
+	if save_button != null:
+		save_button.pressed.emit()
+		await get_tree().process_frame
+	var blocked_before := cam.position
+	var moved_while_blocked: bool = bool(
+		_map.call("_apply_camera_input", 0.5, Vector2.RIGHT)
+	)
+	_check(not moved_while_blocked, "UI 打开时忽略镜头平移输入")
+	_check(cam.position == blocked_before, "UI 打开时镜头位置不变")
+	var close_button := _map.find_child("CloseSaveButton", true, false) as Button
+	if close_button != null:
+		close_button.pressed.emit()
+		await get_tree().process_frame
+	# 清理相机测试留下的跟随指令，避免影响后续 NPC 移动测试。
+	_context.world_map_manager.stop_party(_player.party_id)
+	_player.focus_party_id = ""
+	_player.world_position = Vector2(760.0, 620.0)
+	_player.target_position = _player.world_position
+	_player.movement_state = PartyData.MovementState.IDLE
 	TimeManager.set_base_world_speed(TimeManager.SPEED_PAUSED)
 
 

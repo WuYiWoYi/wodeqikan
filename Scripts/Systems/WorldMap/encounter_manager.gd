@@ -97,6 +97,9 @@ func clear_pending_player_encounter() -> void:
 
 
 ## 统一遭遇判定。返回是否触发了玩家被主动拦截的遭遇。
+##
+## 判定不依赖任何一方仍处于 MOVING：只要双方有效、关系满足、
+## 距离进入统一遭遇半径且攻击/追击意图成立，就可以触发。
 func update_encounters() -> bool:
 	if _party_manager == null or _faction_manager == null or _battle_manager == null:
 		return false
@@ -119,14 +122,6 @@ func update_encounters() -> bool:
 			# 刚结束战斗的部队优先脱离接触，不能被同一对手立刻拖回战斗。
 			if _is_engagement_cooling(a) or _is_engagement_cooling(b):
 				continue
-			if not _faction_manager.is_hostile(a.faction_id, b.faction_id):
-				continue
-			if a.world_position.distance_to(b.world_position) > AI_ENCOUNTER_RADIUS:
-				continue
-
-			# 攻击意图必须明确指向对方，避免“正在追商队却顺手拦截玩家”。
-			var a_attacks_b: bool = a.attack_intent and a.current_target_id == b.party_id
-			var b_attacks_a: bool = b.attack_intent and b.current_target_id == a.party_id
 
 			# 查询双方各自正在参与的战斗；不同部队的战斗互不阻塞。
 			var a_battle: BattleSession = _battle_manager.get_battle_for_party(a.party_id)
@@ -135,45 +130,9 @@ func update_encounters() -> bool:
 				# 已经在同一场战斗中，不得重复创建或加入。
 				continue
 
-			# 玩家被具有攻击意图的敌对 AI 拦截：交给 WorldMap 弹出遭遇对话。
-			if not player_party_id.is_empty() and (a.party_id == player_party_id \
-					or b.party_id == player_party_id):
-				# 任意一方正在战斗时不触发新的玩家遭遇。
-				if a_battle != null or b_battle != null:
-					continue
-				if not a.is_available_for_world() or not b.is_available_for_world():
-					continue
-				var attacker := a if b.party_id == player_party_id else b
-				var target := b if attacker == a else a
-				if _declined_encounter_attacker_id == attacker.party_id:
-					continue
-				# 两种成立方式：
-				# 1. 敌对 AI 的 attack_intent 明确指向玩家；
-				# 2. 玩家主动点击并持续追击该敌对部队（focus_party_id 指向对方）。
-				# 玩家追击不要求目标停下，也不依赖目标反过来追击玩家。
-				var ai_initiated: bool = (
-					attacker.attack_intent
-					and attacker.current_target_id == target.party_id
-				)
-				var player_pursuit: bool = (
-					not target.focus_party_id.is_empty()
-					and target.focus_party_id == attacker.party_id
-				)
-				if not ai_initiated and not player_pursuit:
-					continue
-				# 敌对部队主动追击优先于玩家追击：双方都在追对方时按拦截处理。
-				var reason := (
-					EncounterReason.ENEMY_PURSUIT
-					if ai_initiated else EncounterReason.PLAYER_INITIATED
-				)
-				_begin_pending_player_encounter(attacker, target, reason)
-				return true
-
-			# NPC 对 NPC：双方已在不同战斗中时不得合并，也不能让一方同时参战。
-			if a_battle != null and b_battle != null:
-				continue
 			# 一方已参战、另一方空闲：尝试加入该方所在的离屏战斗。
-			if a_battle != null or b_battle != null:
+			# 加入距离以战场中心为准，与普通遭遇的双方距离解耦。
+			if (a_battle != null) != (b_battle != null):
 				var battle: BattleSession = a_battle if a_battle != null else b_battle
 				if not battle.offscreen:
 					continue
@@ -184,13 +143,65 @@ func update_encounters() -> bool:
 				# 玩家加入离屏战斗由 battle interaction 流程处理。
 				if available.party_id == player_party_id:
 					continue
+				if not _can_assist_battle(available, battle):
+					continue
+				if available.world_position.distance_to(battle.world_position) \
+						> BattleManager.JOIN_RADIUS:
+					continue
 				if _battle_manager.try_join_battle(available.party_id, battle.battle_id):
 					available.attack_intent = false
+					available.battle_response_id = ""
+					available.battle_response_until = 0.0
 					return false
 				continue
 
-			if not a.is_available_for_world() or not b.is_available_for_world():
+			# 双方都在不同战斗中时不得合并，也不能让一方同时参战。
+			if a_battle != null or b_battle != null:
 				continue
+
+			if not _faction_manager.is_party_hostile(a.party_id, b.party_id):
+				continue
+			if a.world_position.distance_to(b.world_position) > AI_ENCOUNTER_RADIUS:
+				continue
+
+			# 攻击意图必须明确指向对方，避免“正在追商队却顺手拦截玩家”。
+			var a_attacks_b: bool = a.attack_intent and a.current_target_id == b.party_id
+			var b_attacks_a: bool = b.attack_intent and b.current_target_id == a.party_id
+
+			# 玩家被具有攻击意图的敌对 AI 拦截：交给 WorldMap 弹出遭遇对话。
+			if not player_party_id.is_empty() and (a.party_id == player_party_id \
+					or b.party_id == player_party_id):
+				if not a.is_available_for_world() or not b.is_available_for_world():
+					continue
+				var attacker := a if b.party_id == player_party_id else b
+				var target := b if attacker == a else a
+				if _declined_encounter_attacker_id == attacker.party_id:
+					continue
+				# 两种成立方式：
+				# 1. 敌对 AI 的 attack_intent 明确指向玩家；
+				# 2. 玩家主动点击并持续追击该敌对部队（focus/跟随指令指向对方）。
+				# 玩家追击不要求目标停下，也不依赖目标反过来追击玩家。
+				var ai_initiated: bool = (
+					attacker.attack_intent
+					and attacker.current_target_id == target.party_id
+				)
+				var player_pursuit: bool = (
+					not target.focus_party_id.is_empty()
+					and target.focus_party_id == attacker.party_id
+				)
+				if not player_pursuit and target.current_order \
+						== PartyData.OrderType.FOLLOW_PARTY:
+					player_pursuit = target.current_target_id == attacker.party_id
+				if not ai_initiated and not player_pursuit:
+					continue
+				# 敌对部队主动追击优先于玩家追击：双方都在追对方时按拦截处理。
+				var reason := (
+					EncounterReason.ENEMY_PURSUIT
+					if ai_initiated else EncounterReason.PLAYER_INITIATED
+				)
+				_begin_pending_player_encounter(attacker, target, reason)
+				return true
+
 			if not (a_attacks_b or b_attacks_a):
 				continue
 			var ai_attacker := a if a_attacks_b else b
@@ -202,6 +213,20 @@ func update_encounters() -> bool:
 			ai_attacker.attack_intent = false
 			ai_target.attack_intent = false
 			return false
+	return false
+
+
+## NPC 加入既有战斗前的资格检查：
+## - 已经看见战场并通过 AIManager 开始接近（battle_response_id）；
+## - 或原本就在追击该战斗中的某支部队（视野已经在追击阶段确认过）。
+## 关系本身仍由 BattleManager.get_join_side() 统一判断。
+func _can_assist_battle(party: PartyData, battle: BattleSession) -> bool:
+	if party == null or battle == null:
+		return false
+	if party.battle_response_id == battle.battle_id:
+		return true
+	if party.attack_intent and not party.current_target_id.is_empty():
+		return battle.is_party_involved(party.current_target_id)
 	return false
 
 
@@ -230,6 +255,10 @@ func _begin_pending_player_encounter(
 	target.attack_intent = false
 	attacker.focus_party_id = ""
 	target.focus_party_id = ""
+	attacker.battle_response_id = ""
+	target.battle_response_id = ""
+	attacker.battle_response_until = 0.0
+	target.battle_response_until = 0.0
 	EventBus.player_encounter_requested.emit(
 		str(_pending_player_encounter["encounter_id"]),
 		attacker.party_id,
@@ -390,3 +419,5 @@ func _stop_party(party_id: String) -> void:
 	party.current_target_id = ""
 	party.attack_intent = false
 	party.focus_party_id = ""
+	party.battle_response_id = ""
+	party.battle_response_until = 0.0

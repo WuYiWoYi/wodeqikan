@@ -9,12 +9,19 @@ const ProjectileManagerScript = preload(
 	"res://Scripts/Systems/Combat/projectile_manager.gd"
 )
 
-const BATTLEFIELD_SIZE := Vector2(1280.0, 720.0)
-## 初始部署：双方靠近左右边界，阵线间距约 1100（含列间距后质心约 1040）。
-## 这是屏幕战斗唯一的初始距离参数；所有创建入口（玩家遭遇、AI 遭遇、
-## 多方中途加入）都经过 BattleScene，不会各自写不同距离。
-const SPAWN_MARGIN_X: float = 90.0
-const INITIAL_DEPLOYMENT_DISTANCE: float = BATTLEFIELD_SIZE.x - SPAWN_MARGIN_X * 2.0
+## 有效战场面积约为旧 1280×720 的 2 倍（1800×1024 ≈ 1.999 倍）。
+## 士兵像素尺寸、动画比例与相机视野（960×540）保持不变，扩大的只是可移动区域。
+const BATTLEFIELD_WIDTH: float = 1800.0
+const BATTLEFIELD_HEIGHT: float = 1024.0
+const BATTLEFIELD_SIZE := Vector2(BATTLEFIELD_WIDTH, BATTLEFIELD_HEIGHT)
+## 初始部署参数：双方分别部署在左右两侧，阵线间距由 INITIAL_ARMY_DISTANCE 控制。
+## 所有屏幕战斗创建入口（玩家遭遇、AI 遭遇、多方中途加入）共用这一组参数，
+## 不允许在其它脚本中写死另一套初始距离。
+const INITIAL_ARMY_DISTANCE: float = 1580.0
+const SPAWN_MARGIN_X: float = (
+	(BATTLEFIELD_WIDTH - INITIAL_ARMY_DISTANCE) * 0.5
+)
+const INITIAL_DEPLOYMENT_DISTANCE: float = BATTLEFIELD_WIDTH - SPAWN_MARGIN_X * 2.0
 const SPAWN_SPACING_X: float = 54.0
 const SPAWN_SPACING_Y: float = 64.0
 
@@ -24,6 +31,11 @@ const BATTLE_CAMERA_Y_OFFSET: float = 30.0
 
 ## 玩家获胜后结算面板的展示延迟（物理时间）。结算数据立即计算，只延迟 UI 展示。
 const VICTORY_RESULT_DELAY: float = 3.0
+
+## 增援部署：在当前阵线后方生成，避免与已参战单位重叠。
+const REINFORCEMENT_REAR_DISTANCE: float = 240.0
+const REINFORCEMENT_MIN_SPACING: float = 38.0
+const REINFORCEMENT_PROMPT_DURATION: float = 2.8
 
 ## 集群/队形参数集中配置。
 const FORMATION_REFRESH_INTERVAL: float = 0.4
@@ -111,6 +123,15 @@ var _control_list: VBoxContainer = null
 var _control_status_label: Label = null
 var _spectate_button: Button = null
 
+## 增援提示：队列逐条展示，不暂停战斗、不拦截输入。
+var _reinforcement_panel: PanelContainer = null
+var _reinforcement_badge: TextureRect = null
+var _reinforcement_label: Label = null
+var _reinforcement_queue: Array[Dictionary] = []
+var _reinforcement_remaining: float = 0.0
+## 已收到但尚未生成控制器的增援数；此间不判定战斗结束。
+var _pending_reinforcement_spawns: int = 0
+
 
 func _ready() -> void:
 	_context = GameManager.world_context
@@ -144,7 +165,18 @@ func _ready() -> void:
 	)
 	_camera_rig.snap_to(_get_camera_follow_position())
 	camera.enabled = true
+
+	# 增援可能在屏幕战斗进行中随时加入；表现层只追加新单位，不改既有状态。
+	if not EventBus.battle_participant_joined.is_connected(_on_battle_participant_joined):
+		EventBus.battle_participant_joined.connect(_on_battle_participant_joined)
+	if not EventBus.party_reinforced.is_connected(_on_party_reinforced):
+		EventBus.party_reinforced.connect(_on_party_reinforced)
+
 	queue_redraw()
+
+
+func _process(delta: float) -> void:
+	_tick_reinforcement_prompt(delta)
 
 
 func _draw() -> void:
@@ -785,6 +817,8 @@ func _build_ui() -> void:
 	hint.add_theme_constant_override("shadow_offset_y", 1)
 	_ui_root.add_child(hint)
 
+	_build_reinforcement_prompt()
+
 	_result_dim = ColorRect.new()
 	_result_dim.name = "BattleResultDim"
 	_result_dim.color = Color(0.0, 0.0, 0.0, 0.5)
@@ -918,6 +952,319 @@ func _build_control_transfer_ui() -> void:
 	column.add_child(_spectate_button)
 
 
+# ---------------------------------------------------------------------------
+# 增援：表现层追加单位与提示
+# ---------------------------------------------------------------------------
+
+
+func _build_reinforcement_prompt() -> void:
+	_reinforcement_panel = PanelContainer.new()
+	_reinforcement_panel.name = "ReinforcementPromptPanel"
+	_reinforcement_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_reinforcement_panel.anchor_left = 0.5
+	_reinforcement_panel.anchor_right = 0.5
+	_reinforcement_panel.offset_left = -320.0
+	_reinforcement_panel.offset_right = 320.0
+	_reinforcement_panel.offset_top = 54.0
+	_reinforcement_panel.offset_bottom = 104.0
+	_reinforcement_panel.visible = false
+	_ui_root.add_child(_reinforcement_panel)
+
+	var margin := MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_theme_constant_override("margin_left", 14)
+	margin.add_theme_constant_override("margin_right", 14)
+	margin.add_theme_constant_override("margin_top", 6)
+	margin.add_theme_constant_override("margin_bottom", 6)
+	_reinforcement_panel.add_child(margin)
+
+	var row := HBoxContainer.new()
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", 10)
+	margin.add_child(row)
+
+	_reinforcement_badge = TextureRect.new()
+	_reinforcement_badge.name = "ReinforcementBannerBadge"
+	_reinforcement_badge.custom_minimum_size = Vector2(32.0, 32.0)
+	_reinforcement_badge.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_reinforcement_badge.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_reinforcement_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_reinforcement_badge.visible = false
+	row.add_child(_reinforcement_badge)
+
+	_reinforcement_label = _make_label("", 16)
+	_reinforcement_label.name = "ReinforcementPromptLabel"
+	_reinforcement_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_reinforcement_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_reinforcement_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_reinforcement_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(_reinforcement_label)
+
+
+func _on_battle_participant_joined(
+	battle_id: String, party_id: String, side_index: int
+) -> void:
+	if _session == null or battle_id != _session.battle_id or _battle_over:
+		return
+	if _session.get_party_unit_ids(party_id).is_empty():
+		return
+	_pending_reinforcement_spawns += 1
+	call_deferred("_spawn_reinforcement_party", party_id, side_index)
+
+
+## 只有加入玩家所在战斗侧的 NPC 部队才提示，避免玩家自己或敌军增援刷屏。
+func _on_party_reinforced(
+	battle_id: String, party_id: String, noble_id: String, side_index: int
+) -> void:
+	if _session == null or battle_id != _session.battle_id or _battle_over:
+		return
+	if _context == null or party_id == _context.player_party_id:
+		return
+	if side_index != _player_side:
+		return
+	_queue_reinforcement_message(_build_reinforcement_message(party_id, noble_id))
+
+
+func _build_reinforcement_message(party_id: String, noble_id: String) -> Dictionary:
+	var party := _context.party_manager.get_party(party_id)
+	var noble: NobleData = null
+	if _context.noble_manager != null and not noble_id.is_empty():
+		noble = _context.noble_manager.get_noble(noble_id)
+	var display_name: String = ""
+	if noble != null:
+		display_name = noble.display_name
+	elif party != null and not party.party_name.is_empty():
+		# 无贵族部队使用真实部队名，不猜测或拼接未配置的称呼。
+		display_name = party.party_name
+	else:
+		display_name = "友军"
+
+	var house_name: String = ""
+	var banner: Texture2D = null
+	if noble != null and _context.house_manager != null \
+			and not noble.house_id.is_empty():
+		var house := _context.house_manager.get_house(noble.house_id)
+		if house != null:
+			house_name = house.house_name
+			var family := _context.family_registry.get_config(house.banner_id) \
+				if _context.family_registry != null else null
+			if family != null and not family.banner_texture_path.is_empty() \
+					and ResourceLoader.exists(family.banner_texture_path):
+				banner = load(family.banner_texture_path) as Texture2D
+
+	var text: String = ""
+	if banner != null and not house_name.is_empty():
+		text = "是%s的旗帜，%s带部队来增援我们了！" % [house_name, display_name]
+	else:
+		text = "%s带部队来增援我们了！" % display_name
+	return {"text": text, "banner": banner}
+
+
+func _queue_reinforcement_message(message: Dictionary) -> void:
+	if message.is_empty():
+		return
+	_reinforcement_queue.append(message)
+	if _reinforcement_panel != null and not _reinforcement_panel.visible:
+		_show_next_reinforcement_message()
+
+
+func _show_next_reinforcement_message() -> void:
+	if _battle_over or _reinforcement_panel == null or _reinforcement_queue.is_empty():
+		return
+	var message: Dictionary = _reinforcement_queue.pop_front()
+	_reinforcement_label.text = str(message.get("text", ""))
+	var banner := message.get("banner") as Texture2D
+	_reinforcement_badge.texture = banner
+	_reinforcement_badge.visible = banner != null
+	_reinforcement_panel.visible = true
+	_reinforcement_panel.modulate.a = 0.0
+	var tween := create_tween()
+	tween.tween_property(_reinforcement_panel, "modulate:a", 1.0, 0.2)
+	_reinforcement_remaining = REINFORCEMENT_PROMPT_DURATION
+
+
+func _tick_reinforcement_prompt(delta: float) -> void:
+	if _reinforcement_panel == null:
+		return
+	if _battle_over:
+		_reinforcement_panel.visible = false
+		_reinforcement_queue.clear()
+		return
+	if not _reinforcement_panel.visible:
+		if not _reinforcement_queue.is_empty():
+			_show_next_reinforcement_message()
+		return
+	_reinforcement_remaining = maxf(0.0, _reinforcement_remaining - delta)
+	if _reinforcement_remaining <= 0.0:
+		_reinforcement_panel.visible = false
+
+
+## 把新参战部队的单位追加到既有战斗侧；不触碰其他控制器、冷却或战斗状态。
+func _spawn_reinforcement_party(party_id: String, side_index: int) -> void:
+	_pending_reinforcement_spawns = maxi(0, _pending_reinforcement_spawns - 1)
+	if _battle_over or _session == null or _context == null:
+		return
+	if not _session.is_party_involved(party_id):
+		return
+	_ensure_side_registered()
+	var unit_ids: Array[String] = _session.get_party_unit_ids(party_id)
+	if unit_ids.is_empty():
+		return
+
+	var origin := _reinforcement_rear_position(side_index)
+	var away := _reinforcement_away_direction(side_index)
+	var controllers := _side_controllers.get(side_index, []) as Array[UnitController]
+	var spawned: int = 0
+	for unit_id: String in unit_ids:
+		if _controllers.has(unit_id):
+			continue
+		var spawn_pos := _find_free_reinforcement_position(origin, away)
+		var controller := _create_unit_controller(unit_id, side_index, spawn_pos)
+		if controller == null:
+			continue
+		if _projectile_manager != null:
+			controller.set_projectile_manager(_projectile_manager)
+		controllers.append(controller)
+		spawned += 1
+	if spawned == 0:
+		return
+	_side_controllers[side_index] = controllers
+	_rebuild_enemy_controller_lists()
+	_update_alive_label()
+	_refresh_neighbor_cache()
+	_refresh_target_claims()
+
+
+func _ensure_side_registered() -> void:
+	_side_order = _session.get_side_indices()
+	for side: int in _side_order:
+		if not _side_controllers.has(side):
+			_side_controllers[side] = [] as Array[UnitController]
+	_rebuild_enemy_controller_lists()
+
+
+func _rebuild_enemy_controller_lists() -> void:
+	_enemy_controllers_by_side.clear()
+	for side_index: int in _side_order:
+		var enemies: Array[UnitController] = []
+		for other_side: int in _side_order:
+			if other_side == side_index:
+				continue
+			enemies.append_array(
+				_side_controllers.get(other_side, []) as Array[UnitController]
+			)
+		_enemy_controllers_by_side[side_index] = enemies
+
+
+## 增援的“己方后方”以该战斗侧的初始部署区域为基准，
+## 而不是当前友军质心：友军即使已经推进到战场中心，增援仍从后方进入。
+func _reinforcement_rear_position(side_index: int) -> Vector2:
+	return _side_anchor(side_index)
+
+
+## 背离战场中心 / 敌方初始区域的方向。
+## 两方与多方战斗都依据该侧的区域锚点，而不是固定 side_index 左右规则；
+## 只有动态新增、没有固定锚点的战斗侧才回退到当前质心差。
+func _reinforcement_away_direction(side_index: int) -> Vector2:
+	var anchor := _side_anchor(side_index)
+	var direction := anchor - BATTLEFIELD_SIZE * 0.5
+	if direction.length_squared() >= 0.0001:
+		return direction.normalized()
+
+	var own := _alive_controllers_on_side(side_index)
+	var own_center: Vector2 = _centroid(own) if not own.is_empty() else anchor
+	var enemy_side := _nearest_enemy_side(side_index)
+	var enemy := _alive_controllers_on_side(enemy_side) if enemy_side >= 0 \
+		else [] as Array[UnitController]
+	direction = own_center - (
+		_centroid(enemy) if not enemy.is_empty() else BATTLEFIELD_SIZE * 0.5
+	)
+	if direction.length_squared() < 0.0001:
+		direction = Vector2.LEFT if side_index == 1 else Vector2.RIGHT
+	return direction.normalized()
+
+
+func _find_free_reinforcement_position(
+	origin: Vector2, away: Vector2
+) -> Vector2:
+	var right := Vector2(-away.y, away.x)
+	# 后方基准点必须落在战场内；后续排数向战场中心方向展开。
+	var rear := (origin + away * REINFORCEMENT_REAR_DISTANCE).clamp(
+		Vector2(40.0, 60.0),
+		BATTLEFIELD_SIZE - Vector2(40.0, 60.0)
+	)
+	var inward := -away
+	var columns: int = 3
+	for attempt: int in range(96):
+		@warning_ignore("integer_division")
+		var row: int = attempt / columns
+		var column: int = attempt % columns
+		var point: Vector2 = rear \
+			+ right * ((float(column) - 1.0) * SPAWN_SPACING_X) \
+			+ inward * float(row) * SPAWN_SPACING_Y
+		point.x = clampf(point.x, 40.0, BATTLEFIELD_SIZE.x - 40.0)
+		point.y = clampf(point.y, 60.0, BATTLEFIELD_SIZE.y - 60.0)
+		# 增援不得越过战场中心进入敌方半场，即使后方网格已经排满。
+		if (point - BATTLEFIELD_SIZE * 0.5).dot(away) < 0.0:
+			continue
+		if _is_spawn_point_free(point):
+			return point
+
+	# 3 列网格在己方半场排满（多方战斗的下/上侧尤其明显）时，
+	# 退化为己方半场内的均匀扫描，优先选择间距足够的点。
+	# 绝不直接返回已占用的 rear 基准点，避免增援重叠生成。
+	return _find_spare_reinforcement_point(away, rear)
+
+
+## 在背离战场中心的一侧扫描空闲点；优先满足最小间距，
+## 全部被占满时返回间距最大的点，仍保证位于战场边界与己方半场。
+func _find_spare_reinforcement_point(away: Vector2, fallback: Vector2) -> Vector2:
+	var center := BATTLEFIELD_SIZE * 0.5
+	var min_point := Vector2(40.0, 60.0)
+	var max_point := BATTLEFIELD_SIZE - Vector2(40.0, 60.0)
+	var step := REINFORCEMENT_MIN_SPACING
+	var best := fallback
+	var best_clearance: float = -1.0
+	var y: float = min_point.y
+	while y <= max_point.y:
+		var x: float = min_point.x
+		while x <= max_point.x:
+			var point := Vector2(x, y)
+			if (point - center).dot(away) >= 0.0:
+				var clearance := _spawn_clearance(point)
+				if clearance >= REINFORCEMENT_MIN_SPACING:
+					return point
+				if clearance > best_clearance:
+					best_clearance = clearance
+					best = point
+			x += step
+		y += step
+	return best
+
+
+## 候选点到最近存活单位的距离；没有单位时返回 INF。
+func _spawn_clearance(point: Vector2) -> float:
+	var clearance: float = INF
+	for value: Variant in _controllers.values():
+		var controller := value as UnitController
+		if controller == null or not controller.is_alive():
+			continue
+		clearance = minf(
+			clearance, controller.get_position().distance_to(point)
+		)
+	return clearance
+
+
+func _is_spawn_point_free(point: Vector2) -> bool:
+	for value: Variant in _controllers.values():
+		var controller := value as UnitController
+		if controller == null or not controller.is_alive():
+			continue
+		if controller.get_position().distance_to(point) < REINFORCEMENT_MIN_SPACING:
+			return false
+	return true
+
+
 ## 所有战斗单位共享一个发射物管理器；远程单位只通过它生成临时箭矢。
 func _setup_projectiles() -> void:
 	_projectile_manager = ProjectileManagerScript.new()
@@ -958,32 +1305,44 @@ func _spawn_side(side_index: int) -> void:
 	var controllers := _side_controllers[side_index] as Array[UnitController]
 	for i: int in range(total):
 		var unit_id: String = unit_ids[i]
-		var unit := _context.unit_manager.get_unit(unit_id)
-		var state := _session.get_unit_state(unit_id)
-		if unit == null or state == null:
-			push_warning("战斗场景跳过无效单位: %s" % unit_id)
-			continue
-		# 玩家加入前已经发生的离屏伤亡不应在屏幕战斗中重新生成。
-		if not state.alive or state.battle_hp <= 0:
-			continue
-
-		var player_side: bool = side_index == _player_side
-		state.battle_position = _spawn_position(
+		var spawn_pos := _spawn_position(
 			i, total, side_index, _side_order.size()
 		)
-		var actor := UnitActor.new()
-		characters.add_child(actor)
-		actor.setup(
-			unit, state, player_side, _visual_equipment_configs(unit)
-		)
+		var controller := _create_unit_controller(unit_id, side_index, spawn_pos)
+		if controller != null:
+			controllers.append(controller)
 
-		var controller := UnitController.new()
-		controller.setup(unit, state, player_side, actor, Rect2(Vector2.ZERO, BATTLEFIELD_SIZE))
-		controller.side_index = side_index
 
-		_actors[unit_id] = actor
-		_controllers[unit_id] = controller
-		controllers.append(controller)
+## 创建单个单位的表现与控制器。初始部署与增援共用，保证属性/装备一致。
+func _create_unit_controller(
+	unit_id: String, side_index: int, spawn_pos: Vector2
+) -> UnitController:
+	var unit := _context.unit_manager.get_unit(unit_id)
+	var state := _session.get_unit_state(unit_id)
+	if unit == null or state == null:
+		push_warning("战斗场景跳过无效单位: %s" % unit_id)
+		return null
+	# 玩家加入前已经发生的离屏伤亡不应在屏幕战斗中重新生成。
+	if not state.alive or state.battle_hp <= 0:
+		return null
+	if _controllers.has(unit_id):
+		return _controllers.get(unit_id) as UnitController
+
+	var player_side: bool = side_index == _player_side
+	state.battle_position = spawn_pos
+	var actor := UnitActor.new()
+	characters.add_child(actor)
+	actor.setup(
+		unit, state, player_side, _visual_equipment_configs(unit)
+	)
+
+	var controller := UnitController.new()
+	controller.setup(unit, state, player_side, actor, Rect2(Vector2.ZERO, BATTLEFIELD_SIZE))
+	controller.side_index = side_index
+
+	_actors[unit_id] = actor
+	_controllers[unit_id] = controller
+	return controller
 
 
 ## 为 UnitVisual 提供当前装备槽位的视觉配置；缺失配置时保持默认长矛/头部。
@@ -1032,9 +1391,9 @@ func _side_anchor(side_index: int) -> Vector2:
 		1:
 			return Vector2(BATTLEFIELD_SIZE.x - SPAWN_MARGIN_X, center.y)
 		2:
-			return Vector2(center.x, BATTLEFIELD_SIZE.y - 160.0)
+			return Vector2(center.x, BATTLEFIELD_SIZE.y - BATTLEFIELD_SIZE.y * 0.22)
 		3:
-			return Vector2(center.x, 160.0)
+			return Vector2(center.x, BATTLEFIELD_SIZE.y * 0.22)
 		_:
 			return center
 
@@ -1098,6 +1457,8 @@ func _count_alive(controllers: Array[UnitController]) -> int:
 
 
 func _check_battle_end() -> void:
+	if _pending_reinforcement_spawns > 0:
+		return
 	var alive_sides: Array[int] = []
 	for side_index: int in _side_order:
 		if _count_side_alive(side_index) > 0:

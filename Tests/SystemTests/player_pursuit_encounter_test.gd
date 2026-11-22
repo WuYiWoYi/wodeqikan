@@ -4,11 +4,14 @@ extends Node
 ## 运行：
 ##   Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/player_pursuit_encounter_test.tscn
 
+const MILITIA_PATH: String = "res://Data/Units/infantry_militia.tres"
+
 var _failed: bool = false
 var _context: WorldContext = null
 var _map: Node = null
 var _player: PartyData = null
 var _bandit: PartyData = null
+var _militia: UnitConfig = null
 
 
 func _ready() -> void:
@@ -131,6 +134,17 @@ func _run() -> void:
 		"撤退后不会留下永久移动中的部队"
 	)
 
+	# 阶段 10 补充：地图点击、目标变向、目标参战、战后冷却与 AI 恢复。
+	_militia = load(MILITIA_PATH) as UnitConfig
+	_check(_militia != null, "加载民兵配置")
+	if _militia == null:
+		return
+	_test_map_move_clears_focus()
+	await _test_pursuit_survives_direction_change()
+	await _test_focus_survives_target_battle()
+	await _test_pursuit_waits_for_post_battle_cooldown()
+	await _test_ai_repursues_player_after_cooldown()
+
 	# 仍在拒绝范围内再次追击：不重复弹出同一场遭遇。
 	_player.focus_party_id = _bandit.party_id
 	_check(
@@ -159,9 +173,8 @@ func _run() -> void:
 	_check(fight != null, "重新触发后存在战斗按钮")
 	if fight != null:
 		fight.pressed.emit()
-	await get_tree().process_frame
-	await get_tree().process_frame
-	await get_tree().process_frame
+	for i: int in range(8):
+		await get_tree().process_frame
 
 	_check(
 		get_tree().current_scene != null and get_tree().current_scene.name == "Battle",
@@ -176,6 +189,277 @@ func _run() -> void:
 			"玩家与追击目标处于不同战斗侧"
 		)
 		_context.battle_manager.abort_battle(session.battle_id)
+
+
+# ---------------------------------------------------------------------------
+# 阶段 10：追击在目标变向、参战与战后冷却期间的稳定性
+# ---------------------------------------------------------------------------
+
+
+## 普通地图移动指令必须清除主动追击焦点。
+func _test_map_move_clears_focus() -> void:
+	_reset_pursuit_parties()
+	_player.focus_party_id = _bandit.party_id
+	_check(
+		bool(_map.call("request_player_move", Vector2(1500.0, 1800.0))),
+		"地图点击下达普通移动"
+	)
+	_check(_player.focus_party_id.is_empty(), "普通地图移动清除追击焦点")
+	_check(
+		_player.current_order != PartyData.OrderType.FOLLOW_PARTY,
+		"普通地图移动结束跟随指令"
+	)
+	_context.world_map_manager.stop_party(_player.party_id)
+
+
+## 目标中途改变方向后，玩家跟随目标仍读取其最新位置并最终触发遭遇。
+func _test_pursuit_survives_direction_change() -> void:
+	_reset_pursuit_parties()
+	_clear_decline_latch()
+	_player.world_position = Vector2(900.0, 1200.0)
+	_bandit.world_position = Vector2(1080.0, 1200.0)
+	_bandit.target_position = Vector2(1600.0, 1200.0)
+	_bandit.movement_state = PartyData.MovementState.MOVING
+	_bandit.current_order = PartyData.OrderType.MOVE
+	_check(
+		bool(_map.call("request_party_command", _bandit.party_id)),
+		"变向测试开始追击"
+	)
+	for i: int in range(10):
+		_context.world_map_manager.update_party_movement(0.1)
+	# 目标转向后，跟随目标必须更新到新位置，而不是沿用旧方向。
+	_bandit.target_position = Vector2(1200.0, 1600.0)
+	_bandit.movement_state = PartyData.MovementState.MOVING
+	_context.world_map_manager.update_party_movement(0.6)
+	_check(
+		_player.focus_party_id == _bandit.party_id,
+		"目标变向后焦点保持"
+	)
+	_check(
+		_player.target_position.distance_to(_bandit.world_position) <= 60.0,
+		"目标变向后跟随坐标同步到新位置"
+	)
+	_player.world_position = _bandit.world_position + Vector2(40.0, 0.0)
+	_context.world_map_manager.stop_party(_bandit.party_id)
+	_check(
+		_context.encounter_manager.update_encounters(),
+		"目标变向后仍能正常触发遭遇"
+	)
+	await _dismiss_encounter_panel()
+	_clear_decline_latch()
+
+
+## 目标进入其他战斗时保留追击关系并原地等待，战斗结束后恢复跟随。
+func _test_focus_survives_target_battle() -> void:
+	_reset_pursuit_parties()
+	var old_fraction: float = _context.battle_manager.offscreen_config.base_hourly_casualty_fraction
+	var old_variance: float = _context.battle_manager.offscreen_config.casualty_variance
+	_context.battle_manager.offscreen_config.base_hourly_casualty_fraction = 0.0
+	_context.battle_manager.offscreen_config.casualty_variance = 0.0
+
+	_player.world_position = Vector2(900.0, 1200.0)
+	_bandit.world_position = Vector2(1080.0, 1200.0)
+	_check(
+		bool(_map.call("request_party_command", _bandit.party_id)),
+		"目标参战前开始追击"
+	)
+	var guard := _make_temp_party(
+		FactionManager.GUARD_FACTION_ID, Vector2(1100.0, 1200.0), "目标战斗对手"
+	)
+	var session := _context.battle_manager.start_battle(
+		[_bandit.party_id], [guard.party_id], _bandit.world_position, true
+	)
+	_check(session != null, "目标进入另一场离屏战斗")
+	if session != null:
+		_map.call("_update_focus_state")
+		_check(
+			_player.focus_party_id == _bandit.party_id,
+			"目标进入战斗后焦点不被清除"
+		)
+		_context.world_map_manager.update_party_movement(0.5)
+		_check(
+			_player.current_order == PartyData.OrderType.FOLLOW_PARTY
+				and _player.movement_state == PartyData.MovementState.IDLE,
+			"目标战斗中玩家保持跟随指令并原地等待"
+		)
+		# 收尾阶段靠近目标，验证焦点在战斗结束后仍保留。
+		_player.world_position = _bandit.world_position + Vector2(40.0, 0.0)
+
+		_context.battle_manager.resolve_current_battle_now()
+		_check(
+			_context.battle_manager.get_battle(session.battle_id) == null,
+			"目标所在战斗已结束"
+		)
+		_map.call("_update_focus_state")
+		_check(
+			_player.focus_party_id == _bandit.party_id,
+			"目标战斗结束后焦点仍然保留"
+		)
+		_context.world_map_manager.update_party_movement(0.5)
+		_check(
+			_player.current_order == PartyData.OrderType.FOLLOW_PARTY
+				and _player.movement_state == PartyData.MovementState.MOVING,
+			"目标战斗结束后自动恢复追击移动"
+		)
+
+	_destroy_temp_party(guard)
+	_context.battle_manager.offscreen_config.base_hourly_casualty_fraction = old_fraction
+	_context.battle_manager.offscreen_config.casualty_variance = old_variance
+	_reset_pursuit_parties()
+
+
+## 目标刚结束战斗处于冷却时，玩家追上后等待；冷却结束必须可靠触发，而不是永久卡住。
+func _test_pursuit_waits_for_post_battle_cooldown() -> void:
+	_reset_pursuit_parties()
+	_clear_decline_latch()
+	TimeManager.world_elapsed_seconds = 0.0
+	var old_fraction: float = _context.battle_manager.offscreen_config.base_hourly_casualty_fraction
+	var old_variance: float = _context.battle_manager.offscreen_config.casualty_variance
+	_context.battle_manager.offscreen_config.base_hourly_casualty_fraction = 0.0
+	_context.battle_manager.offscreen_config.casualty_variance = 0.0
+
+	_bandit.world_position = Vector2(1200.0, 1200.0)
+	var caravan := _make_temp_party(
+		FactionManager.MERCHANT_FACTION_ID,
+		Vector2(1230.0, 1200.0),
+		"被击败的商队"
+	)
+	var session := _context.battle_manager.start_battle(
+		[_bandit.party_id], [caravan.party_id], Vector2(1215.0, 1200.0), true
+	)
+	_check(session != null, "强盗击败商队的离屏战斗")
+	if session == null:
+		_destroy_temp_party(caravan)
+		return
+	_context.battle_manager.resolve_current_battle_now()
+	_check(
+		_bandit.engagement_cooldown_until > TimeManager.world_elapsed_seconds,
+		"强盗战后进入冷却"
+	)
+	# 商队退场，避免干扰追击。
+	caravan.world_position = Vector2(2500.0, 1800.0)
+	caravan.target_position = caravan.world_position
+	caravan.movement_state = PartyData.MovementState.IDLE
+
+	_player.world_position = Vector2(900.0, 1200.0)
+	_bandit.world_position = Vector2(1200.0, 1200.0)
+	_bandit.target_position = _bandit.world_position
+	_bandit.movement_state = PartyData.MovementState.IDLE
+	_check(
+		bool(_map.call("request_party_command", _bandit.party_id)),
+		"商队战败后玩家继续追击强盗"
+	)
+
+	var triggered: bool = false
+	for i: int in range(240):
+		_context.world_map_manager.update_party_movement(0.1)
+		TimeManager.world_elapsed_seconds += 0.2
+		if _context.encounter_manager.update_encounters():
+			triggered = true
+			break
+	_check(triggered, "冷却结束后玩家追击可靠触发遭遇")
+	_check(
+		TimeManager.world_elapsed_seconds >= 30.0 - 0.001,
+		"遭遇发生在战后冷却结束之后"
+	)
+	_check(
+		_player.world_position.distance_to(_bandit.world_position)
+			<= EncounterManager.AI_ENCOUNTER_RADIUS,
+		"等待期间玩家保持在遭遇距离内"
+	)
+	await _dismiss_encounter_panel()
+	_clear_decline_latch()
+	_destroy_temp_party(caravan)
+	_context.battle_manager.offscreen_config.base_hourly_casualty_fraction = old_fraction
+	_context.battle_manager.offscreen_config.casualty_variance = old_variance
+	_reset_pursuit_parties()
+
+
+## 战后冷却结束，AI 强盗重新把玩家视为追击目标并主动拦截。
+func _test_ai_repursues_player_after_cooldown() -> void:
+	_reset_pursuit_parties()
+	_clear_decline_latch()
+	TimeManager.world_elapsed_seconds = 0.0
+	_player.world_position = Vector2(1200.0, 1200.0)
+	_bandit.world_position = Vector2(1600.0, 1200.0)
+	_bandit.sight_range = 500.0
+	_bandit.ai_type = PartyData.PartyAIType.BANDIT
+	_bandit.engagement_cooldown_until = 10.0
+
+	_context.ai_manager.tick(1.0)
+	_check(
+		_bandit.current_target_id.is_empty() and not _bandit.attack_intent,
+		"冷却中强盗不追击玩家"
+	)
+
+	TimeManager.world_elapsed_seconds = 11.0
+	_context.ai_manager.tick(1.0)
+	_check(
+		_bandit.current_target_id == _player.party_id and _bandit.attack_intent,
+		"冷却结束后强盗重新锁定玩家"
+	)
+	_bandit.world_position = _player.world_position + Vector2(40.0, 0.0)
+	_check(
+		_context.encounter_manager.update_encounters(),
+		"恢复追击后主动拦截玩家"
+	)
+	await _dismiss_encounter_panel()
+	_clear_decline_latch()
+	_bandit.ai_type = PartyData.PartyAIType.NONE
+	_reset_pursuit_parties()
+
+
+func _reset_pursuit_parties() -> void:
+	_context.encounter_manager.clear_pending_player_encounter()
+	for party: PartyData in [_player, _bandit]:
+		party.focus_party_id = ""
+		party.attack_intent = false
+		party.current_target_id = ""
+		party.current_order = PartyData.OrderType.NONE
+		party.target_position = party.world_position
+		party.movement_state = PartyData.MovementState.IDLE
+		party.battle_state = PartyData.BattleState.AVAILABLE
+	_context.battle_manager.player_party_id = _context.player_party_id
+
+
+func _clear_decline_latch() -> void:
+	# 拉开到拒绝锁存退出距离之外，让后续场景可以重新触发同一对手。
+	_player.world_position = _bandit.world_position + Vector2(300.0, 0.0)
+	_context.encounter_manager.update_encounters()
+
+
+func _dismiss_encounter_panel() -> void:
+	await get_tree().process_frame
+	var panel := _find_panel("PlayerEncounterPanel")
+	if panel != null and panel.visible:
+		# 测试清理直接走取消入口；AI 主动拦截不允许撤退，不能依赖撤退按钮。
+		_map.call("cancel_player_encounter")
+		await get_tree().process_frame
+	else:
+		_context.encounter_manager.clear_pending_player_encounter()
+
+
+func _make_temp_party(
+	faction_id: String, position: Vector2, party_name: String
+) -> PartyData:
+	var party := _context.party_manager.create_party(faction_id, position, party_name)
+	party.target_position = position
+	party.movement_state = PartyData.MovementState.IDLE
+	party.sight_range = 250.0
+	party.movement_speed = 100.0
+	for i: int in range(3):
+		var unit := _context.unit_manager.create_unit(_militia, faction_id)
+		_context.party_manager.add_member(party.party_id, unit.unit_id)
+	return party
+
+
+func _destroy_temp_party(party: PartyData) -> void:
+	if party == null:
+		return
+	for unit_id: String in party.member_unit_ids.duplicate():
+		_context.party_manager.remove_member(party.party_id, unit_id)
+		_context.unit_manager.remove_unit(unit_id)
+	_context.party_manager.remove_party(party.party_id)
 
 
 func _isolate_parties() -> void:

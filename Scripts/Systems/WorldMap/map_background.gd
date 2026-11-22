@@ -3,7 +3,7 @@ extends Node2D
 ## Milestone 1 的简单大地图背景：草地、道路、河流与边界。
 ## 纯绘制，不参与任何世界数据。
 
-@export var world_size: Vector2 = Vector2(3000.0, 2000.0)
+@export var world_size: Vector2 = Vector2(5000.0, 3000.0)
 
 
 func _ready() -> void:
@@ -42,10 +42,18 @@ func _draw() -> void:
 
 func _draw_settlement_clearings() -> void:
 	var clearings := [
-		Vector2(500.0, 500.0),
-		Vector2(1200.0, 900.0),
-		Vector2(2200.0, 500.0),
-		Vector2(1800.0, 1300.0),
+		# 伯克纳尼亚王国区域（北）：统治家族与墨西西附庸封地。
+		Vector2(2500.0, 700.0),
+		Vector2(2250.0, 1000.0),
+		Vector2(2900.0, 750.0),
+		Vector2(3200.0, 1000.0),
+		# 玩家中立村庄位于两王国之间的西侧缓冲地带。
+		Vector2(1600.0, 1500.0),
+		# 奥林王国区域（南）：统治家族与巴里附庸封地。
+		Vector2(2600.0, 2100.0),
+		Vector2(2900.0, 2350.0),
+		Vector2(2950.0, 1850.0),
+		Vector2(3250.0, 2050.0),
 	]
 	for point: Vector2 in clearings:
 		draw_circle(point, 95.0, Color(0.86, 0.79, 0.56, 0.30))
@@ -68,11 +76,18 @@ func _draw_river() -> void:
 func _draw_roads() -> void:
 	var road_color := Color("#b7a06a")
 	var roads := [
-		[Vector2(500.0, 500.0), Vector2(1200.0, 900.0)],
-		[Vector2(1200.0, 900.0), Vector2(2200.0, 500.0)],
-		[Vector2(1200.0, 900.0), Vector2(1800.0, 1300.0)],
-		[Vector2(1800.0, 1300.0), Vector2(2200.0, 500.0)],
-		[Vector2(400.0, 1000.0), Vector2(1200.0, 900.0)],
+		# 玩家村庄到两个王国区域的联络道路。
+		[Vector2(1600.0, 1500.0), Vector2(2900.0, 750.0)],
+		[Vector2(1600.0, 1500.0), Vector2(2950.0, 1850.0)],
+		# 伯克纳尼亚区域内部：统治家族、附庸与各自封地。
+		[Vector2(2500.0, 700.0), Vector2(2900.0, 750.0)],
+		[Vector2(2250.0, 1000.0), Vector2(2500.0, 700.0)],
+		[Vector2(2900.0, 750.0), Vector2(3200.0, 1000.0)],
+		[Vector2(2250.0, 1000.0), Vector2(2900.0, 750.0)],
+		# 奥林区域内部：统治家族、附庸与各自封地。
+		[Vector2(2950.0, 1850.0), Vector2(3250.0, 2050.0)],
+		[Vector2(2950.0, 1850.0), Vector2(2600.0, 2100.0)],
+		[Vector2(2600.0, 2100.0), Vector2(2900.0, 2350.0)],
 	]
 	for road: Array in roads:
 		var from: Vector2 = road[0]

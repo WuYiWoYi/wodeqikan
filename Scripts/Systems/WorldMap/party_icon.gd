@@ -84,8 +84,14 @@ func _draw() -> void:
 		)
 
 	# 没有家族旗帜时，在圆内绘制简易默认旗帜，避免出现空圆。
+	# 三角形顶点需落在内圆内，因此单独限制半宽，避免放大旗帜后越出圆形。
 	if _flag_sprite == null or _flag_sprite.texture == null:
-		var half: float = _style.flag_max_size * 0.5
+		var inner_radius: float = maxf(
+			1.0, _style.marker_radius - _style.border_width
+		)
+		var half: float = minf(
+			_style.flag_max_size * 0.5, inner_radius * 0.62
+		)
 		draw_colored_polygon(
 			PackedVector2Array([
 				Vector2(-half, -half),

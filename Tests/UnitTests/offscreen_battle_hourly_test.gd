@@ -51,7 +51,7 @@ func _setup_fixture() -> void:
 	_parties = PartyManager.new()
 	_parties.setup(_units, _ids)
 	_factions = FactionManager.new()
-	_factions.setup_defaults()
+	_factions.setup_defaults(_parties)
 	_battle = BattleManager.new()
 	_battle.setup(_units, _parties, _ids, _factions)
 

@@ -174,7 +174,9 @@ func tick(world_delta: float) -> void:
 			settlement.fief_recruitment_elapsed = 0.0
 
 
-## 领主是否拥有该封地；空 ID 或无效领主一律拒绝。
+## 贵族是否获得封地家族授权；空 ID 或无效贵族一律拒绝。
+## 本阶段规则：只有村庄可征召；封地明确指定 owner_noble_id 时只认该贵族；
+## 未指定个人所有者时，允许所有者家族的领袖征召。
 func can_recruit(settlement_id: String, lord_id: String) -> bool:
 	var settlement: SettlementData = null
 	if _settlement_manager != null:
@@ -189,8 +191,14 @@ func can_recruit(settlement_id: String, lord_id: String) -> bool:
 	if lord == null or not lord.is_alive:
 		last_error = "领主不存在或已死亡，无法征召采邑。"
 		return false
-	if settlement.owner_lord_id != lord_id:
-		last_error = "你不是该封地的领主，无法征召采邑。"
+	var noble := lord as NobleData
+	var authorized: bool = settlement.owner_noble_id == lord_id
+	if not authorized and settlement.owner_noble_id.is_empty() \
+			and not settlement.owner_house_id.is_empty() and noble != null:
+		authorized = noble.house_id == settlement.owner_house_id \
+			and noble.is_house_leader
+	if not authorized:
+		last_error = "你不是该封地家族的授权贵族，无法征召采邑。"
 		return false
 	if settlement.fief_recruitment_stock <= 0:
 		last_error = "当前没有可征召的采邑。"

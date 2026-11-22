@@ -22,6 +22,10 @@ signal settlement_exited(settlement_id: String, party_id: String)
 signal battle_started(battle_id: String)
 signal battle_finished(battle_id: String, result: int)
 signal battle_participant_joined(battle_id: String, party_id: String, side_index: int)
+## 增援部队已加入既有战斗。noble_id 可能为空（无贵族的普通部队）。
+signal party_reinforced(
+	battle_id: String, party_id: String, noble_id: String, side_index: int
+)
 ## 离屏战斗完成一次小时结算后广播，供大地图战斗面板刷新存活人数。
 signal battle_participants_updated(battle_id: String)
 signal player_encounter_requested(

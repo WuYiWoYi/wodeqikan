@@ -23,7 +23,7 @@ EventBus.fief_recruited
 WorldLogManager / WorldMap 浮动提示（只读订阅）
 ```
 
-- 只有 `SettlementData.owner_lord_id == lord_id` 的领主可以征召；`faction_id`、`family_id` 不参与权限判断。
+- 阶段 8 起授权条件：`SettlementData.owner_noble_id == lord_id`，或请求者是 `owner_house_id` 家族的领袖；`faction_id` 与视觉 `family_id` 不参与权限判断。`owner_lord_id` 作为兼容副本同步。
 - 只有村庄有采邑储备；城镇/城堡容量为 0。
 - 管理器不操作 UI、场景节点或部队图标；UI 只调用接口并读取 `last_error`。
 - 生成的 6 名单位全部进入 `UnitManager`，并通过 `PartyManager.add_member()` 加入领主部队。
@@ -34,7 +34,9 @@ WorldLogManager / WorldMap 浮动提示（只读订阅）
 
 | 字段 | 说明 |
 |---|---|
-| `owner_lord_id` | 封地归属领主；空字符串表示无主 |
+| `owner_noble_id` | 封地归属贵族；空字符串表示无主 |
+| `owner_house_id` | 归属政治家族；家族领袖也可授权征召 |
+| `owner_lord_id` | 兼容副本；与 `owner_noble_id` 同步 |
 | `fief_recruitment_stock` | 当前可征召组数 |
 | `fief_recruitment_capacity` | 储备上限；读档/配置变化时按 `fief_max_stock` 修正 |
 | `fief_recruitment_elapsed` | 距离下一组补充的累计世界秒 |
@@ -60,7 +62,7 @@ WorldLogManager / WorldMap 浮动提示（只读订阅）
 
 `recruit_group()` 按以下顺序执行：
 
-1. `can_recruit()` 校验：村庄存在且为村庄、领主存在且存活、`owner_lord_id` 匹配、储备 > 0、领主部队存在且 `is_available_for_world()`。
+1. `can_recruit()` 校验：村庄存在且为村庄、贵族存在且存活、`owner_noble_id` 匹配或请求者为 `owner_house_id` 家族领袖、储备 > 0、部队存在且 `is_available_for_world()`。
 2. 校验编制人数与配置一致。
 3. 依次创建 6 个单位、写入招募来源、生成外观、装备马匹、加入部队。
 4. 全部成功后一次性扣除储备、人口、繁荣度，重置补充计时并重算税收缓存。
@@ -118,9 +120,9 @@ interval = refill_base_interval
 
 ## 9. 持久化
 
-- `SettlementData.to_dict()/from_dict()` 保存 `owner_lord_id`、储备/容量/计时、人口/繁荣度、税收缓存与冒险者候选人。
-- 存档 Schema v4 新增顶层 `lords`；读档先恢复领主，再恢复地点，随后调用 `initialize_settlement(settlement)` 修正边界但不覆盖储备与计时。
-- 读档校验：每个非空 `owner_lord_id` 必须指向存在的领主；玩家领主必须存在且 `is_player_lord == true`；失败则拒绝加载，不自动改写存档。
+- `SettlementData.to_dict()/from_dict()` 保存 `owner_noble_id` / `owner_house_id` / `owner_lord_id`、储备/容量/计时、人口/繁荣度、税收缓存与冒险者候选人。
+- 存档 Schema v4 新增顶层 `lords`；Schema v5 继续保留并由 `nobles` 同源提供贵族数据。读档先恢复领主/贵族，再恢复地点，随后调用 `initialize_settlement(settlement)` 修正边界但不覆盖储备与计时。
+- 读档校验：每个非空 `owner_noble_id` 必须指向存在的贵族，`owner_house_id` 必须存在且与贵族家族一致；玩家贵族必须存在且 `is_player_lord == true`；失败则拒绝加载，不自动改写存档。
 - 当前配置参数（周期、成本、编制、上限）是静态资源，不进入存档。
 
 ## 10. 测试

@@ -21,7 +21,11 @@ func setup(
 	_unit_manager = unit_manager
 
 
-func can_see(observer_id: String, target_id: String) -> bool:
+## include_in_battle = true 时，正在离屏战斗中的参战方也视为可见。
+## 普通追击目标使用默认 false，避免追击已经锁定进战斗的部队。
+func can_see(
+	observer_id: String, target_id: String, include_in_battle: bool = false
+) -> bool:
 	if _party_manager == null:
 		return false
 	if observer_id.is_empty() or target_id.is_empty() or observer_id == target_id:
@@ -30,7 +34,7 @@ func can_see(observer_id: String, target_id: String) -> bool:
 	var target := _party_manager.get_party(target_id)
 	if observer == null or target == null:
 		return false
-	if not _is_active_party(observer) or not _is_valid_target(target):
+	if not _is_active_party(observer) or not _is_valid_target(target, include_in_battle):
 		return false
 	return observer.world_position.distance_to(target.world_position) <= maxf(
 		observer.sight_range, 0.0
@@ -38,7 +42,10 @@ func can_see(observer_id: String, target_id: String) -> bool:
 
 
 ## 返回观察者当前可见的全部有效部队（不含自身、失效部队与空部队）。
-func get_visible_parties(observer_id: String) -> Array[PartyData]:
+## include_in_battle = true 用于“看见正在发生的战斗”，允许把 IN_BATTLE 参战方纳入结果。
+func get_visible_parties(
+	observer_id: String, include_in_battle: bool = false
+) -> Array[PartyData]:
 	var result: Array[PartyData] = []
 	if _party_manager == null:
 		return result
@@ -50,7 +57,7 @@ func get_visible_parties(observer_id: String) -> Array[PartyData]:
 	for target: PartyData in _party_manager.get_all_parties():
 		if target == null or target.party_id == observer_id:
 			continue
-		if not _is_valid_target(target):
+		if not _is_valid_target(target, include_in_battle):
 			continue
 		if observer.world_position.distance_to(target.world_position) <= sight:
 			result.append(target)
@@ -101,7 +108,9 @@ func _filter_by_relation(
 	for target: PartyData in get_visible_parties(observer_id):
 		if _faction_manager == null:
 			continue
-		if _faction_manager.get_relation(observer.faction_id, target.faction_id) == relation:
+		if _faction_manager.get_party_relation(
+			observer.party_id, target.party_id
+		) == relation:
 			result.append(target)
 	return result
 
@@ -128,9 +137,13 @@ func _is_active_party(party: PartyData) -> bool:
 
 
 ## 可被发现/追击的目标：可用、有存活士兵、不是空部队。
-func _is_valid_target(party: PartyData) -> bool:
-	if party == null or not party.is_available_for_world():
+## include_in_battle = true 时额外接受 IN_BATTLE 参战方（仅用于观察战斗）。
+func _is_valid_target(party: PartyData, include_in_battle: bool = false) -> bool:
+	if party == null:
 		return false
+	if not party.is_available_for_world():
+		if not include_in_battle or party.battle_state != PartyData.BattleState.IN_BATTLE:
+			return false
 	return _has_living_member(party)
 
 

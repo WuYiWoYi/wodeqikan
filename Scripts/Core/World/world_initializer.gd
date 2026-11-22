@@ -13,6 +13,27 @@ const GUARD_FACTION_ID: String = "FACTION_GUARD"
 const FAMILY_BARI_ID: String = "FAMILY_BARI"
 const FAMILY_MOXIXI_ID: String = "FAMILY_MOXIXI"
 const FAMILY_PLAYER_ID: String = "FAMILY_PLAYER"
+const FAMILY_BURKNANIA_ID: String = "FAMILY_BURKNANIA"
+const FAMILY_OLIN_ID: String = "FAMILY_OLIN"
+
+## 政治层级固定 ID：家族 → 王国。只在新世界初始化时写入，读档不会重建。
+const HOUSE_PLAYER_ID: String = "HOUSE_PLAYER"
+const HOUSE_BARI_ID: String = "HOUSE_BARI"
+const HOUSE_MOXIXI_ID: String = "HOUSE_MOXIXI"
+const HOUSE_BURKNANIA_ID: String = "HOUSE_BURKNANIA"
+const HOUSE_OLIN_ID: String = "HOUSE_OLIN"
+const KINGDOM_BURKNANIA_ID: String = "KINGDOM_BURKNANIA"
+const KINGDOM_OLIN_ID: String = "KINGDOM_OLIN"
+
+const PLAYER_HOUSE_NAME: String = "玩家家族"
+const BARI_HOUSE_NAME: String = "巴里家族"
+const MOXIXI_HOUSE_NAME: String = "墨西西家族"
+const BURKNANIA_HOUSE_NAME: String = "伯克纳家族"
+const OLIN_HOUSE_NAME: String = "奥林家族"
+const BURKNANIA_KINGDOM_NAME: String = "伯克纳尼亚王国"
+const OLIN_KINGDOM_NAME: String = "奥林王国"
+const BURKNANIA_KINGDOM_COLOR: Color = Color(0.62, 0.16, 0.16)
+const OLIN_KINGDOM_COLOR: Color = Color(0.72, 0.55, 0.22)
 
 const PLAYER_START_POSITION: Vector2 = Vector2(760.0, 620.0)
 const PLAYER_MOVE_SPEED: float = 150.0
@@ -68,7 +89,8 @@ const WASTE_BANDIT_PARTY_NAME: String = "荒野强盗"
 const BARI_VILLAGE_NAME: String = "巴里"
 const MOXIXI_VILLAGE_NAME: String = "墨西西"
 const PLAYER_VILLAGE_NAME: String = "青禾村"
-const PLAYER_VILLAGE_POSITION: Vector2 = Vector2(650.0, 1500.0)
+## 玩家村庄保持中立，位于两王国区域之间的西侧缓冲地带。
+const PLAYER_VILLAGE_POSITION: Vector2 = Vector2(1600.0, 1500.0)
 const BARI_KNIGHT_PARTY_NAME: String = "巴里骑士"
 const MOXIXI_KNIGHT_PARTY_NAME: String = "墨西西骑士"
 const BARI_KNIGHT_LEADER_NAME: String = "巴里骑士"
@@ -76,6 +98,32 @@ const MOXIXI_KNIGHT_LEADER_NAME: String = "墨西西骑士"
 const PLAYER_LORD_NAME: String = "玩家领主"
 const BARI_LORD_NAME: String = "巴里领主"
 const MOXIXI_LORD_NAME: String = "墨西西领主"
+
+## 新政治区域按王国聚集：伯克纳尼亚在北侧，奥林在南侧，
+## 同家族封地保持较近距离，两个王国之间留出可辨认的势力间隔。
+const BURKNANIA_TOWN_NAME: String = "伯克纳尼亚"
+const BURKNA_VILLAGE_NAME: String = "伯克纳"
+const OLIN_CASTLE_NAME: String = "奥林德斯堡"
+const OLIN_VILLAGE_NAME: String = "奥林"
+const BURKNANIA_TOWN_POSITION: Vector2 = Vector2(2900.0, 750.0)
+const BURKNA_VILLAGE_POSITION: Vector2 = Vector2(3200.0, 1000.0)
+const OLIN_CASTLE_POSITION: Vector2 = Vector2(2950.0, 1850.0)
+const OLIN_VILLAGE_POSITION: Vector2 = Vector2(3250.0, 2050.0)
+
+## 旧家族封地重新归入各自王国区域：墨西西靠近伯克纳尼亚，巴里靠近奥林。
+const BARI_VILLAGE_POSITION: Vector2 = Vector2(2600.0, 2100.0)
+const MOXIXI_VILLAGE_POSITION: Vector2 = Vector2(2500.0, 700.0)
+const NORTH_VILLAGE_POSITION: Vector2 = Vector2(2250.0, 1000.0)
+const GREY_CASTLE_POSITION: Vector2 = Vector2(2900.0, 2350.0)
+
+const BURKNANIA_KING_NAME: String = "伯克纳国王"
+const BURKNANIA_LORD_NAME: String = "伯克纳领主"
+const OLIN_KING_NAME: String = "奥林国王"
+const OLIN_LORD_NAME: String = "奥林领主"
+const BURKNANIA_KING_PARTY_NAME: String = "伯克纳王室卫队"
+const BURKNANIA_KNIGHT_PARTY_NAME: String = "伯克纳骑士"
+const OLIN_KING_PARTY_NAME: String = "奥林王室卫队"
+const OLIN_KNIGHT_PARTY_NAME: String = "奥林骑士"
 
 ## 家族骑士编制（每队）：
 ## 1 领袖（三级）+ 1 骑乘侍从（三级）+ 3 骑乘军士（二级）
@@ -104,6 +152,28 @@ static func create_new_world(context: WorldContext) -> bool:
 	context.world_size = WorldContext.DEFAULT_WORLD_SIZE
 	context.world_map_manager.world_bounds = Rect2(Vector2.ZERO, context.world_size)
 
+	# 家族先于贵族/封地建立，避免初始化过程中出现悬空 house_id。
+	var player_house := context.house_manager.register_house(
+		HOUSE_PLAYER_ID, PLAYER_HOUSE_NAME, FAMILY_PLAYER_ID, true
+	)
+	var bari_house := context.house_manager.register_house(
+		HOUSE_BARI_ID, BARI_HOUSE_NAME, FAMILY_BARI_ID
+	)
+	var moxixi_house := context.house_manager.register_house(
+		HOUSE_MOXIXI_ID, MOXIXI_HOUSE_NAME, FAMILY_MOXIXI_ID
+	)
+	var burknania_house := context.house_manager.register_house(
+		HOUSE_BURKNANIA_ID, BURKNANIA_HOUSE_NAME, FAMILY_BURKNANIA_ID
+	)
+	var olin_house := context.house_manager.register_house(
+		HOUSE_OLIN_ID, OLIN_HOUSE_NAME, FAMILY_OLIN_ID
+	)
+	if player_house == null or bari_house == null or moxixi_house == null \
+			or burknania_house == null or olin_house == null:
+		push_error("初始家族注册失败")
+		return false
+	context.player_house_id = player_house.house_id
+
 	var player_party := context.party_manager.create_party(
 		PLAYER_FACTION_ID,
 		PLAYER_START_POSITION,
@@ -121,13 +191,21 @@ static func create_new_world(context: WorldContext) -> bool:
 	context.battle_manager.player_party_id = player_party.party_id
 	context.adventurer_recruitment_manager.player_party_id = player_party.party_id
 
-	# 玩家领主是战略层身份，与玩家角色 UnitData 分离；封地所有权只认领主 ID。
-	var player_lord: LordData = context.lord_manager.create_lord(
-		PLAYER_LORD_NAME, PLAYER_FACTION_ID, player_party.party_id, true
+	# 玩家是家族中的一名骑士贵族，与玩家角色 UnitData 分离；
+	# 封地所有权只认 noble_id/owner_house_id，不依赖玩家角色单位。
+	var player_noble: NobleData = context.noble_manager.create_noble(
+		PLAYER_LORD_NAME,
+		PLAYER_FACTION_ID,
+		player_party.party_id,
+		HOUSE_PLAYER_ID,
+		NobleData.Rank.KNIGHT,
+		true,
+		true
 	)
-	if player_lord == null:
+	if player_noble == null:
 		return false
-	context.player_lord_id = player_lord.lord_id
+	context.player_lord_id = player_noble.lord_id
+	player_party.leader_noble_id = player_noble.lord_id
 
 	var merchant_party := context.party_manager.create_party(
 		MERCHANT_FACTION_ID,
@@ -163,7 +241,7 @@ static func create_new_world(context: WorldContext) -> bool:
 	# 通过 PartyData.family_id 与专属巡逻点区分，不新增特殊地图逻辑。
 	var bari_knights := context.party_manager.create_party(
 		LOCAL_FACTION_ID,
-		Vector2(620.0, 460.0),
+		Vector2(2550.0, 2150.0),
 		BARI_KNIGHT_PARTY_NAME,
 		PartyData.PartyKind.FAMILY
 	)
@@ -174,7 +252,7 @@ static func create_new_world(context: WorldContext) -> bool:
 
 	var moxixi_knights := context.party_manager.create_party(
 		LOCAL_FACTION_ID,
-		Vector2(1320.0, 860.0),
+		Vector2(2400.0, 850.0),
 		MOXIXI_KNIGHT_PARTY_NAME,
 		PartyData.PartyKind.FAMILY
 	)
@@ -183,17 +261,33 @@ static func create_new_world(context: WorldContext) -> bool:
 		moxixi_knights.movement_speed = FAMILY_KNIGHT_MOVE_SPEED
 		moxixi_knights.sight_range = FAMILY_KNIGHT_SIGHT_RANGE
 
-	# 两名 NPC 领主各自拥有一支家族骑士部队；封地归属稍后在村庄创建后写入。
-	var bari_lord: LordData = null
-	var moxixi_lord: LordData = null
+	# 两名 NPC 家族领袖各自独立指挥自己的骑士部队；封地归属在村庄创建后写入。
+	var bari_lord: NobleData = null
+	var moxixi_lord: NobleData = null
 	if bari_knights != null:
-		bari_lord = context.lord_manager.create_lord(
-			BARI_LORD_NAME, LOCAL_FACTION_ID, bari_knights.party_id, false
+		bari_lord = context.noble_manager.create_noble(
+			BARI_LORD_NAME,
+			LOCAL_FACTION_ID,
+			bari_knights.party_id,
+			HOUSE_BARI_ID,
+			NobleData.Rank.BARON,
+			false,
+			true
 		)
+		if bari_lord != null:
+			bari_knights.leader_noble_id = bari_lord.lord_id
 	if moxixi_knights != null:
-		moxixi_lord = context.lord_manager.create_lord(
-			MOXIXI_LORD_NAME, LOCAL_FACTION_ID, moxixi_knights.party_id, false
+		moxixi_lord = context.noble_manager.create_noble(
+			MOXIXI_LORD_NAME,
+			LOCAL_FACTION_ID,
+			moxixi_knights.party_id,
+			HOUSE_MOXIXI_ID,
+			NobleData.Rank.BARON,
+			false,
+			true
 		)
+		if moxixi_lord != null:
+			moxixi_knights.leader_noble_id = moxixi_lord.lord_id
 
 	# 两支新强盗部队：沿用现有 BANDIT 阵营与 AI，只是拥有独立 ID、出生点和路线。
 	var east_bandits := context.party_manager.create_party(
@@ -216,17 +310,85 @@ static func create_new_world(context: WorldContext) -> bool:
 		waste_bandits.movement_speed = BANDIT_MOVE_SPEED
 		waste_bandits.sight_range = BANDIT_SIGHT_RANGE
 
+	# 两个新王国的国王与普通贵族各自独立指挥一支部队；
+	# 家族/王国关系在部队和贵族建立后统一写入。
+	var burknania_king_party := _create_family_party(
+		context, FAMILY_BURKNANIA_ID,
+		BURKNANIA_KING_PARTY_NAME, Vector2(2850.0, 650.0)
+	)
+	var burknania_knight_party := _create_family_party(
+		context, FAMILY_BURKNANIA_ID,
+		BURKNANIA_KNIGHT_PARTY_NAME, Vector2(3200.0, 1050.0)
+	)
+	var olin_king_party := _create_family_party(
+		context, FAMILY_OLIN_ID,
+		OLIN_KING_PARTY_NAME, Vector2(2950.0, 1800.0)
+	)
+	var olin_knight_party := _create_family_party(
+		context, FAMILY_OLIN_ID,
+		OLIN_KNIGHT_PARTY_NAME, Vector2(3250.0, 2100.0)
+	)
+	if burknania_king_party == null or burknania_knight_party == null \
+			or olin_king_party == null or olin_knight_party == null:
+		push_error("新王国部队创建失败")
+		return false
+
+	var burknania_king: NobleData = context.noble_manager.create_noble(
+		BURKNANIA_KING_NAME,
+		LOCAL_FACTION_ID,
+		burknania_king_party.party_id,
+		HOUSE_BURKNANIA_ID,
+		NobleData.Rank.DUKE,
+		false,
+		true
+	)
+	var burknania_lord: NobleData = context.noble_manager.create_noble(
+		BURKNANIA_LORD_NAME,
+		LOCAL_FACTION_ID,
+		burknania_knight_party.party_id,
+		HOUSE_BURKNANIA_ID,
+		NobleData.Rank.KNIGHT
+	)
+	var olin_king: NobleData = context.noble_manager.create_noble(
+		OLIN_KING_NAME,
+		LOCAL_FACTION_ID,
+		olin_king_party.party_id,
+		HOUSE_OLIN_ID,
+		NobleData.Rank.DUKE,
+		false,
+		true
+	)
+	var olin_lord: NobleData = context.noble_manager.create_noble(
+		OLIN_LORD_NAME,
+		LOCAL_FACTION_ID,
+		olin_knight_party.party_id,
+		HOUSE_OLIN_ID,
+		NobleData.Rank.KNIGHT
+	)
+	if burknania_king == null or burknania_lord == null \
+			or olin_king == null or olin_lord == null:
+		push_error("新王国贵族创建失败")
+		return false
+	burknania_king_party.leader_noble_id = burknania_king.lord_id
+	burknania_knight_party.leader_noble_id = burknania_lord.lord_id
+	olin_king_party.leader_noble_id = olin_king.lord_id
+	olin_knight_party.leader_noble_id = olin_lord.lord_id
+
 	var bari_village := _create_settlement(
-		context, BARI_VILLAGE_NAME, SettlementData.SettlementType.VILLAGE, Vector2(500.0, 500.0), 120, 40
+		context, BARI_VILLAGE_NAME, SettlementData.SettlementType.VILLAGE,
+		BARI_VILLAGE_POSITION, 120, 40
 	)
 	var moxixi_village := _create_settlement(
-		context, MOXIXI_VILLAGE_NAME, SettlementData.SettlementType.VILLAGE, Vector2(1200.0, 900.0), 96, 35
+		context, MOXIXI_VILLAGE_NAME, SettlementData.SettlementType.VILLAGE,
+		MOXIXI_VILLAGE_POSITION, 96, 35
 	)
 	var north_village := _create_settlement(
-		context, "北境村", SettlementData.SettlementType.VILLAGE, Vector2(2200.0, 500.0), 80, 30
+		context, "北境村", SettlementData.SettlementType.VILLAGE,
+		NORTH_VILLAGE_POSITION, 80, 30
 	)
 	var grey_castle := _create_settlement(
-		context, "灰石城堡", SettlementData.SettlementType.CASTLE, Vector2(1800.0, 1300.0), 0, 60
+		context, "灰石城堡", SettlementData.SettlementType.CASTLE,
+		GREY_CASTLE_POSITION, 0, 60
 	)
 	# 玩家封地放在已有地点之后创建，保持“第一个村庄”等旧流程稳定。
 	var player_village := _create_settlement(
@@ -238,24 +400,58 @@ static func create_new_world(context: WorldContext) -> bool:
 		38,
 		PLAYER_FACTION_ID
 	)
+	# 新王国的城镇/城堡与其近邻村庄；距离旧区域足够远，避免地图图标重叠。
+	var burknania_town := _create_settlement(
+		context, BURKNANIA_TOWN_NAME, SettlementData.SettlementType.TOWN,
+		BURKNANIA_TOWN_POSITION, 240, 72
+	)
+	var burkna_village := _create_settlement(
+		context, BURKNA_VILLAGE_NAME, SettlementData.SettlementType.VILLAGE,
+		BURKNA_VILLAGE_POSITION, 130, 42
+	)
+	var olin_castle := _create_settlement(
+		context, OLIN_CASTLE_NAME, SettlementData.SettlementType.CASTLE,
+		OLIN_CASTLE_POSITION, 0, 78
+	)
+	var olin_village := _create_settlement(
+		context, OLIN_VILLAGE_NAME, SettlementData.SettlementType.VILLAGE,
+		OLIN_VILLAGE_POSITION, 140, 46
+	)
+
 	for village: SettlementData in [
-		bari_village, moxixi_village, north_village, player_village
+		bari_village, moxixi_village, north_village, player_village,
+		burkna_village, olin_village
 	]:
 		if village != null:
 			village.scene_path = DEFAULT_VILLAGE_SCENE_PATH
-	if bari_village != null:
-		bari_village.family_id = FAMILY_BARI_ID
-		if bari_lord != null:
-			bari_village.owner_lord_id = bari_lord.lord_id
-	if moxixi_village != null:
-		moxixi_village.family_id = FAMILY_MOXIXI_ID
-		if moxixi_lord != null:
-			moxixi_village.owner_lord_id = moxixi_lord.lord_id
-	if player_village != null:
-		player_village.family_id = FAMILY_PLAYER_ID
-		player_village.owner_lord_id = context.player_lord_id
-	if north_village != null:
-		north_village.family_id = ""
+	# 所有地点都必须有家族所有者；贵族所有者可选，但必须属于该家族。
+	_assign_settlement_owner(
+		bari_village, FAMILY_BARI_ID, HOUSE_BARI_ID, bari_lord
+	)
+	_assign_settlement_owner(
+		moxixi_village, FAMILY_MOXIXI_ID, HOUSE_MOXIXI_ID, moxixi_lord
+	)
+	_assign_settlement_owner(
+		north_village, FAMILY_MOXIXI_ID, HOUSE_MOXIXI_ID, moxixi_lord
+	)
+	_assign_settlement_owner(
+		grey_castle, FAMILY_BARI_ID, HOUSE_BARI_ID, bari_lord
+	)
+	_assign_settlement_owner(
+		player_village, FAMILY_PLAYER_ID, HOUSE_PLAYER_ID, player_noble
+	)
+	_assign_settlement_owner(
+		burknania_town, FAMILY_BURKNANIA_ID, HOUSE_BURKNANIA_ID, burknania_king
+	)
+	_assign_settlement_owner(
+		burkna_village, FAMILY_BURKNANIA_ID, HOUSE_BURKNANIA_ID, burknania_lord
+	)
+	_assign_settlement_owner(
+		olin_castle, FAMILY_OLIN_ID, HOUSE_OLIN_ID, olin_king
+	)
+	_assign_settlement_owner(
+		olin_village, FAMILY_OLIN_ID, HOUSE_OLIN_ID, olin_lord
+	)
 
 	if merchant_party != null and bari_village != null and moxixi_village != null:
 		# 商队从巴里路线起点出发，首次决策后前往墨西西。
@@ -286,20 +482,56 @@ static func create_new_world(context: WorldContext) -> bool:
 		bari_knights.ai_type = PartyData.PartyAIType.PATROL
 		bari_knights.ai_route_index = 0
 		bari_knights.ai_patrol_points = [
-			Vector2(620.0, 460.0),
-			Vector2(680.0, 340.0),
-			Vector2(520.0, 300.0),
-			Vector2(360.0, 500.0),
+			Vector2(2550.0, 2150.0),
+			Vector2(2700.0, 2250.0),
+			Vector2(2800.0, 2400.0),
+			Vector2(2500.0, 2300.0),
 		]
 	if moxixi_knights != null:
 		moxixi_knights.ai_type = PartyData.PartyAIType.PATROL
 		moxixi_knights.ai_route_index = 0
 		moxixi_knights.ai_patrol_points = [
-			Vector2(1320.0, 860.0),
-			Vector2(1460.0, 1020.0),
-			Vector2(1260.0, 1160.0),
-			Vector2(1060.0, 1020.0),
+			Vector2(2400.0, 850.0),
+			Vector2(2500.0, 950.0),
+			Vector2(2300.0, 1050.0),
+			Vector2(2250.0, 900.0),
 		]
+	_set_patrol_route(
+		burknania_king_party,
+		[
+			Vector2(2850.0, 650.0),
+			Vector2(3000.0, 550.0),
+			Vector2(3100.0, 750.0),
+			Vector2(2900.0, 850.0),
+		]
+	)
+	_set_patrol_route(
+		burknania_knight_party,
+		[
+			Vector2(3200.0, 1050.0),
+			Vector2(3350.0, 950.0),
+			Vector2(3300.0, 1150.0),
+			Vector2(3100.0, 1100.0),
+		]
+	)
+	_set_patrol_route(
+		olin_king_party,
+		[
+			Vector2(2950.0, 1800.0),
+			Vector2(3100.0, 1750.0),
+			Vector2(3150.0, 1950.0),
+			Vector2(2900.0, 1950.0),
+		]
+	)
+	_set_patrol_route(
+		olin_knight_party,
+		[
+			Vector2(3250.0, 2100.0),
+			Vector2(3400.0, 2050.0),
+			Vector2(3350.0, 2250.0),
+			Vector2(3150.0, 2200.0),
+		]
+	)
 
 	if east_bandits != null:
 		east_bandits.ai_type = PartyData.PartyAIType.BANDIT
@@ -321,6 +553,51 @@ static func create_new_world(context: WorldContext) -> bool:
 				north_village.settlement_id,
 				grey_castle.settlement_id,
 			]
+
+	# 王国：伯克纳统治伯克纳家族并吸纳墨西西；奥林统治奥林家族并吸纳巴里。
+	# 初始两王国互相敌对；玩家家族不属于任何王国，保持中立。
+	var burknania_kingdom := context.kingdom_manager.register_kingdom(
+		KINGDOM_BURKNANIA_ID,
+		BURKNANIA_KINGDOM_NAME,
+		HOUSE_BURKNANIA_ID,
+		burknania_king.lord_id,
+		BURKNANIA_KINGDOM_COLOR
+	)
+	var olin_kingdom := context.kingdom_manager.register_kingdom(
+		KINGDOM_OLIN_ID,
+		OLIN_KINGDOM_NAME,
+		HOUSE_OLIN_ID,
+		olin_king.lord_id,
+		OLIN_KINGDOM_COLOR
+	)
+	if burknania_kingdom == null or olin_kingdom == null:
+		push_error("初始王国注册失败")
+		return false
+	if not context.kingdom_manager.add_vassal_house(KINGDOM_BURKNANIA_ID, HOUSE_MOXIXI_ID):
+		push_error("墨西西家族加入伯克纳王国失败")
+		return false
+	if not context.kingdom_manager.add_vassal_house(KINGDOM_OLIN_ID, HOUSE_BARI_ID):
+		push_error("巴里家族加入奥林王国失败")
+		return false
+	context.kingdom_manager.declare_war(KINGDOM_BURKNANIA_ID, KINGDOM_OLIN_ID)
+
+	# 上下级关系：普通贵族与附庸家族领袖效忠各自王国的国王。
+	context.noble_manager.set_liege(burknania_lord.lord_id, burknania_king.lord_id)
+	context.noble_manager.set_liege(olin_lord.lord_id, olin_king.lord_id)
+	context.noble_manager.set_liege(moxixi_lord.lord_id, burknania_king.lord_id)
+	context.noble_manager.set_liege(bari_lord.lord_id, olin_king.lord_id)
+
+	context.house_manager.refresh_settlement_links()
+
+	var political_errors: Array[String] = []
+	political_errors.append_array(context.noble_manager.validate(context.party_manager))
+	political_errors.append_array(context.house_manager.validate())
+	political_errors.append_array(context.kingdom_manager.validate())
+	political_errors.append_array(context.validate_world_ownership())
+	if not political_errors.is_empty():
+		for error_text: String in political_errors:
+			push_error("初始政治数据错误: %s" % error_text)
+		return false
 
 	if not create_test_battle_forces(context):
 		push_error("初始测试兵力生成失败")
@@ -408,6 +685,49 @@ static func create_test_battle_forces(context: WorldContext) -> bool:
 		veteran
 	):
 		return false
+
+	# 新王国四支部队沿用同一家族骑士编制与外观配置。
+	var new_family_parties: Array[Dictionary] = [
+		{
+			"party_name": BURKNANIA_KING_PARTY_NAME,
+			"family_id": FAMILY_BURKNANIA_ID,
+			"leader_name": BURKNANIA_KING_NAME,
+		},
+		{
+			"party_name": BURKNANIA_KNIGHT_PARTY_NAME,
+			"family_id": FAMILY_BURKNANIA_ID,
+			"leader_name": BURKNANIA_LORD_NAME,
+		},
+		{
+			"party_name": OLIN_KING_PARTY_NAME,
+			"family_id": FAMILY_OLIN_ID,
+			"leader_name": OLIN_KING_NAME,
+		},
+		{
+			"party_name": OLIN_KNIGHT_PARTY_NAME,
+			"family_id": FAMILY_OLIN_ID,
+			"leader_name": OLIN_LORD_NAME,
+		},
+	]
+	for entry: Dictionary in new_family_parties:
+		var party := _find_party_by_name(context, str(entry["party_name"]))
+		if party == null:
+			push_error("测试兵力找不到部队: %s" % str(entry["party_name"]))
+			return false
+		var family := context.family_registry.get_config(str(entry["family_id"]))
+		if family == null:
+			push_error("测试兵力缺少家族配置: %s" % str(entry["family_id"]))
+			return false
+		if not _populate_family_party(
+			context,
+			party,
+			family,
+			str(entry["leader_name"]),
+			militia,
+			trained,
+			veteran
+		):
+			return false
 	return true
 
 
@@ -629,6 +949,46 @@ static func _create_world_unit(
 		push_error("测试骑兵装备马匹失败: %s" % unit.unit_id)
 		return null
 	return unit
+
+
+## 创建一支家族骑士部队；指挥贵族稍后再绑定到 leader_noble_id。
+static func _create_family_party(
+	context: WorldContext,
+	family_id: String,
+	party_name: String,
+	world_position: Vector2
+) -> PartyData:
+	var party := context.party_manager.create_party(
+		LOCAL_FACTION_ID, world_position, party_name, PartyData.PartyKind.FAMILY
+	)
+	if party == null:
+		return null
+	party.family_id = family_id
+	party.movement_speed = FAMILY_KNIGHT_MOVE_SPEED
+	party.sight_range = FAMILY_KNIGHT_SIGHT_RANGE
+	return party
+
+
+## 统一写入封地的视觉家族与政治所有权，避免家族/贵族字段不一致。
+static func _assign_settlement_owner(
+	settlement: SettlementData,
+	family_id: String,
+	house_id: String,
+	noble: NobleData
+) -> void:
+	if settlement == null:
+		return
+	settlement.family_id = family_id
+	settlement.owner_house_id = house_id
+	settlement.owner_noble_id = noble.lord_id if noble != null else ""
+
+
+static func _set_patrol_route(party: PartyData, points: Array[Vector2]) -> void:
+	if party == null:
+		return
+	party.ai_type = PartyData.PartyAIType.PATROL
+	party.ai_route_index = 0
+	party.ai_patrol_points = points
 
 
 static func _create_settlement(

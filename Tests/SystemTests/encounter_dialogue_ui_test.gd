@@ -64,11 +64,12 @@ func _test_marker_style() -> void:
 		return
 	_check(
 		is_equal_approx(style.marker_radius, 18.0),
-		"部队圆形标记恢复扩编前的原始尺寸"
+		"部队圆形标记保持原始尺寸"
 	)
 	_check(
-		style.flag_max_size <= 30.0,
-		"部队旗帜未随村庄一起放大"
+		style.flag_max_size > 30.0
+		and style.flag_max_size <= style.marker_radius * 2.0 + 4.0,
+		"圆形内部旗帜放大且不改变圆形底盘"
 	)
 	var player_icon := _map.find_child(
 		"PartyIcon_%s" % _player.party_id, true, false

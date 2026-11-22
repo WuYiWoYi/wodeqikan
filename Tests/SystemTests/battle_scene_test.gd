@@ -119,7 +119,7 @@ func _run() -> void:
 	var all_inside: bool = true
 	for unit_id: String in _session.get_all_unit_ids():
 		var position := _session.get_unit_state(unit_id).battle_position
-		if not Rect2(Vector2.ZERO, Vector2(1280.0, 720.0)).has_point(position):
+		if not Rect2(Vector2.ZERO, BattleScene.BATTLEFIELD_SIZE).has_point(position):
 			all_inside = false
 	_check(all_inside, "所有单位都在战场边界内")
 	var battle_camera := _battle_scene.get_node("Camera2D") as Camera2D

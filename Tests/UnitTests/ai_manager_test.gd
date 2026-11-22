@@ -82,7 +82,7 @@ func _setup_fixture() -> void:
 	_settlements = SettlementManager.new()
 	_settlements.setup(_ids)
 	_factions = FactionManager.new()
-	_factions.setup_defaults()
+	_factions.setup_defaults(_parties)
 	_vision = VisionManager.new()
 	_vision.setup(_parties, _factions, _units)
 	_map = WorldMapManager.new()

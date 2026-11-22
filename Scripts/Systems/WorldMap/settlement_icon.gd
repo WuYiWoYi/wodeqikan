@@ -8,6 +8,7 @@ extends Node2D
 ## 地点名称组合位于原有美术正上方时的屏幕锚点半径（世界像素）。
 const VILLAGE_NAME_ANCHOR_RADIUS: float = 28.0
 const CASTLE_NAME_ANCHOR_RADIUS: float = 40.0
+const TOWN_NAME_ANCHOR_RADIUS: float = 44.0
 
 var settlement: SettlementData = null
 
@@ -24,6 +25,8 @@ static func get_name_anchor_radius(
 ) -> float:
 	if settlement_type == SettlementData.SettlementType.CASTLE:
 		return CASTLE_NAME_ANCHOR_RADIUS
+	if settlement_type == SettlementData.SettlementType.TOWN:
+		return TOWN_NAME_ANCHOR_RADIUS
 	return VILLAGE_NAME_ANCHOR_RADIUS
 
 
@@ -32,10 +35,13 @@ func _draw() -> void:
 		return
 
 	draw_circle(Vector2(0.0, 8.0), 15.0, Color(0.0, 0.0, 0.0, 0.22))
-	if settlement.settlement_type == SettlementData.SettlementType.CASTLE:
-		_draw_castle()
-	else:
-		_draw_village()
+	match settlement.settlement_type:
+		SettlementData.SettlementType.CASTLE:
+			_draw_castle()
+		SettlementData.SettlementType.TOWN:
+			_draw_town()
+		_:
+			_draw_village()
 
 
 ## 修改前的村庄美术：土墙 + 红屋顶 + 门洞，保持不变。
@@ -50,6 +56,30 @@ func _draw_village() -> void:
 	])
 	draw_colored_polygon(roof_points, roof)
 	draw_rect(Rect2(-5.0, 4.0, 10.0, 10.0), Color("#4a3020"), true)
+
+
+## 城镇：比村庄更大的石墙聚落，双塔与多屋顶，便于与村庄/城堡区分。
+func _draw_town() -> void:
+	var wall := Color("#9a835c")
+	var roof := Color("#9d4a3a")
+	var dark := Color("#4a3a28")
+	draw_rect(Rect2(-24.0, -8.0, 48.0, 22.0), wall, true)
+	draw_rect(Rect2(-24.0, -8.0, 48.0, 5.0), dark, true)
+	draw_colored_polygon(
+		PackedVector2Array([
+			Vector2(-28.0, -8.0), Vector2(-12.0, -30.0), Vector2(4.0, -8.0)
+		]),
+		roof
+	)
+	draw_colored_polygon(
+		PackedVector2Array([
+			Vector2(-2.0, -8.0), Vector2(14.0, -26.0), Vector2(30.0, -8.0)
+		]),
+		roof.lightened(0.08)
+	)
+	draw_rect(Rect2(-4.0, 4.0, 11.0, 10.0), dark, true)
+	draw_rect(Rect2(-31.0, -18.0, 7.0, 14.0), wall, true)
+	draw_rect(Rect2(24.0, -18.0, 7.0, 14.0), wall, true)
 
 
 func _draw_castle() -> void:

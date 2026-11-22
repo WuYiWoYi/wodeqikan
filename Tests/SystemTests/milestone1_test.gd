@@ -32,9 +32,9 @@ func _run() -> void:
 
 	_check(WorldInitializer.create_new_world(_context), "新世界初始化成功")
 	_check(_context.world_id.begins_with("WORLD_"), "世界 ID 使用 WORLD 前缀")
-	_check(_context.world_size == Vector2(3000.0, 2000.0), "世界尺寸为 3000x2000")
-	_check(_context.party_manager.get_all_parties().size() == 8, "生成 8 支部队")
-	_check(_context.settlement_manager.get_all_settlements().size() == 5, "生成 5 个地点")
+	_check(_context.world_size == Vector2(5000.0, 3000.0), "世界尺寸为 5000x3000")
+	_check(_context.party_manager.get_all_parties().size() == 12, "生成 12 支部队")
+	_check(_context.settlement_manager.get_all_settlements().size() == 9, "生成 9 个地点")
 	_check(_context.get_player_party() != null, "玩家部队存在")
 
 	var unique_ids: Dictionary = {}
@@ -42,7 +42,7 @@ func _run() -> void:
 		unique_ids[party.party_id] = true
 	for settlement: SettlementData in _context.settlement_manager.get_all_settlements():
 		unique_ids[settlement.settlement_id] = true
-	_check(unique_ids.size() == 13, "13 个实体 ID 全部唯一")
+	_check(unique_ids.size() == 21, "21 个实体 ID 全部唯一")
 
 	var player := _context.get_player_party()
 	var start_position := player.world_position
@@ -75,8 +75,8 @@ func _run() -> void:
 	var save := _context.to_save_data()
 	_check(save.world_id == _context.world_id, "存档包含世界 ID")
 	_check(save.player_party_id == _context.player_party_id, "存档包含玩家部队 ID")
-	_check(save.parties.size() == 8, "存档包含 8 支部队")
-	_check(save.settlements.size() == 5, "存档包含 5 个地点")
+	_check(save.parties.size() == 12, "存档包含 12 支部队")
+	_check(save.settlements.size() == 9, "存档包含 9 个地点")
 	_check(save.id_counters.size() > 0, "存档包含 ID 计数器")
 	_check(is_equal_approx(save.world_elapsed_seconds, 321.0), "存档包含世界时间")
 
@@ -94,8 +94,8 @@ func _run() -> void:
 	add_child(_second_context)
 	_check(_second_context.load_from_save_data(loaded), "WorldContext 从存档恢复")
 	_check(_second_context.world_id == _context.world_id, "世界 ID 恢复一致")
-	_check(_second_context.party_manager.get_all_parties().size() == 8, "部队数量恢复一致")
-	_check(_second_context.settlement_manager.get_all_settlements().size() == 5, "地点数量恢复一致")
+	_check(_second_context.party_manager.get_all_parties().size() == 12, "部队数量恢复一致")
+	_check(_second_context.settlement_manager.get_all_settlements().size() == 9, "地点数量恢复一致")
 	_check(
 		_second_context.get_player_party().world_position == player.world_position,
 		"玩家位置恢复一致"
@@ -197,11 +197,19 @@ func _run() -> void:
 	await get_tree().process_frame
 
 	var entities := _map.get_node("WorldEntities") as Node2D
-	_check(entities.get_child_count() == 13, "大地图生成 8 个部队图标与 5 个地点图标")
+	_check(entities.get_child_count() == 21, "大地图生成 12 个部队图标与 9 个地点图标")
 	_check(_map.find_child("TopBar", true, false) != null, "大地图时间 UI 已生成")
 	_check(_map.find_child("SettlementPanel", true, false) != null, "地点交互面板已生成")
 
-	player.world_position = Vector2(500.0, 470.0)
+	var bari_village: SettlementData = null
+	for settlement: SettlementData in _context.settlement_manager.get_all_settlements():
+		if settlement.display_name == WorldInitializer.BARI_VILLAGE_NAME:
+			bari_village = settlement
+			break
+	_check(bari_village != null, "找到巴里村庄用于地点交互")
+	if bari_village == null:
+		return
+	player.world_position = bari_village.world_position + Vector2(0.0, -30.0)
 	player.target_position = player.world_position
 	player.movement_state = PartyData.MovementState.IDLE
 	await get_tree().process_frame

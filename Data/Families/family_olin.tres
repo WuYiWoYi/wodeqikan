@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="FamilyConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/family_config.gd" id="1_familyconfig"]
+
+[resource]
+script = ExtResource("1_familyconfig")
+family_id = "FAMILY_OLIN"
+display_name = "奥林家族"
+primary_color = Color(0.72, 0.55, 0.22, 1)
+secondary_color = Color(0.66, 0.24, 0.18, 1)
+banner_texture_path = "res://art/正式人物美术/奥林家族风格美术/奥林旗帜16_16.png"
+tabard_primary_texture_path = "res://art/正式人物美术/奥林家族风格美术/奥林风格罩袍_主.png"
+tabard_secondary_texture_path = "res://art/正式人物美术/奥林家族风格美术/奥林风格罩袍_副.png"
+leader_plume_texture_path = "res://art/正式人物美术/奥林家族风格美术/奥林风格缨饰.png"
+spear_texture_path = "res://art/正式人物美术/奥林家族风格美术/奥林风格长矛.png"

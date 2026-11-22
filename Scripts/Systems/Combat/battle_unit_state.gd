@@ -9,3 +9,7 @@ var party_id: String = ""
 var battle_hp: int = 0
 var alive: bool = true
 var battle_position: Vector2 = Vector2.ZERO
+## 增援标记只影响表现层出生位置与提示，不改变单位属性或战斗规则。
+var is_reinforcement: bool = false
+var reinforcement_battle_id: String = ""
+var reinforcement_arrival_time: float = 0.0

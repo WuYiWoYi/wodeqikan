@@ -27,7 +27,8 @@
 | `party_kind` | enum | GENERIC / PLAYER / FAMILY / MERCHANT / BANDIT / GUARD；只用于配置、表现与对话文本 |
 | `banner_texture_path` | String | 部队旗帜贴图；为空时回退家族旗帜 |
 | `leader_unit_id` | String | 部队领袖的 `UnitData.unit_id`；玩家部队、家族部队与普通 NPC 均可拥有 |
-| `leader_lord_id` | String | 旧领主字段，保留用于兼容旧存档，不参与逻辑 |
+| `leader_noble_id` | String | 指挥该部队的贵族 `NobleData.lord_id`；用于政治关系、增援提示与百科 |
+| `leader_lord_id` | String | 旧领主字段，保留用于兼容旧存档；读档时回退到 `leader_noble_id` |
 | `world_position` | Vector2 | 大地图坐标（像素） |
 | `target_position` | Vector2 | 移动目标 |
 | `movement_speed` | float | 像素 / 游戏秒 |
@@ -405,3 +406,15 @@ FiefRecruitmentManager / AdventurerRecruitmentManager
 - 招募单位写入 `recruit_source`、`recruit_settlement_id`、`origin_faction_id`、`joined_at_game_time`，不改变部队 `control_type`、`ai_type` 或路线。
 - 部队人数上限目前不限制；工资仍只统计不扣除。
 - 候选人本身不是部队成员，只有招募成功后才进入 `PartyManager`。
+
+## 15. 贵族指挥与政治身份（阶段 8 新增）
+
+- `PartyData.leader_noble_id` 指向指挥该部队的贵族；每个贵族最多指挥一支部队。
+- 新增 `PartyData.leader_noble_id` 后，政治关系解析顺序：
+  1. `leader_noble_id` → `NobleData.house_id` → 家族/王国关系；
+  2. 无贵族时，`family_id` → `HouseManager.get_house_by_banner_id()` → 政治家族；
+  3. 都没有时回退到 `faction_id`。
+- `FactionManager.get_party_relation()` / `is_party_hostile()` / `is_party_friendly()` 统一使用上述顺序，因此同一个 `FACTION_LOCAL` 下的不同家族可以互相敌对或友好。
+- 增援提示使用 `leader_noble_id` 查找 `NobleData.display_name` 与 `HouseData.house_name`，再通过 `FamilyConfig.banner_texture_path` 取旗帜。
+- 部队悬浮与百科显示贵族名称、爵位与家族；部队本身不复制贵族状态。
+- 旧存档缺少 `leader_noble_id` 时读取 `leader_lord_id`，再缺失时政治关系回退到 `family_id` / 阵营。

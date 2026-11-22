@@ -11,4 +11,4 @@ script = ExtResource("1_battle")
 y_sort_enabled = true
 
 [node name="Camera2D" type="Camera2D" parent="."]
-position = Vector2(640, 360)
+position = Vector2(900, 512)

@@ -52,6 +52,19 @@ enum PartyKind {
 	GUARD,
 }
 
+## 大地图行动意图：供悬浮面板展示，由现有权威字段推导。
+## 这是只读派生状态，不进入存档，也不参与 AI 决定；
+## UI 遇到无法命中的行为时可回退到 TRAVEL / IDLE。
+enum Activity {
+	IDLE,
+	PATROL,
+	TRAVEL,
+	PURSUIT,
+	RESPOND_TO_BATTLE,
+	RECRUITING,
+	FOLLOWING,
+}
+
 var party_id: String = ""
 var party_name: String = ""
 var faction_id: String = ""
@@ -73,7 +86,11 @@ var banner_texture_path: String = ""
 ## - BattleScene 的 controlled 表示“当前控制谁”；
 ## - leader_unit_id 表示“这支部队的领袖是谁”。
 var leader_unit_id: String = ""
-## 旧领主字段保留用于兼容旧存档，当前阶段不参与逻辑。
+## 指挥本部队的贵族（NobleData.noble_id，持久化）。
+## 部队→贵族→家族→王国的政治链路从这里开始；
+## 旧存档缺失时由 NobleManager 按 noble.party_id 反向补齐。
+var leader_noble_id: String = ""
+## 旧领主字段保留用于兼容旧存档；新逻辑统一读取 leader_noble_id。
 var leader_lord_id: String = ""
 
 var world_position: Vector2 = Vector2.ZERO
@@ -107,6 +124,12 @@ var focus_party_id: String = ""
 ## 存活部队需要时间脱离接触；到期后由 AI 正常重新决策。
 var engagement_cooldown_until: float = 0.0
 
+## AI 已发现并正在接近的离屏战斗 ID（仅运行时，不进入存档）。
+## 用于“看见战斗 → 前往战场”的目标保持，避免每个决策周期在发现/失去视野间抖动。
+var battle_response_id: String = ""
+## 战场响应目标保持截止世界时间；到期后若仍看不见参战方则放弃。
+var battle_response_until: float = 0.0
+
 
 func has_member(unit_id: String) -> bool:
 	return member_unit_ids.has(unit_id)
@@ -135,6 +158,29 @@ func get_kind_key() -> String:
 			return "GUARD"
 		_:
 			return "GENERIC"
+
+
+## 从现有权威字段推导行动意图；不修改任何状态。
+## 优先级：战场响应 > 追击攻击 > 跟随 > AI 路线/巡逻 > 普通移动。
+func get_activity_state() -> Activity:
+	if not battle_response_id.is_empty():
+		return Activity.RESPOND_TO_BATTLE
+	if attack_intent and not current_target_id.is_empty():
+		return Activity.PURSUIT
+	if current_order == OrderType.FOLLOW_PARTY:
+		return Activity.FOLLOWING
+	match ai_type:
+		PartyAIType.PATROL, PartyAIType.GUARD:
+			if movement_state == MovementState.MOVING:
+				return Activity.PATROL
+		PartyAIType.TRADE_ROUTE, PartyAIType.BANDIT:
+			if movement_state == MovementState.MOVING:
+				return Activity.TRAVEL
+		_:
+			pass
+	if movement_state == MovementState.MOVING:
+		return Activity.TRAVEL
+	return Activity.IDLE
 
 
 ## 读档后补齐旧存档缺失的控制类型与部队类型。
@@ -171,6 +217,7 @@ func to_dict() -> Dictionary:
 		"party_kind": int(party_kind),
 		"banner_texture_path": banner_texture_path,
 		"leader_unit_id": leader_unit_id,
+		"leader_noble_id": leader_noble_id,
 		"leader_lord_id": leader_lord_id,
 		"world_position": [world_position.x, world_position.y],
 		"target_position": [target_position.x, target_position.y],
@@ -204,6 +251,7 @@ static func from_dict(data: Dictionary) -> PartyData:
 	party.party_kind = kind_value as PartyKind
 	party.banner_texture_path = str(data.get("banner_texture_path", ""))
 	party.leader_unit_id = str(data.get("leader_unit_id", ""))
+	party.leader_noble_id = str(data.get("leader_noble_id", data.get("leader_lord_id", "")))
 	party.leader_lord_id = str(data.get("leader_lord_id", ""))
 	party.world_position = _read_vector2(data.get("world_position", []))
 	party.target_position = _read_vector2(data.get("target_position", []))

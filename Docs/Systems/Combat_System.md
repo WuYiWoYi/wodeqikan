@@ -3,7 +3,7 @@
 **核心数据：** `Scripts/Systems/Combat/battle_session.gd`、`battle_unit_state.gd`
 **核心逻辑：** `Scripts/Systems/Combat/battle_manager.gd`
 **场景与表现：** `Scripts/UI/Battle/battle_scene.gd`、`Scripts/Systems/Combat/unit_actor.gd`、`unit_controller.gd`
-**状态：** 双方/多方实时战斗、多场 AI 离屏战斗并行、按游戏小时结算的离屏战斗、360°定向矩形攻击、玩家自由攻击、武器决定攻击距离、实体碰撞、统一攻击规则、多人围攻、控制权转移与观战、双方半场列阵/接敌放松/目标分流/局部避让、克制步态/待机动画、跃马式马腿动画、长矛前后摇与攻击后保持、骑乘战斗加速、左右手武器独立层级、人物头部/头盔分离、满血隐藏生命条、1920×1080 显示、统一 BattleResult、经验/奖励与撤退已实现；复杂战术指挥、显式攻击槽位、受击动画与士气未实现
+**状态：** 双方/多方实时战斗、多场 AI 离屏战斗并行、按游戏小时结算的离屏战斗、1800×1024 战场与参数化部署、增援加入既有会话与后方展开、增援提示、360°定向矩形攻击、玩家自由攻击、武器决定攻击距离、实体碰撞、统一攻击规则、多人围攻、控制权转移与观战、双方半场列阵/接敌放松/目标分流/局部避让、克制步态/待机动画、跃马式马腿动画、长矛前后摇与攻击后保持、骑乘战斗加速、左右手武器独立层级、人物头部/头盔分离、满血隐藏生命条、1920×1080 显示、统一 BattleResult、经验/奖励与撤退已实现；复杂战术指挥、显式攻击槽位、受击动画与士气未实现
 
 > 本文是项目实际的战斗系统文档。任务书中提到的 `Battle_System.md` 与本文对应，未另建重复文档。
 
@@ -310,13 +310,14 @@ BattleScene (Node2D)
   - 步兵 `BATTLE_MOVE_SPEED_MULTIPLIER = 0.6`：民兵 60→36；职业步兵 55→33；玩家角色 75→45（保持不变）；
   - 骑乘 `BATTLE_MOUNTED_MOVE_SPEED_MULTIPLIER = 0.84`：民兵 85→71.4；职业步兵 80→67.2；玩家角色 100→84；
   - 只影响战斗场景，不修改 UnitConfig 或 `UnitData.move_speed`，也不影响大地图 `PartyData.movement_speed`。
-- 初始部署边距集中在 `BattleScene.SPAWN_MARGIN_X = 90`；双方阵线间距 `INITIAL_DEPLOYMENT_DISTANCE = 1100`，含列间距后的质心距离约 1040。所有单位仍在 1280×720 战场边界内，多侧部署复用同一套常量，不改变双方内部阵型与 Party Lane。
+- 战场有效区域为 `BATTLEFIELD_WIDTH = 1800` × `BATTLEFIELD_HEIGHT = 1024`（约旧 1280×720 的 2 倍）；士兵像素、动画比例与相机 960×540 视野不变。
+- 初始部署集中参数化：`INITIAL_ARMY_DISTANCE = 1580`、`SPAWN_MARGIN_X = (1800 - 1580) / 2 = 110`、`INITIAL_DEPLOYMENT_DISTANCE = 1580`；多侧部署复用同一套常量，不改变双方内部阵型与 Party Lane。
 - 实体碰撞：
   - `UnitController.MIN_BODY_DISTANCE = 28`，在 tick/player_tick 开始处执行 2 次最小间距推开；
   - 与局部避让（Separation）协同；局部避让负责提前调整方向，硬间距作为最后空间约束；
   - 死亡单位跳过，不阻挡其他单位；碰撞不改变伤害、攻击范围或队形目标。
 - 屏幕显示：项目窗口/Viewport 1920×1080，Stretch 关闭（原生像素）；战斗相机通过 `SceneCameraRig` 使用统一视野基准 `960×540`（1920×1080 下为 2 倍缩放），并向下偏移 30；大地图相机默认 1.5 倍。
-- 战斗摄像机默认平滑跟随当前玩家控制单位；切换控制权后自动跟随新单位；观战时保持当前位置。`F` 切换自由视角，WASD/方向键移动镜头，自由视角不移动角色；镜头受战场 `1280×720` 边界限制。
+- 战斗摄像机默认平滑跟随当前玩家控制单位；切换控制权后自动跟随新单位；观战时保持当前位置。`F` 切换自由视角，WASD/方向键移动镜头，自由视角不移动角色；镜头受战场 `1800×1024` 边界限制。
 
 ### 4.4 玩家角色与当前控制权
 
@@ -447,6 +448,28 @@ BattleScene (Node2D)
 - 同一部队不能同时参与两场战斗：`party_battle_lookup` 与 `get_battle_for_party()` 是唯一归属判断。
 - AI 的 `_try_respond_to_battle()` 遍历全部离屏战斗，选择可加入且距离最近的一场接近，实际加入仍由 EncounterManager 处理。
 - EncounterManager 的两支部队若已分别处于不同战斗，不会合并会话，也不会让任何一方同时参战。
+- 侧别统一由 `FactionManager.is_party_hostile()` / `is_party_friendly()` 按政治身份（贵族 → 家族 → 王国）判定；无家族部队回退到阵营关系。
+
+### 8.1 增援（阶段 8）
+
+- 新遭遇使用 `start_battle_by_sides()` 新建 `BattleSession`；增援使用 `try_join_battle()` / `add_reinforcement()` 加入**既有** `BattleSession`，不新建会话。
+- 增援参与者写入：
+  - `BattleParticipant.is_reinforcement = true`
+  - `reinforcement_battle_id = session.battle_id`
+  - `reinforcement_arrival_time = TimeManager.world_elapsed_seconds`
+- `_add_party_units()` 把上述字段复制到每个 `BattleUnitState`，便于表现层区分初始部署与增援。
+- 广播 `EventBus.battle_participant_joined`（通用）与 `EventBus.party_reinforced(battle_id, party_id, noble_id, side_index)`（增援专用）。
+- 战斗场景收到 `party_reinforced` 后：
+  1. 确保该战斗侧已注册；
+  2. 从战场中心指向远离方向，在阵线后方 `REINFORCEMENT_REAR_DISTANCE = 240` 处生成；
+  3. 使用 3 列网格 + 最多 96 次尝试寻找空位，间距 `REINFORCEMENT_MIN_SPACING = 38`，并 clamp 在战场内；
+  4. 只创建新的 `UnitActor` / `UnitController`，不移动、不重置既有单位，不改变攻击冷却与战斗进度。
+- 若增援部队加入玩家所在战斗侧，且不是玩家部队，战斗场景在顶部中央显示增援提示：
+  - 有家族旗帜：徽章 + “是XXX的旗帜，AAA带部队来增援我们了！”
+  - 无旗帜：纯文本 “AAA带部队来增援我们了！”
+  - 提示排队、逐条淡入淡出（`REINFORCEMENT_PROMPT_DURATION = 2.8` 秒），不暂停、不阻塞操作。
+- 敌方加入、玩家部队自身加入都不显示提示。
+- 存在待生成增援时，战斗场景暂缓 `_check_battle_end()`，避免在增援单位生成前误判结束。
 
 ## 9. 离屏战斗（按游戏小时结算）
 
@@ -524,7 +547,7 @@ BattleScene (Node2D)
 | 武器攻击距离 | 已实现（WEAPON.weapon_attack_range 覆盖单位基础射程；长矛前向 +6） |
 | 单次攻击单目标 | 已实现（矩形内只选一个；其他目标不受伤） |
 | 实体碰撞 | 已实现（最小中心间距 28 + 局部避让；死亡单位不阻挡） |
-| 战斗降速 / 初始部署 | 已实现（步兵 0.6、骑乘 0.84；部署边距 90 / 阵线间距 1100） |
+| 战斗降速 / 初始部署 | 已实现（步兵 0.6、骑乘 0.84；战场 1800×1024、阵线间距 1580、边距 110） |
 | 1920×1080 / 战斗相机 | 已实现（原生 Viewport；战斗相机 2 倍缩放） |
 | 步兵/骑兵待机/移动动画 | 已实现（腿部挂载身体并继承整体变换；马身整体跃动为主且幅度下调、马腿辅助动作适度增大；骑马影子随抬升轻微缩小/变淡） |
 | 控制权转移 / 观战 | 已实现（存活友军列表、本地 SceneTime 暂停；列表区分骑乘） |
@@ -539,6 +562,11 @@ BattleScene (Node2D)
 | 撤退 / 结果面板 | 已实现（撤退按钮、RETREATED、伤亡/经验/奖励展示） |
 | 战后经验 / 金币 / 战利品 | 已实现（仅玩家获胜；写入 PlayerProfile） |
 | 中途加入 / 独立第三方 | 已实现（关系判定 + 距离校验） |
+| 增援加入既有战斗 | 已实现（`try_join_battle` / `add_reinforcement`，不新建会话） |
+| 增援逐单位标记 | 已实现（`is_reinforcement` / `reinforcement_battle_id` / `reinforcement_arrival_time`） |
+| 增援后方展开 | 已实现（后方 240 像素、3 列网格、间距 38、边界 clamp、不重叠） |
+| 增援提示与旗帜 | 已实现（仅玩家侧 NPC；家族文本 + 徽章或纯文本；排队淡入淡出、不暂停） |
+| `party_reinforced` 事件 | 已实现（`battle_id`, `party_id`, `noble_id`, `side_index`） |
 | 大地图部队对话 UI | 已实现（中立/友好部队） |
 | 玩家被主动拦截遭遇对话 | 已实现（底部 NPC 对话、领袖头像、`ENEMY_PURSUIT` 禁止离开） |
 | 统一大地图遭遇距离 | 已实现（50，`EncounterManager`） |
@@ -664,3 +692,35 @@ can_ranged_attack(a, b)        → 攻击者存活 ∧ 目标存活 ∧ 敌对 �
 ### 14.5 明确不做
 
 - 弩、投石索、穿透、溅射/AOE、弹药数量、蓄力、爆头/暴击、风力、箭矢回收与完整音效。
+
+## 15. 增援按初始侧部署与统一战斗入口（阶段 10）
+
+### 15.1 初始侧锚点
+
+- 每个战斗侧拥有初始区域锚点（side0 左、side1 右、side2 下、side3 上），由战场几何与创建顺序决定。
+- 增援的“后方”方向 = 该侧锚点 − 战场中心；部署点位于己方初始区域之后，而不是当前友军质心之后。
+- 两方战斗与三方/四方战斗使用同一规则，因此混战、伤亡或友军位置变化不会改变增援方向。
+
+### 15.2 网格与备用扫描
+
+- 保留 3 列网格、局部避让与 `REINFORCEMENT_MIN_SPACING`。
+- 网格点被占满时，在己方半场按最小间距均匀扫描，选择离所有存活单位最远的合法点；绝不返回已占用的基准点。
+- 生成点必须位于战场边界内、己方半场，且与存活单位保持最小间距；不会落入混战中心或敌方阵线。
+
+### 15.3 既有单位不受影响
+
+- 增援只加入既有 `BattleSession`，不新建战斗。
+- 既有单位的控制器、位置、HP、攻击冷却、队形槽位与战斗侧索引保持不变。
+- 逐单位生成后仍写入 `BattleParticipant`/`BattleUnitState`，并进入既有战斗结算。
+
+### 15.4 统一加入入口与第三侧规则
+
+- 玩家与 AI 的创建/加入都经 `BattleManager`；`get_join_side()` 检查全部战斗侧。
+- 只有“恰好一个敌对侧 + 至少一个非敌对侧”才允许加入；与所有侧敌对或全中立时拒绝，不自动创建第三侧。
+- 三方以上多方战斗仍通过显式多方入口创建，不由助攻或中途加入自动产生。
+
+### 15.5 战斗摘要与确认
+
+- 大地图战斗摘要只在悬浮对应 `BattleMarker` 时显示，按 `side_index` 分列部队与兵种；离开或结束即隐藏。
+- 玩家主动攻击先经过二次确认；确认时重校验有效性、占用、关系与距离，取消零副作用，重复确认不产生第二场战斗。
+- 加入友军既有战斗不弹攻击确认。

@@ -1,7 +1,7 @@
 # 存档系统
 
 **核心脚本：** `Scripts/Autoload/save_manager.gd`、`Scripts/Core/Save/save_data.gd`
-**状态：** 保存/读取闭环、成员关系校验、士兵成长/装备/骑乘/工资恢复、玩家档案与物品数量、地点场景路径、AI/跟随字段兼容、领主/封地/采邑/冒险者持久化已实现；Schema v4
+**状态：** 保存/读取闭环、成员关系校验、士兵成长/装备/骑乘/工资恢复、玩家档案与物品数量、地点场景路径、AI/跟随字段兼容、领主/封地/采邑/冒险者、贵族/家族/王国持久化已实现；Schema v5
 
 ---
 
@@ -21,17 +21,17 @@ user://saves/<slot>.json
 
 Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录内。
 
-## 3. Schema v4
+## 3. Schema v5
 
 ```json
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "project_version": "0.2.0",
   "saved_at": "2026-11-20T22:30:00",
   "world": {
     "world_id": "WORLD_000001",
     "created_at": "2026-11-20T22:00:00",
-    "size": [3000.0, 2000.0]
+    "size": [5000.0, 3000.0]
   },
   "time": {
     "world_elapsed_seconds": 1234.5,
@@ -55,6 +55,9 @@ Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录
   "units": { "UNIT_000001": { } },
   "parties": { "PARTY_000001": { } },
   "lords": { "LORD_000001": { } },
+  "nobles": { "LORD_000001": { } },
+  "houses": { "HOUSE_PLAYER": { } },
+  "kingdoms": { "KINGDOM_BURKNANIA": { } },
   "settlements": { "SETTLEMENT_000001": { } },
   "factions": {},
   "quests": {}
@@ -73,7 +76,10 @@ Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录
 | `world_state` | 世界级标记（预留） |
 | `scene_state` | 局部状态（初期不使用） |
 | `world_log` | 最近 100 条世界日志；缺失时为空历史 |
-| `lords` | 领主表 `{ lord_id: LordData }`；Schema v4 新增 |
+| `lords` | 领主表 `{ lord_id: LordData }`；Schema v4 新增，v5 继续保留为兼容副本 |
+| `nobles` | 贵族表 `{ noble_id: NobleData }`；Schema v5 新增 |
+| `houses` | 家族表 `{ house_id: HouseData }`；Schema v5 新增，含 `banner_id` 映射 |
+| `kingdoms` | 王国表 `{ kingdom_id: KingdomData }`；Schema v5 新增 |
 | 各实体表 | `{ 实体 ID: 实体数据 }` |
 
 `units` 与 `parties` 以实体 ID 为键；`PartyData.member_unit_ids` 保存成员 ID 列表。
@@ -207,8 +213,9 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 ## 9. 版本与迁移
 
 - `schema_version` 每次结构不兼容变更时加 1。
-- 当前版本 4；`SaveData.from_dict()` 接受 1..4。
+- 当前版本 5；`SaveData.from_dict()` 接受 1..5。
 - v3 → v4 新增 `lords` 与 `player.player_lord_id` / `player.player_unit_id`；旧存档缺失时由 `WorldContext` 补玩家领主身份，不伪造封地归属。
+- v4 → v5 新增 `nobles` / `houses` / `kingdoms` 与地点 `owner_house_id` / `owner_noble_id`；旧存档缺失时由 `lords`、`family_id` 与 `banner_id` 补建最小政治视图，并通过固定 ID 去重。
 - 读取旧版本时执行迁移；`SaveData.from_dict()` 已保留 v1 → v2 入口，但完整字段迁移尚未完成。
 - 读取高于当前版本的存档直接拒绝。
 - 迁移逻辑集中在 `SaveData.from_dict()`，禁止散落。
@@ -233,8 +240,15 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
   - 同一部队最多一个领主；
   - 玩家领主最多一个且 `is_player_lord == true`。
 - 封地所有权（`WorldContext.validate_world_ownership()`）：
-  - 每个非空 `owner_lord_id` 必须指向存在的领主；
-  - `player_lord_id` 非空时必须存在且为玩家领主。
+  - 每个非空 `owner_noble_id` 必须指向存在的贵族；`owner_house_id` 必须存在且与贵族家族一致；
+  - `owner_lord_id` 兼容字段与 `owner_noble_id` 一致；
+  - `player_lord_id` 非空时必须存在且为玩家贵族。
+- 政治层级（`NobleManager` / `HouseManager` / `KingdomManager`）：
+  - 贵族/家族/王国 ID 唯一；
+  - 宗主、家族、王国引用存在；宗主链无循环、无自指；
+  - `is_house_leader` / `is_king` 与领袖/国王字段一致；
+  - 一个家族最多属于一个王国；
+  - 领袖/国王必须存活，否则标记待定。
 
 校验失败处理：逐条 `push_error`，`load_from_save_data()` 返回 `false`，不自动修复或改写存档（D025）。
 
@@ -248,7 +262,7 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 
 | 项 | 状态 |
 |---|---|
-| `SaveData` Schema v4 | 已实现 |
+| `SaveData` Schema v5 | 已实现 |
 | JSON 写入/读取 | 已实现 |
 | 临时文件 + 备份替换 | 已实现 |
 | 槽位列表/删除 | 已实现 |
@@ -390,3 +404,35 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 - 候选人被招募但尚未离开村庄的状态可以持久化（`RECRUITED_PENDING_DEPARTURE`）；如果存档发生在离开村庄前，读档后仍会显示“已招募”记录，离开时再清理。
 - 征集过程中的临时创建单位若事务失败会被立即回滚，不会进入存档。
 - 静态经济配置 `Data/Settlements/settlement_economy_config.tres` 不进入存档。
+
+## 19. Schema v5：贵族、家族与王国（阶段 8）
+
+### 19.1 新增字段
+
+| 位置 | 字段 | 说明 |
+|---|---|---|
+| 顶层 | `nobles` | `{ noble_id: NobleData }`；贵族、爵位、宗主、领袖/国王、部队与存活 |
+| 顶层 | `houses` | `{ house_id: HouseData }`；领袖、贵族、封地、王国、宗主、`banner_id`、玩家家族 |
+| 顶层 | `kingdoms` | `{ kingdom_id: KingdomData }`；统治家族、国王、附庸、敌对、颜色、活动 |
+| `SettlementData` | `owner_house_id` | 政治家族归属 |
+| `SettlementData` | `owner_noble_id` | 贵族归属；与 `owner_lord_id` 同步 |
+| `PartyData` | `leader_noble_id` | 指挥该部队的贵族 |
+| 世界 | `world.size` | 新游戏为 5000×3000 |
+
+### 19.2 读档顺序与兼容
+
+1. 单位 → 部队 → `apply_runtime_defaults()`。
+2. `house_manager.load_from_dict(save.houses)`。
+3. `noble_manager.load_from_dict(save.nobles)`；`lord_manager` 指向同一实例。
+4. `kingdom_manager.load_from_dict(save.kingdoms)`。
+5. 旧存档只有 `lords` 且无政治表时，按旧领主补建最小家族/贵族视图，不伪造王国。
+6. 地点 `owner_house_id` / `owner_noble_id` 缺失时由 `family_id` → `banner_id` 解析现有家族；旧 `owner_lord_id` 同步到 `owner_noble_id`。
+7. 校验贵族/家族/王国引用、循环、爵位、领袖/国王标记与封地归属；失败拒绝读档。
+8. 重建部队 → 贵族 → 家族 → 王国的链接，并刷新地块归属。
+
+### 19.3 不持久化
+
+- 战斗中的增援标记（`is_reinforcement` 等）属于 `BattleUnitState` 运行时字段，不进入存档；战斗进行中禁止保存。
+- 百科面板层级、滚动位置、选中王国/家族均为 UI 状态。
+- 增援提示队列与淡入淡出计时不持久化。
+- 固定 ID 家族/王国（`HOUSE_*`、`KINGDOM_*`）由初始化器显式注册，不消耗 `IdGenerator` 计数。

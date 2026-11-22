@@ -66,6 +66,8 @@ func _run() -> void:
 	add_child(_map)
 	await get_tree().process_frame
 	await get_tree().process_frame
+	# 无显示器环境下鼠标位置固定，关闭自动悬浮以保证默认状态可验证。
+	_map.call("set_battle_mouse_hover_for_test", false)
 
 	var session := _context.battle_manager.start_battle(
 		[_merchant.party_id], [_bandit.party_id], _battle_position, true
@@ -98,12 +100,21 @@ func _run() -> void:
 		_icon(_guard).visible and _icon(_player).visible,
 		"未参战部队图标保持显示"
 	)
+	_check(
+		_map.call("is_battle_summary_visible") == false,
+		"AI 对 AI 战斗默认只显示标记，不自动显示信息面板"
+	)
+	_check(str(_map.call("get_battle_summary_text")) == "", "未悬浮时没有战斗信息文本")
+	_check(marker != null and marker.get_count_text() == "10", "战斗标记显示总存活人数")
+
+	# 悬浮战斗标记后才显示对应信息。
+	_map.call("apply_battle_hover_for_test", _battle_position)
 	var summary: String = str(_map.call("get_battle_summary_text"))
+	_check(_map.call("get_hovered_battle_id") == session.battle_id, "悬浮命中当前战斗")
 	_check(summary.contains(_merchant.party_name), "战斗汇总显示商队")
 	_check(summary.contains(_bandit.party_name), "战斗汇总显示强盗")
 	_check(summary.contains("民兵（3）"), "战斗汇总按兵种统计人数")
 	_check(summary.contains("职业步兵（2）"), "战斗汇总区分不同兵种")
-	_check(marker != null and marker.get_count_text() == "10", "战斗标记显示总存活人数")
 	_check(
 		_map.call("is_battle_summary_visible") == true,
 		"战斗汇总面板显示在战斗标记附近"
@@ -121,8 +132,16 @@ func _run() -> void:
 		int(session.offscreen_settlements_done) == 1,
 		"UI 不创建额外战斗或重复结算"
 	)
+	_map.call("apply_battle_hover_for_test", _battle_position)
 	var summary_after: String = str(_map.call("get_battle_summary_text"))
 	_check(summary_after != summary, "战斗汇总文本随伤亡刷新")
+	# 鼠标离开战斗标记后立即隐藏。
+	_map.call("clear_battle_hover_for_test")
+	_check(
+		_map.call("is_battle_summary_visible") == false,
+		"鼠标离开战斗标记后信息面板隐藏"
+	)
+	_check(str(_map.call("get_hovered_battle_id")) == "", "清理悬浮战斗记录")
 
 	# 治安队加入商队一方：新部队自动进入同侧分组。
 	_guard.world_position = _battle_position + Vector2(20.0, 0.0)
@@ -131,6 +150,7 @@ func _run() -> void:
 		"治安队加入已有战斗"
 	)
 	await _wait_frames(2)
+	_map.call("apply_battle_hover_for_test", _battle_position)
 	summary = str(_map.call("get_battle_summary_text"))
 	_check(summary.contains(_guard.party_name), "新参战部队自动加入汇总")
 	_check(not _icon(_guard).visible, "新参战部队图标被隐藏")
@@ -156,12 +176,14 @@ func _run() -> void:
 	_check(three_sides != null, "创建三方离屏战斗")
 	if three_sides != null:
 		await _wait_frames(3)
+		_map.call("apply_battle_hover_for_test", _battle_position)
 		_check(
 			int(_map.call("get_battle_summary_column_count")) == 3,
 			"三方战斗按 side_index 生成三列"
 		)
 		var side_indices: Array = _map.call("get_battle_summary_side_indices")
 		_check(side_indices == [0, 1, 2], "汇总列顺序对应战斗侧顺序")
+		_map.call("clear_battle_hover_for_test")
 		_context.battle_manager.finish_battle(
 			three_sides.battle_id, BattleSession.BattleResult.ABORTED
 		)
@@ -228,6 +250,55 @@ func _test_parallel_battle_markers() -> void:
 		and marker_second.get_count_text() == str(_session_alive(second)),
 		"每个标记显示本场战斗自己的存活人数"
 	)
+
+	# 悬浮不同战斗标记时切换到对应战斗信息。
+	_map.call("apply_battle_hover_for_test", _battle_position)
+	_check(
+		_map.call("get_hovered_battle_id") == first.battle_id,
+		"悬浮第一场战斗命中对应标记"
+	)
+	var first_summary := str(_map.call("get_battle_summary_text"))
+	_check(
+		first_summary.contains(_merchant.party_name)
+			and first_summary.contains(_bandit.party_name),
+		"第一场悬浮信息显示自己的参战部队"
+	)
+	_map.call("apply_battle_hover_for_test", second_position)
+	_check(
+		_map.call("get_hovered_battle_id") == second.battle_id,
+		"鼠标移动到第二场战斗时切换信息"
+	)
+	var second_summary := str(_map.call("get_battle_summary_text"))
+	_check(
+		second_summary.contains(_guard.party_name)
+			and second_summary.contains(east_bandits.party_name),
+		"第二场悬浮信息显示自己的参战部队"
+	)
+	_check(
+		not second_summary.contains(_merchant.party_name),
+		"悬浮第二场时不再显示第一场部队"
+	)
+
+	# 战斗结束时，正在悬浮的对应面板必须关闭。
+	_context.battle_manager.finish_battle(
+		second.battle_id, BattleSession.BattleResult.ABORTED
+	)
+	await _wait_frames(4)
+	_check(
+		_map.call("get_hovered_battle_id") == ""
+			and _map.call("is_battle_summary_visible") == false,
+		"悬浮中的战斗结束后自动关闭信息面板"
+	)
+	# 重新创建第二场战斗用于后续“结束第一场不影响第二场”的检查。
+	_guard.world_position = second_position
+	east_bandits.world_position = second_position + Vector2(40.0, 0.0)
+	second = _context.battle_manager.start_battle(
+		[_guard.party_id], [east_bandits.party_id], second_position, true
+	)
+	_check(second != null, "重新创建第二场离屏战斗")
+	if second == null:
+		return
+	await _wait_frames(4)
 
 	_context.battle_manager.finish_battle(
 		first.battle_id, BattleSession.BattleResult.ABORTED

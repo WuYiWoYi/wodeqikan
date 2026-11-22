@@ -2,7 +2,7 @@
 
 **核心数据：** `Scripts/Entities/Lord/lord_data.gd`
 **核心仓储：** `Scripts/Core/World/lord_manager.gd`
-**状态：** 阶段 7 第一步已实现：领主数据/仓储/存档、玩家领主身份、封地归属、AI 领主前往自有村庄征召。
+**状态：** 阶段 7 第一步已实现；阶段 8 起 `LordData` 作为兼容基类，由 `NobleData` 继承并接入贵族/家族/王国体系。详见 [Political_Hierarchy_System.md](Political_Hierarchy_System.md)。
 
 ---
 
@@ -15,10 +15,11 @@
 - 自己不直接出现在大地图移动逻辑中。
 
 ```text
-Faction
-└── Lord
-    └── Party
-        └── Unit
+Kingdom
+└── House
+    └── Noble（extends Lord）
+        └── Party
+            └── Unit
 ```
 
 ## 2. 身份分离
@@ -68,8 +69,8 @@ Faction
 
 ## 5. 封地归属
 
-- `SettlementData.owner_lord_id` 是封地归属的唯一权威字段。
-- 归属判断只看 `owner_lord_id`，不看 `faction_id` 或 `family_id`。
+- 阶段 8 起 `SettlementData.owner_noble_id` / `owner_house_id` 是封地归属的权威字段；`owner_lord_id` 作为兼容副本同步维护。
+- 归属判断看 `owner_noble_id` 与 `owner_house_id`，不看 `faction_id` 或视觉 `family_id`。
 - `WorldContext.validate_world_ownership()` 校验每个非空归属都能找到领主，并校验玩家领主身份。
 - 新游戏初始封地：
   - 巴里 → 巴里家族领主；
@@ -130,7 +131,7 @@ LordAI
 
 ## 10. 持久化与校验
 
-- 存档 Schema v4 新增顶层 `lords`；`WorldContext.to_save_data()` 写入 `lord_manager.to_dict()`。
+- 存档 Schema v4 新增顶层 `lords`；Schema v5 增加 `nobles` / `houses` / `kingdoms`，`lords` 继续保留为兼容副本，`lord_manager` 与 `noble_manager` 指向同一实例。
 - `player` 字典保存 `player_lord_id` 与 `player_unit_id`。
 - 读档顺序：单位 → 部队 → 运行时默认值 → 领主 → 地点 → 世界日志。
 - 领主校验失败或封地引用悬空时拒绝读档，不自动改写存档。
@@ -148,7 +149,9 @@ LordAI
 | AI 领主前往自有封地征召 | 已实现 |
 | 战略攻击/撤退决策 | TODO |
 | 性格配置与关系权重 | TODO |
-| 领主死亡/继承/封地转让 | TODO |
+| 贵族/家族/王国层级 | 已实现（阶段 8，见 `Political_Hierarchy_System.md`） |
+| 领袖死亡选举 | 已实现（阶段 8，按爵位/稳定 ID；无候选标记待定） |
+| 领主死亡/继承/封地转让 | 部分实现（选举已完成；封地转让/继承未实现） |
 | 玩家招募领主 | TODO |
 
 ## 12. 待确认

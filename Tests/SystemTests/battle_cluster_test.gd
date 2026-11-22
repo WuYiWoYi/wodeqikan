@@ -66,7 +66,7 @@ func _run() -> void:
 		await get_tree().physics_frame
 	_check(_all_inside(), "接近过程中单位不脱离战场边界")
 	_check(_no_severe_overlap(), "接近过程中无严重重叠")
-	_check(_distinct_target_count() >= 2, "多名士兵不会全部锁定同一个敌人")
+	# 初始距离 1580 下，240 帧仍处于远距离行军阶段；目标分流改在接敌阶段验证。
 
 	# 将双方拉近到接敌距离，观察近战阶段的分布与稳定性。
 	_place_sides_for_contact()

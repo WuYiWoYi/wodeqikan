@@ -1,8 +1,8 @@
 # 当前开发状态
 
 **更新日期：** 2026-11-22
-**当前阶段：** 阶段 7 第一步 · 封地所有权、采邑征召与村庄冒险者完成
-**整体状态：** 领主/封地归属、玩家领主与玩家角色分离、每村采邑储备与按人口/繁荣度补充、6 人成组征召与原子回滚、AI 领主征召、每村最多 5 名冒险者候选人及 1 金币招募、共享世界日志与大地图浮动提示完成；地点交互恢复“点击设置移动目标、到达后停止/暂停/打开面板”；战斗系统支持多场 AI 离屏战斗并行、单场独立推进/结算、一方全灭立即结束、大地图多战斗标记；Schema v4；相关自动化测试通过
+**当前阶段：** 阶段 10 · 战后追击、AI 助攻、增援部署与大地图交互完善
+**整体状态：** 阶段 9 已完成地点聚类与部队旗帜放大；阶段 10 修复战后追击/遭遇卡死、统一强盗与贵族敌对关系、启用基于视野的 AI 战场助攻、按初始战斗侧修正增援部署，并补充行动意图悬浮、战斗标记悬浮、WASD 自由镜头、主动攻击二次确认与进一步的旗帜放大；相关自动化测试全部通过
 
 ---
 
@@ -33,7 +33,10 @@
 | 6 后续 · 村庄表现/玩家扩编/战斗集群 | 完成 | 部队标记恢复原尺寸、村庄圆形标记放大、名称位于上方、玩家 12 人、初始部署距离 1100、半场列阵/接敌放松/目标分流/局部避让 |
 | 6 后续 · 大地图表现/AI 恢复/存档/战斗 UI | 完成 | 村庄原始美术 + 徽章名称组合、AI 战后恢复与冷却、Schema v3 世界日志与读档清理、胜利 3 秒延迟、按 side_index 分列、左 Alt 详细悬浮 |
 | 6 后续 · 弓箭手与远程箭矢 | 完成 | 三级弓箭手、弓/箭临时美术、固定终点抛物线箭矢、高度命中与自然射失、远程 AI、玩家射箭、3 秒冷却、新游戏 3 名弓箭手与存档 |
-| 6（原路线图）援军与高级战斗 | 未开始 | 并入后续高级战斗阶段 |
+| 8 战场扩建 · 增援 · 贵族王国 · 地图扩建 · 百科 | 完成 | 1800×1024 战场参数化、增援加入既有战斗与后方展开、Noble/House/Kingdom 数据与管理器、5000×3000 地图与两王国、三级百科、Schema v5 |
+| 9 大地图布局 · 部队旗帜 | 完成 | 地点按王国/家族聚类、道路与巡逻点同步、部队内部旗帜放大且圆形底盘不变 |
+| 10 战后追击 · AI 助攻 · 增援部署 · 大地图交互 | 完成 | 战后追击/冷却恢复、强盗与贵族敌对、视野门槛助攻、按初始侧部署增援、行动意图悬浮、战斗标记悬浮、WASD 自由镜头、主动攻击二次确认、旗帜进一步放大 |
+| 6（原路线图）援军与高级战斗 | 部分完成 | 增援加入既有战斗已完成；玩家手动选择加入方、士气与高级指挥未开始 |
 | 7 沙盒扩展 | 未开始 | — |
 
 ## 2. Milestone 1 已完成内容
@@ -1343,6 +1346,154 @@
 - 更新 `battle_occupancy_ui_test`：世界其他战斗不再阻塞无关部队开战。
 - 回归通过：`battle_scene_test`、`battle_result_delay_test`、`battle_result_test`、`player_battle_interaction_test`、`ai_encounter_flow_test`、`milestone2_flow_test`、`save_persistence_test`、`world_log_ui_test`、`neutral_party_interaction_test`、`encounter_dialogue_ui_test`、`player_encounter_test`、`battle_retreat_test`、`battle_side_result_test`、`party_dialogue_test`、`player_pursuit_encounter_test`、`player_control_test`、`battle_cluster_test`、`battle_formation_test`。
 
+## 8.21 阶段 8 · 战场扩建、增援表现、贵族王国体系、地图扩建与百科
+
+### 战场与增援
+
+- `BattleScene` 战场扩大为 1800×1024（有效区域约为原先 2 倍），相机维持 960×540，像素、动画与缩放不变。
+- 战场尺寸参数化：`BATTLEFIELD_SIZE`、`INITIAL_ARMY_DISTANCE`（1580）、`DEPLOYMENT_MARGIN`（110）；初始部署距离增加，按双方阵营中心向两侧展开。
+- 区分新遭遇与增援：新遭遇走 `start_battle_by_sides()`；增援走 `try_join_battle()` / `add_reinforcement()`，加入既有 `BattleSession`，不新建会话。
+- 增援侧别由 `FactionManager.is_party_hostile/friendly` 按政治身份判定；增援在战斗中心远离方向的后方 240 像素处展开，使用 3 列网格 + 96 次尝试避免越界与重叠。
+- 增援不重置既有单位位置、不打断攻击冷却、不重置战斗进度；仅新增单位控制器。
+- `BattleParticipant` / `BattleUnitState` 新增 `is_reinforcement`、`reinforcement_battle_id`、`reinforcement_arrival_time`，由参与者复制到单位状态。
+- 新增 `EventBus.party_reinforced(battle_id, party_id, noble_id, side_index)`；`battle_participant_joined` 仍用于通用加入通知。
+- 仅当 NPC 加入玩家所在战斗侧时显示增援提示：有家族旗帜时显示“是XXX的旗帜，AAA带部队来增援我们了！”+ 徽章；无旗帜时显示“AAA带部队来增援我们了！”。提示排队合并、淡入淡出、不暂停、不阻塞。
+- 增援数据读取真实 `NobleData` / `HouseData` / `FamilyConfig.banner_texture_path`。
+
+### 贵族 / 家族 / 王国
+
+- 新增 `NobleData`（继承 `LordData`）、`NobleManager`（继承 `LordManager`）、`HouseData` / `HouseManager`、`KingdomData` / `KingdomManager`。
+- `NobleData`：`lord_id`、名称、`house_id`、爵位（Knight=1 / Baron=2 / Duke=3）、`liege_noble_id`、`is_house_leader`、`is_king`、`party_id`、`is_alive`；每个贵族独立指挥一支部队。
+- `validate()` 校验 ID 唯一、引用存在、无自指/循环、爵位合法、领袖与国王标记一致。
+- 领袖死亡触发家族选举：按爵位降序、再按稳定 ID 升序；更新家族领袖/王国国王标记；无候选时家族/王国标记为待定（`pending_leader`）。
+- `HouseData`：领袖、贵族列表、封地、所属王国、宗主家族、旗帜 ID、玩家家族标记；地点归属通过 `owner_house_id` / `owner_noble_id` 绑定家族。
+- 招募授权：仅村庄可征召；仅 `owner_noble_id` 本人或该家族领袖可征召该封地采邑。
+- `KingdomData`：统治家族、国王、附庸家族、敌对王国、颜色、活动状态；一个家族最多属于一个王国。
+- 附庸保留自己的领袖、贵族、部队与封地；战争敌对关系传播到所有成员家族。
+- `FactionManager` 增加统一查询：`get_party_relation()`、`get_house_relation()`、`are_houses_hostile()`；双方都有家族时以家族/王国关系优先，玩家家族默认中立。
+- 玩家是玩家家族中的骑士，独立且中立。
+
+### 世界地图与初始世界
+
+- 世界尺寸 3000×2000 → 5000×3000，保留原有地点与部队，新增地点互不重叠。
+- 地点层级：村庄（1 级，可征召）、城堡（2 级）、城镇（3 级）；新地点全部归属家族。
+- 伯克纳尼亚王国：城镇“伯克纳尼亚” + 村庄“伯克纳”，家族 `HOUSE_BURKNANIA`，国王与普通贵族各指挥一支部队。
+- 墨西西家族成为伯克纳尼亚附庸。
+- 奥林王国：城堡“奥林德斯堡” + 村庄“奥林”，家族 `HOUSE_OLIN`，国王与普通贵族各指挥一支部队。
+- 巴里家族成为奥林附庸。
+- 两王国处于战争状态；玩家中立。
+- `Data/Families/family_burknania.tres`、`family_olin.tres` 提供家族旗帜/罩袍/缨饰/长矛。
+- ID 固定：`HOUSE_*`、`KINGDOM_*`、`FAMILY_*`；读档通过 `banner_id` 映射视觉家族到政治家族，避免重复初始化。
+- `map_background.gd` 扩展清空区与道路；`settlement_icon.gd` 新增城镇绘制与名称锚点。
+
+### 百科
+
+- 大地图顶栏新增“百科”按钮，打开屏幕空间面板并压入 `ui_panel` 暂停；关闭恢复原速度，不重置相机。
+- 一级：王国列表（名称、统治家族、国王、附庸数、封地数、玩家关系、战争状态）。
+- 二级：王国详情（统治家族、徽章、领袖、国王、其他贵族、可点击附庸、按家族分组的封地）。
+- 三级：家族详情（名称、徽章、所属王国、领袖、贵族爵位/领袖/国王/部队/存活状态、封地名称/类型/所有者）。
+- 返回导航、可滚动列表、缺失旗帜占位徽章、数据变化签名刷新、遵循暂停规则。
+
+### 存档
+
+- Schema v4 → v5：新增 `nobles`、`houses`、`kingdoms`；保留 `lords` 兼容副本。
+- 读档校验政治引用与一致性；`FAMILY_*` 通过 `HouseData.banner_id` 解析到现有 `HOUSE_*`，不生成重复家族。
+- `SaveData.CURRENT_SCHEMA_VERSION = 5`。
+
+### 测试
+
+- 新增 `political_hierarchy_test`：5 家族、2 王国、7 贵族、附庸、战争传播、玩家中立、独立部队、存档往返、国王死亡选举与待定王国。
+- 新增 `battle_reinforcement_test`：增援侧别、单位标记、场景单位数、既有控制器保持、后方/边界/不重叠、旗帜提示、消息排队、玩家/敌方侧不提示。
+- 新增 `encyclopedia_ui_test`：入口、暂停、一级真实数据、三级导航、返回、死亡动态刷新、占位徽章、关闭恢复速度、相机不重置。
+- 更新 `milestone1_test`（5000×3000、12 部队、9 地点、21 唯一 ID）、`milestone1_restart_test`、`family_appearance_test`、`battle_scene_test`、`save_persistence_test`（Schema v5）。
+
+### 阶段 8 验收清单
+
+- [x] 战场有效区域约 2 倍，像素/动画/相机不变；战场宽高、初始距离、边距参数化。
+- [x] 新遭遇与增援区分；增援加入既有战斗，不新建会话。
+- [x] 增援在后方展开，不越界、不重叠，不重置既有单位与冷却。
+- [x] 增援单位具备 `is_reinforcement` / `reinforcement_battle_id` / `reinforcement_arrival_time`。
+- [x] 仅玩家侧 NPC 增援显示提示；有旗帜显示家族文本 + 徽章，无旗帜显示纯文本；消息排队、不暂停。
+- [x] 贵族/家族/王国数据与管理器、引用/循环校验、独立部队、领袖死亡选举与待定。
+- [x] 地点归属绑定家族；仅村庄征召；仅家族授权贵族可征召。
+- [x] 王国战争传播到成员家族；`FactionManager` 统一查询；玩家中立。
+- [x] 世界地图 5000×3000；新增地点不重叠、ID 唯一；两王国与四个新地点。
+- [x] 百科三级导航、真实数据、占位徽章、动态刷新、暂停与相机保持。
+- [x] Schema v5 往返；旧存档不重复初始化家族。
+- [x] 相关新增与回归自动化测试通过。
+- [ ] 非 headless 视觉验收（战场扩大手感、增援提示排版、百科可读性）待人工执行。
+
+## 8.22 阶段 9 · 大地图地点区域化布局与部队内部旗帜放大
+
+### 地点布局
+
+- 世界尺寸保持 5000×3000；只调整 `world_initializer.gd` 中的坐标常量，不改变地点 ID、名称、类型、家族、政治归属、交互配置与村庄征召。
+- 伯克纳尼亚王国（上部）：墨西西 (2500, 700)、伯克纳尼亚 (2900, 750)、北境村 (2250, 1000)、伯克纳 (3200, 1000)。
+- 奥林王国（下部）：奥林德斯堡 (2950, 1850)、奥林 (3250, 2050)、巴里 (2600, 2100)、灰石城堡 (2900, 2350)。
+- 青禾村作为玩家中立村庄位于 (1600, 1500)，处于两王国区域之间的西侧缓冲带。
+- 同王国地点最大两两距离 ≤ 1100；两王国质心间距约 1240；家族封地跨度 ≤ 500；任意地点间距 ≥ 250；距地图边界 ≥ 120。
+- 家族骑士、国王卫队、巡逻点同步移动到对应区域；AI 行为类型与巡逻规则不变。
+- `map_background.gd` 的清空区与道路改用同一组坐标：青禾村通向两王国，各王国区域内部连通。
+
+### 部队旗帜
+
+- `PartyMarkerStyle.flag_max_size` 30 → 38；`marker_radius` 18、`border_width` 2 不变。
+- 旗帜贴图为 48×48 画布、有效像素约 30×36；等比缩放并居中后有效旗帜约 24×28.5，接近半径 16 的内圆。
+- `map_flag_circle.gdshader` 圆形遮罩继续裁剪四角；点击/悬浮区域、地图位置与移动动画不受影响。
+- 无旗帜纹理时的回退三角形限制在 `inner_radius * 0.62` 内，不会越出圆形。
+
+### 测试
+
+- 新增 `world_map_layout_test`：9 地点、5000×3000、名称唯一、边界余量、最小间距、家族跨度、王国跨度与质心间隔、家族靠近所属王国、圆形半径与旗帜尺寸。
+- 更新 `encounter_dialogue_ui_test` 的标记断言；`milestone1_test` 改为从 `WorldInitializer.BARI_VILLAGE_NAME` 动态读取巴里位置。
+- 本轮按需求只运行布局/地点/图标相关测试：`world_map_layout_test`、`milestone1_test`、`encounter_dialogue_ui_test`、`world_map_milestone6_test`、`settlement_interaction_test`、`fief_adventurer_system_test`、`world_map_input_test`，全部通过；未运行全项目测试。
+
+### 阶段 9 验收清单
+
+- [x] 新地点与旧地点距离缩短，按王国/家族聚类，两王国之间保留间隔。
+- [x] 地点 ID、名称、类型、归属、家族、交互配置与村庄征召不变。
+- [x] 图标/名称标签间距、地图边界与摄像机可达性、点击判定不受影响。
+- [x] 圆形底盘、边框、背景、形状、点击/悬浮区域、地图位置与移动动画不变。
+- [x] 旗帜等比放大、居中、不越出圆形，尺寸通过 `flag_max_size` 参数化。
+- [x] 相关自动化测试通过（未运行全项目测试）。
+- [ ] 非 headless 视觉验收（地点聚集观感、旗帜在圆形中的比例）待人工执行。
+
+## 8.23 阶段 10 · 战后追击、AI 助攻、增援部署与大地图交互
+
+### 战后追击与遭遇
+
+- `EncounterManager.update_encounters()` 不再要求双方 MOVING；只要部队有效、关系敌对、距离进入统一遭遇半径且攻击/追击意图成立即可触发。
+- 战后冷却由 `BattleManager.POST_BATTLE_ENGAGEMENT_COOLDOWN` 统一写入；冷却期间 AI 先脱离接触并恢复路线/巡逻，结束后重新评估目标。
+- 玩家追击使用 `focus_party_id` 与 `FOLLOW_PARTY` 双通道：目标移动、进入离屏战斗或战后冷却期间都保持追击关系，条件满足后可靠触发遭遇，不会永久卡住。
+- `WorldMapManager._refresh_follow_party()` 在目标进入战斗时保留 FOLLOW_PARTY 并原地等待，战斗结束后自动恢复；目标失效才清理。
+- 同一时间只创建/加入一场相关战斗；冷却期间即使双方被强制设置攻击意图也不会立即再战。
+
+### 强盗与贵族敌对
+
+- `FactionManager.get_party_relation()` 新增统一规则：`party_kind == BANDIT` 或强盗阵营，对任何政治家族贵族（王室、附庸、独立家族、玩家家族）一律 HOSTILE。
+- 判断只使用部队类型与家族数据，不依赖名称；同一家族/同一王国关系、王国战争、商队中立与治安队友好保持原行为。
+
+### AI 战场助攻
+
+- `VisionManager` 新增 `include_in_battle` 查询模式，允许观察者“看见”正在离屏战斗中的参战方。
+- `AIManager._try_respond_to_battle()` 只通过视野发现战场，要求进入 `BATTLE_APPROACH_RADIUS` 且至少看见一名参战方；发现后保持 15 秒接近目标，避免视野抖动。
+- 加入资格仍由 `BattleManager.get_join_side()` 统一判断：必须恰好存在敌对侧且另有无敌对关系的战斗侧；检查全部战斗侧，而不是只看前两侧；与所有侧敌对时返回 -1，不创建第三侧。
+- 实际加入仍走 `EncounterManager` → `BattleManager.try_join_battle()` 的既有入口，不新增战斗；农贸商队不响应，家族骑士/卫队/强盗/治安队可响应。
+
+### 增援部署
+
+- 增援后方基准改为该战斗侧的初始区域锚点（`_side_anchor`），背离方向由“锚点 − 战场中心”计算；两方与多方战斗不再假设左右。
+- 保留 3 列网格与局部避让；网格在己方半场排满时退化为半场均匀扫描，优先选择满足最小间距的点，绝不返回已占用的基准点。
+- 增援不会在混战中心、敌方半场、越界位置生成；初始部署与既有单位控制器/HP/攻击冷却不受影响。
+
+### 大地图交互与 UI
+
+- 部队悬浮面板新增“行动：XXX”，由 `PartyData` 运行时字段推导：追击、跟随、巡逻、前往地点、战场响应、征召、前往目的地、待命；意图变化自动刷新，Alt 仍展开兵种构成，UI 不修改 AI。
+- AI 对 AI 战斗信息面板只在该战斗标记悬浮时显示，默认隐藏；多场战斗按悬浮切换，离开或战斗结束即隐藏，不阻挡地图输入。
+- 大地图相机新增 `FOLLOW_PLAYER` / `FREE_CAMERA`：WASD 或方向键进入自由镜头，速度随缩放变化并限制在世界边界；新的玩家移动/跟随指令重新锁定玩家。
+- 玩家主动攻击新增二次确认；取消不产生任何战斗副作用；确认时重新校验玩家/目标可用性、战斗占用、友军变化等条件；加入友军既有战斗不弹确认；重复确认不会创建第二场战斗。
+- 部队内部旗帜 `flag_max_size` 由 38 提升到 44，圆形底盘、边框、点击半径、悬浮判定与人数显示保持不变。
+
 ## 9. 自动化验收
 
 ### 测试套件
@@ -1355,12 +1506,13 @@
 | `Tests/UnitTests/unit_party_serialization_test.tscn` | 5 名士兵与多部队存档往返、等级/经验/装备/当前 HP 恢复、读档重算、旧存档缺失字段、无效装备清理、继续转队、损坏引用拒绝加载 |
 | `Tests/SystemTests/party_panel_test.tscn` | 大地图部队按钮、面板打开/关闭、概览、完整初始成员列表、详情属性、装备槽位、步兵/骑兵 SubViewport 美术预览、预览只读、暂停原因栈 |
 | `Tests/UnitTests/faction_vision_test.tscn` | 阵营关系组合与对称性、视野发现/离开、敌友中立筛选、失效观察者与目标 |
-| `Tests/UnitTests/multi_party_battle_test.tscn` | 双方回归、友军加入、独立第三方、中立拒绝、距离/重复校验、玩家战斗与其他 AI 战斗并行、多方离屏结算、多侧战斗场景 |
-| `Tests/SystemTests/ai_encounter_flow_test.tscn` | 玩家加入离屏战斗、玩家实际战斗侧、`battle_started` 自动进入战斗场景 |
+| `Tests/UnitTests/multi_party_battle_test.tscn` | 双方回归、友军加入、与所有侧敌对时拒绝自动第三方、中立拒绝、显式多方创建与离屏结算、距离/重复校验、玩家战斗与其他 AI 战斗并行、多侧战斗场景 |
+| `Tests/SystemTests/ai_encounter_flow_test.tscn` | 玩家加入离屏战斗、玩家实际战斗侧、`battle_started` 自动进入战斗场景；阶段 10 追加：视野门槛助攻、友/中立+敌对才加入、全敌对/全中立拒绝、检查全部战斗侧、战后冷却与恢复、多战斗幸存者恢复移动 |
 | `Tests/SystemTests/player_encounter_test.tscn` | 敌对 AI 主动拦截玩家、ENEMY_PURSUIT 原因、底部布局与领袖头像、无离开选项、暂停原因栈、防重复、异常清理、进入战斗场景 |
 | `Tests/SystemTests/world_map_milestone6_test.tscn` | 村庄原始美术/位置/缩放、固定尺寸徽章+名称组合、徽章读取家族、无家族隐藏、左 Alt 输入切换、简单/详细悬浮 |
 | `Tests/UnitTests/party_architecture_test.tscn` | 统一 Party 字段、控制类型/部队类型、NPC 领袖、序列化往返、旧存档默认值与类型推断、读档不重置位置/成员 |
-| `Tests/SystemTests/encounter_dialogue_ui_test.tscn` | 部队标记恢复原尺寸、底部 NPC 对话、领袖头像/默认剪影、敌对追击无离开、玩家主动接近保留离开、配置文本 |
+| `Tests/SystemTests/encounter_dialogue_ui_test.tscn` | 部队标记保持圆形底盘、内部旗帜放大、底部 NPC 对话、领袖头像/默认剪影、敌对追击无离开、玩家主动接近保留离开、配置文本 |
+| `Tests/SystemTests/world_map_layout_test.tscn` | 9 地点数量/名称唯一、5000×3000、边界余量、最小间距、家族跨度、王国跨度与质心间隔、家族靠近所属王国、圆形半径与旗帜尺寸 |
 | `Tests/SystemTests/player_party_expansion_test.tscn` | 玩家 15 人编制（含 3 名弓箭手）、完整 UnitData、兵种/骑乘数量、领袖、马匹库存、存档往返不丢失或重复生成 |
 | `Tests/SystemTests/battle_cluster_test.tscn` | 初始部署距离、战场边界、双方半场列阵、接近/接敌后无严重重叠、局部拥挤上限、目标分流、纵深分布 |
 | `Tests/SystemTests/battle_occupancy_ui_test.tscn` | 世界其他位置战斗不阻塞无关部队开战、参战方“加入战斗”复用同一会话 |
@@ -1375,11 +1527,11 @@
 | `Tests/UnitTests/battle_manager_test.tscn` | 开始校验、锁定、玩家战败结算、剩余 HP 写回、重复结算拒绝、多战斗注册表、部队唯一归属、独立结算 |
 | `Tests/UnitTests/ai_manager_test.tscn` | 商队往返、治安队巡逻、玩家/战斗/NONE 跳过、强盗动态评分/切换阈值/追击/失去视野、攻击意图、单方/双方意图遭遇、友方不遭遇、治安队拦截/恢复巡逻、离屏遭遇与中途加入、两组部队并行遭遇、AI 分别响应最近战场、AI 字段序列化 |
 | `Tests/SystemTests/party_dialogue_test.tscn` | 接近 AI 部队、对话内容、暂停恢复、重复 UI、战斗准备、战斗中禁存档 |
-| `Tests/SystemTests/world_map_input_test.tscn` | 数字键 1/2/3、小键盘/echo、UI 屏蔽、点击切 1x、真实 tick 下 NPC 移动 |
+| `Tests/SystemTests/world_map_input_test.tscn` | 数字键 1/2/3、小键盘/echo、UI 屏蔽、点击切 1x、真实 tick 下 NPC 移动；阶段 10 追加：WASD 进入自由镜头、速度随缩放变化、边界限制、新移动/跟随重新锁定玩家、UI 打开时屏蔽、缩放与 1/2/3 快捷键保持 |
 | `Tests/SystemTests/battle_scene_test.tscn` | 全部参战士兵生成（玩家 15 + 敌方 5）、唯一 unit_id、初始部署距离、边界、2 倍相机、1920×1080 设置、部件 z/贴图、骑乘保留人腿、实时伤害、死亡移除、胜利、结算与存档 |
 | `Tests/SystemTests/archer_battle_test.tscn` | 三级弓配置/属性、弓锚点与拉弓动画、抛物线/地面深度、静止命中、移动目标射失、头顶掠过、死亡目标、每箭单次伤害、远程 AI/冷却/接近/后撤、玩家固定终点、初始 3 名弓箭手与存档往返 |
 | `Tests/SystemTests/archer_scene_test.tscn` | 真实战斗场景 ProjectileManager 注入、接管弓箭手、鼠标世界坐标射击入口、3 秒冷却、箭矢伤害与冷却拒绝 |
-| `Tests/SystemTests/fief_adventurer_system_test.tscn` | 封地归属、6 人编制与马匹、人口/繁荣度/税收、失败回滚、采邑/冒险者日志、候选人刷新上限、1 金币招募/重复拒绝/离开清理、AI 领主征召、Schema v4 往返 |
+| `Tests/SystemTests/fief_adventurer_system_test.tscn` | 封地归属、6 人编制与马匹、人口/繁荣度/税收、失败回滚、采邑/冒险者日志、候选人刷新上限、1 金币招募/重复拒绝/离开清理、AI 领主征召、封地/存档往返 |
 | `Tests/SystemTests/player_control_test.tscn` | 玩家角色控制、WASD/斜向、左键攻击/冷却、受伤、控制权转移、观战、战败结果 |
 | `Tests/SystemTests/battle_formation_test.tscn` | 队形槽位、同队间距、多友军 lane 分区、阵亡后重分配 |
 | `Tests/SystemTests/battle_side_result_test.tscn` | 同侧一支部队全灭但仍有友军时战斗继续；侧全灭后失败 |
@@ -1399,14 +1551,20 @@
 | `Tests/SystemTests/party_economy_ui_test.tscn` | 金币/工资显示、上马/下马、晋升按钮与工资总额更新 |
 | `Tests/UnitTests/offscreen_battle_hourly_test.tscn` | 离屏战斗 1 小时门槛、双方伤亡、tier 影响、小数累计、玩家加入保留伤亡、转换后停止结算、0 人战斗侧不计入存活侧、一方/双方全灭结束、两场战斗同一 tick 独立推进与结算 |
 | `Tests/SystemTests/small_scene_camera_test.tscn` | 统一视野、跟随、自由视角、边界限制、切回跟随、村庄摄像机 |
-| `Tests/SystemTests/player_pursuit_encounter_test.tscn` | 同向追击接触、停止/清目标、暂停与面板、撤退、拒绝锁、重新触发、进入战斗 |
-| `Tests/SystemTests/world_map_battle_marker_test.tscn` | 单战斗标记、参战图标隐藏、按 side_index 分列汇总、小时伤亡刷新、同侧加入、三方三列、两场战斗双标记与独立图标隐藏/恢复、结束清理 |
-| `Tests/SystemTests/save_persistence_test.tscn` | Schema v3、世界日志往返、世界/地点/部队/士兵/经济恢复、战后成员与 HP、失效战斗状态清理、领袖校验 |
+| `Tests/SystemTests/player_pursuit_encounter_test.tscn` | 同向追击接触、停止/清目标、暂停与面板、撤退、拒绝锁、重新触发、进入战斗；阶段 10 追加：地图移动清除追击焦点、目标转向后追击刷新、目标进入战斗时焦点保留、战后冷却等待、冷却后 AI 重新追击玩家 |
+| `Tests/SystemTests/world_map_battle_marker_test.tscn` | 单战斗标记、参战图标隐藏、按 side_index 分列汇总、小时伤亡刷新、同侧加入、三方三列、两场战斗双标记与独立图标隐藏/恢复、结束清理；阶段 10 追加：摘要面板仅悬浮显示、默认隐藏、多战斗切换、离开/结束隐藏、不拦截地图输入 |
+| `Tests/SystemTests/save_persistence_test.tscn` | Schema v5、世界日志往返、世界/地点/部队/士兵/经济恢复、战后成员与 HP、失效战斗状态清理、领袖校验 |
+| `Tests/SystemTests/political_hierarchy_test.tscn` | 5 家族/2 王国/7 贵族、贵族引用与循环校验、附庸与战争传播、玩家中立、独立部队、Schema v5 往返、国王死亡选举与待定王国 |
+| `Tests/SystemTests/battle_reinforcement_test.tscn` | 增援加入既有会话、侧别判定、逐单位标记、场景单位数量、既有控制器保持、后方展开/边界/不重叠、旗帜提示与排队、玩家/敌方侧不提示；阶段 10 追加：按初始侧锚点部署（右侧/下方）、多方战斗各自后方、网格排满时备用扫描点仍不重叠、既有 HP/冷却/控制器保持 |
+| `Tests/SystemTests/encyclopedia_ui_test.tscn` | 百科入口、暂停、一级真实数据、二/三级导航与返回、死亡动态刷新、占位徽章、关闭恢复速度、相机不重置 |
 | `Tests/SystemTests/battle_result_delay_test.tscn` | 胜利数据立即生成、面板约 3 秒延迟、失败即时、延迟期间退出取消、无重复展示 |
 | `Tests/UnitTests/world_log_manager_test.tscn` | 战斗/胜负/消灭/遭遇/地点事件文本、扩展事件、100 条上限、序列化预留 |
 | `Tests/SystemTests/world_log_ui_test.tscn` | 左下角日志面板、自动刷新、滚动区域、不阻挡地图移动 |
 | `Tests/SystemTests/fief_adventurer_ui_test.tscn` | 村庄候选 NPC/对话招募/已招募标记/离开清理、共享日志面板、地点封地字段、征召按钮状态、部队浮动提示、非自有村庄隐藏入口 |
 | `Tests/SystemTests/neutral_party_interaction_test.tscn` | 路过中立不弹窗、追击不被无关目标打断、主动点击对话、AI 追击遭遇、防重复 |
+| `Tests/SystemTests/faction_bandit_hostility_test.tscn` | 强盗对两王国国王/骑士、独立家族与玩家家族一律敌对；同家族/同王国友好；王国间敌对；商队对玩家中立、对治安队友好；改名后仍按类型敌对 |
+| `Tests/SystemTests/party_intent_hover_test.tscn` | 悬浮行动意图：待命、巡逻静止/移动、前往地点、追击、跟随友军、跟随敌对按追击、战场响应、领主征召、意图变化自动刷新、Alt 构成展开、显示不修改 AI |
+| `Tests/SystemTests/party_attack_confirmation_test.tscn` | 主动攻击先弹二次确认且不创建战斗、取消无任何副作用、确认前重校验失效条件并显示原因、重复入口只创建一场战斗、加入友军既有战斗不弹确认 |
 
 ### 运行命令
 
@@ -1470,6 +1628,30 @@ Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/neutra
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/save_persistence_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/battle_result_delay_test.tscn
 
+# 阶段 8：战场扩建、增援、贵族王国、地图扩建与百科
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/political_hierarchy_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/battle_reinforcement_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/encyclopedia_ui_test.tscn
+
+# 阶段 9：大地图布局与部队旗帜（只运行相关测试）
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/world_map_layout_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/milestone1_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/encounter_dialogue_ui_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/world_map_milestone6_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/settlement_interaction_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/fief_adventurer_system_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/world_map_input_test.tscn
+
+# 阶段 10：战后追击、AI 助攻、增援部署与大地图交互
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/faction_bandit_hostility_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/party_intent_hover_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/party_attack_confirmation_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/ai_encounter_flow_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/player_pursuit_encounter_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/battle_reinforcement_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/world_map_battle_marker_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/world_map_input_test.tscn
+
 # 手动视觉验收（非 headless，打开窗口并保存截图到 user://）
 Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/visual_probe.tscn
 Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/party_preview_probe.tscn
@@ -1491,6 +1673,12 @@ Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/main_menu_probe.tscn
 本次实际执行（阶段 6 后续：大地图表现/AI 恢复/存档/战斗 UI）：新增 `save_persistence_test`、`battle_result_delay_test` 全部通过；更新后通过 `world_map_milestone6_test`、`world_map_battle_marker_test`、`battle_scene_test`、`milestone2_flow_test`、`multi_party_battle_test`；回归通过 `party_manager_test`、`unit_party_serialization_test`、`party_architecture_test`、`family_appearance_test`、`world_log_manager_test`、`battle_manager_test`、`battle_result_test`、`ai_manager_test`、`offscreen_battle_hourly_test`、`ai_encounter_flow_test`、`player_encounter_test`、`player_pursuit_encounter_test`、`encounter_dialogue_ui_test`、`world_map_input_test`、`world_log_ui_test`、`party_panel_test`、`neutral_party_interaction_test`、`battle_side_result_test`、`battle_retreat_test`、`player_control_test`、`milestone1_restart_test`（save/load 两进程）。存档 Schema 升至 v3；仅执行自动测试，未做非 headless 视觉验收。
 
 本次实际执行（阶段 7 第一步：封地/采邑/冒险者）：新增 `fief_adventurer_system_test`、`fief_adventurer_ui_test` 全部通过；执行完整 `Tests/SystemTests` 与 `Tests/UnitTests` 全量套件，全部通过（含 `save_persistence_test`、`milestone1_test`、`milestone1_restart_test`、`milestone2_flow_test`、`world_log_ui_test`、`village_scene_test`、`ai_manager_test`、`party_economy_ui_test`、`stat_calculator_test`、`family_appearance_test`、`unit_party_serialization_test`）。存档 Schema 升至 v4；仅执行自动测试，未做非 headless 视觉验收。
+
+本次实际执行（阶段 8：战场/增援/贵族王国/地图/百科）：新增 `political_hierarchy_test`、`battle_reinforcement_test`、`encyclopedia_ui_test` 全部通过；更新并通过 `milestone1_test`（5000×3000、12 部队、9 地点、21 唯一 ID）、`milestone1_restart_test`（save/load 两阶段）、`family_appearance_test`、`battle_scene_test`、`save_persistence_test`（Schema v5）、`unit_party_serialization_test`、`battle_cluster_test`。修复 `FactionManager` 独立测试夹具后，`faction_vision_test`、`ai_manager_test`、`battle_result_test`、`multi_party_battle_test`、`offscreen_battle_hourly_test` 恢复通过。最终全量 `Tests/SystemTests` + `Tests/UnitTests`（60 个场景，另含跨进程 save/load）通过。存档 Schema 升至 v5；仅执行自动测试，未做非 headless 视觉验收。
+
+本次实际执行（阶段 9：大地图布局与部队旗帜）：新增 `world_map_layout_test` 通过；更新 `encounter_dialogue_ui_test` 标记断言、`milestone1_test` 巴里位置动态读取后通过；回归 `world_map_milestone6_test`、`settlement_interaction_test`、`fief_adventurer_system_test`、`world_map_input_test` 全部通过。按需求仅运行布局/地点/图标相关测试，未执行全项目套件。未改变存档 Schema；坐标与旗帜尺寸均为初始化/样式常量，旧存档读入后保持存档中的原坐标。
+
+本次实际执行（阶段 10：战后追击、AI 助攻、增援部署与大地图交互）：新增 `faction_bandit_hostility_test`、`party_intent_hover_test`、`party_attack_confirmation_test` 全部通过；扩展并通过 `ai_encounter_flow_test`、`player_pursuit_encounter_test`、`battle_reinforcement_test`、`world_map_battle_marker_test`、`world_map_input_test`；回归通过 `multi_party_battle_test`、`ai_manager_test`、`battle_scene_test`、`battle_cluster_test`、`save_persistence_test`、`milestone1_test`、`settlement_interaction_test`。按增量要求先跑最小相关测试，再执行上述相关回归链，未执行全项目套件。未改变存档 Schema；追击焦点、冷却、镜头模式与悬浮状态均为运行时数据。旗帜尺寸为视觉常量，headless 测试只验证尺寸约束，实际观感仍需非 headless 验收。
 
 本次实际执行（修复：恢复地点移动到达交互）：新增 `settlement_interaction_test` 全部通过；更新并回归 `world_map_milestone6_test`、`world_map_input_test`、`village_flow_test` 全部通过。覆盖远距离点击只设置移动目标且不暂停、到达后停止/暂停/打开、近距离直接打开、普通移动/追逐/路过不触发、切换地点替换待交互目标、外部停止清空、城堡/城镇一致、返回村庄不残留待交互状态。按小范围修复要求未执行无关全量套件；待交互状态仅运行时，不改变存档 Schema。
 
@@ -1588,28 +1776,43 @@ Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/main_menu_probe.tscn
 80. 重复点击同一候选人确认没有招募选项；离开村庄再进入，确认已招募候选人不再出现，真实单位仍在部队中。
 81. 让世界时间推进超过 144 秒，确认村庄采邑储备与冒险者数量按配置补充，且不超过上限。
 82. 保存并读档，确认领主、封地归属、采邑储备/计时、人口/繁荣度、税收缓存与冒险者候选人均恢复；损坏的封地引用应拒绝读档并输出错误。
+83. 让强盗追上玩家并进入战斗；胜利返回大地图后让强盗残部继续追击，确认遭遇能再次触发且不会永久卡住或连续重复开战。
+84. 追上正在移动的目标后让目标转向，确认玩家追击仍保持；让目标先进入一场离屏战斗，确认玩家原地等待并在战后继续追击。
+85. 观察任意强盗对国王、骑士、独立家族与玩家家族部队的关系，确认均为敌对；确认商队对玩家保持中立、对治安队友好。
+86. 让治安队/家族骑士靠近一场离屏战斗，确认只有在其视野与接近范围内才前往支援；让与双方都敌对的部队靠近，确认其不会生成第三战斗侧。
+87. 战中触发增援，确认增援出现在自己的初始战斗侧后方、不与混战单位重叠、不越界；多方战斗时各方增援回到各自方向。
+88. 草地悬浮不同部队，确认“行动：……”随巡逻、前往、追击、跟随、响应战场、征召与待命正确变化，且移动鼠标后立即刷新。
+89. 悬浮 AI 对 AI 战斗标记时显示战斗汇总，移开或战斗结束后面板隐藏；确认面板不阻挡点击地图与拖动。
+90. 使用 WASD 离开玩家部队，确认镜头进入自由视角且速度随缩放变化；点击移动或跟随玩家后镜头重新锁定。
+91. 主动点击敌对部队“发起战斗”，确认先出现二次确认；取消后无任何状态变化；确认后只进入一场战斗；加入友军既有战斗不弹确认。
+92. 放大观察部队内部旗帜，确认旗帜更大但仍被圆形底盘与边框约束，点击/悬浮/人数显示与动画不受影响（需非 headless 人工确认）。
 
 ## 10. 下一步任务
 
-1. 阶段 7 后续：每日税收实际入账、人口/繁荣度自然变化、封地转让/继承、城镇/城堡采邑征召。
-2. 村庄正式内容：商店、普通兵员招募、任务、好感度、村庄头人作息与多选项对话。
-3. 城镇/城堡独立小场景；村庄碰撞、城门与出口通道。
-4. 工资定期扣除、士气、逃兵与经济循环；晋升凭证正式来源。
-4. 完整背包/物品栏 UI、装备更换、商店与交易。
-5. 大地图寻路、地形阻挡、道路加成与速度系数；战斗寻路与更复杂队形。
-6. 强盗营地、强盗经济、装备获取与招募系统。
-7. 正式士兵美术；继续补受击动画、受击硬直与独立缨饰/罩袍贴图；步兵/马匹步态待正式美术替换。
-8. 招募系统替换 `milestone2_test` 临时兵力，处理旧存档补员。
-9. 高级战斗指挥：玩家选择加入方、键盘部队指令 UI、士气与多部队协同。
-10. 玩家角色永久阵亡后的复活/继承/重开流程；玩家战败的逃脱/被俘处理。
-11. 存档：Schema v1 → v2 完整迁移、自动存档、其他跨实体引用校验。
-12. AI 主动撤退、追击撤退方、俘虏与伤兵规则。
-13. 离屏战斗的伤兵/俘虏、士气、撤退与更长时间平衡；随机种子纳入存档。
-14. 目标周围显式攻击槽位分配、位置不足时的等待/换位；AI 骑兵不停步攻击与冲锋加成。
-15. 小场景高级镜头：缩放、边缘拖动、手柄/Input Map、战斗标记点击与单部队详情。
-16. 大地图战斗观察体验：远离战场时的小地图指示、战斗标记点击交互与旁观模式。
-17. 世界日志持久化、类型过滤、点击跳转与完整事件覆盖。
-18. 正式头盔/左手武器素材与装备差异化外观；生命条样式与战斗 UI 缩放。
+1. 阶段 10 后续：让玩家追击焦点与拒绝锁持久化；为自由镜头增加缩放/边缘拖动/手柄入口；AI 助攻加入距离衰减与“是否值得支援”评估；增援网格改为真正按侧半场布局；二次确认面板补充键盘焦点与手柄操作。
+2. 阶段 7 后续：每日税收实际入账、人口/繁荣度自然变化、封地转让/继承、城镇/城堡采邑征召。
+3. 村庄正式内容：商店、普通兵员招募、任务、好感度、村庄头人作息与多选项对话。
+4. 城镇/城堡独立小场景；村庄碰撞、城门与出口通道。
+5. 工资定期扣除、士气、逃兵与经济循环；晋升凭证正式来源。
+6. 完整背包/物品栏 UI、装备更换、商店与交易。
+7. 大地图寻路、地形阻挡、道路加成与速度系数；战斗寻路与更复杂队形。
+8. 强盗营地、强盗经济、装备获取与招募系统。
+9. 正式士兵美术；继续补受击动画、受击硬直与独立缨饰/罩袍贴图；步兵/马匹步态待正式美术替换。
+10. 招募系统替换 `milestone2_test` 临时兵力，处理旧存档补员。
+11. 高级战斗指挥：玩家选择加入方、键盘部队指令 UI、士气与多部队协同。
+12. 玩家角色永久阵亡后的复活/继承/重开流程；玩家战败的逃脱/被俘处理。
+13. 存档：Schema v1 → v2 完整迁移、自动存档、其他跨实体引用校验。
+14. AI 主动撤退、追击撤退方、俘虏与伤兵规则。
+15. 离屏战斗的伤兵/俘虏、士气、撤退与更长时间平衡；随机种子纳入存档。
+16. 目标周围显式攻击槽位分配、位置不足时的等待/换位；AI 骑兵不停步攻击与冲锋加成。
+17. 小场景高级镜头：缩放、边缘拖动、手柄/Input Map、战斗标记点击与单部队详情。
+18. 大地图战斗观察体验：远离战场时的小地图指示、战斗标记点击交互与旁观模式。
+19. 世界日志持久化、类型过滤、点击跳转与完整事件覆盖。
+20. 正式头盔/左手武器素材与装备差异化外观；生命条样式与战斗 UI 缩放。
+21. 政治系统后续：领地转让/继承、宣战/议和、战争胜负与停战、附庸叛离与家族关系 UI。
+22. 增援后续：玩家手动选择加入方、增援路线/到达时间表现、多波次增援与战场外集结点。
+23. 百科后续：搜索/排序/筛选、部队与人物详情跳转、战争与封地历史的动态条目。
+24. 地图后续：地形阻挡与寻路、城镇/城堡小场景、正式地图与地点美术。
 
 ## 11. 当前风险
 
@@ -1679,6 +1882,20 @@ Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/main_menu_probe.tscn
 - 大地图悬浮面板只支持鼠标，触屏/手柄没有等价入口（KI394）。
 - 追逐焦点不持久化，读档后需要玩家重新点击目标才会恢复自动交互保护（KI395）。
 - 读档没有校验“背包马匹 + 已装备 MOUNT”的数量守恒；正常管理器/UI 流程保持一致，手工损坏存档可能重复（KI399）。
+- 贵族/家族/王国关系目前由初始化代码与固定 ID 建立；尚无领地转让、继承、宣战/议和 UI（KI501/KI502）。
+- 领袖死亡选举只在管理器层触发；若玩家或外部系统直接修改 `is_alive` 而绕过 `kill_noble()`，不会自动重选（KI503）。
+- 增援展开使用固定后方距离与 3 列网格；超大编队或战场边缘仍可能依赖回退点位，未做全局寻路（KI504）。
+- 视觉家族 `FAMILY_*` 与政治家族 `HOUSE_*` 通过 `banner_id` 映射；新增家族时若忘记配置旗帜，关系解析会回退到阵营（KI505）。
+- 百科为纯屏幕 UI，数据变化通过签名轮询刷新；尚无搜索、排序与跨层级筛选（KI506）。
+- 新地图为 5000×3000，全部地点与道路仍为程序绘制；新增区域尚未配置地形阻挡与正式美术（KI507）。
+- 阶段 9 后旧存档仍加载存档内的旧地点坐标；新游戏使用新布局，同一世界不同来源可能出现布局差异。布局与旗帜比例仅经自动化数值验证，观感需非 headless 验收。
+- 阶段 10 的玩家追击焦点、战后冷却与拒绝锁均为运行时数据；保存/读档后不会保留，读档需由 AI 重新建立追击关系（KI510）。
+- 强盗对所有政治家族敌对意味着玩家家族也永久敌对，当前没有外交、赎金或招安途径；玩家与强盗同侧作战只能通过第三方战斗的既有战斗侧存在（KI511）。
+- AI 战场助攻以视野内“看见参战方”为门槛，没有支援价值评估、距离衰减或撤退判断；助攻部队可能在明显劣势时仍前往（KI512）。
+- 增援优先使用初始侧锚点后的 3 列网格；网格排满时退化为半场均匀扫描，不保证最优阵型，也没有寻路或动态集结点（KI513）。
+- 主动攻击二次确认只覆盖玩家主动发起；AI 遭遇与加入友军战斗不弹确认。确认面板的键盘焦点与手柄操作尚未完善（KI514）。
+- WASD 自由镜头没有缩放、边缘拖动或手柄绑定；镜头模式不进入存档（KI515）。
+- 部队旗帜放大到 44 像素仅通过自动化尺寸约束验证，实际可读性、点击热区与边框比例仍需非 headless 人工确认（KI516）。
 
 ## 12. 快速文件索引
 
@@ -1698,3 +1915,6 @@ Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/main_menu_probe.tscn
 | 村庄小场景 | `Docs/Systems/Village_System.md` |
 | 背包/金币/工资/晋升 | `Docs/Systems/Inventory_Economy_System.md` |
 | 存档结构 | `Docs/Systems/Save_System.md` |
+| 贵族/家族/王国 | `Docs/Systems/Political_Hierarchy_System.md` |
+| 增援与战场 | `Docs/Systems/Combat_System.md` |
+| 百科界面 | `Docs/Systems/Encyclopedia_System.md` |

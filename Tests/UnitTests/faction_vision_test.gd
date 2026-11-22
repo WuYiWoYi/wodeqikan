@@ -35,7 +35,7 @@ func _run() -> void:
 	_parties = PartyManager.new()
 	_parties.setup(_units, ids)
 	_factions = FactionManager.new()
-	_factions.setup_defaults()
+	_factions.setup_defaults(_parties)
 	_vision = VisionManager.new()
 	_vision.setup(_parties, _factions, _units)
 

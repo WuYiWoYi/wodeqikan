@@ -24,9 +24,10 @@ extends Resource
 }
 
 @export_category("Flag")
-## 旗帜等比缩放后的最大边长（像素）。恢复为扩编前尺寸；
-## 遮罩仍按实际半径计算，未来调整尺寸时无需改代码。
-@export var flag_max_size: float = 30.0
+## 旗帜等比缩放后的最大边长（像素，按贴图画布计算）。
+## 当前家族旗帜为 48×48 画布、有效像素约 30×36；44 让有效旗帜接近内圆，
+## 同时保留遮罩留白，不覆盖外圈边框。圆形底盘、边框和点击区域不受影响。
+@export var flag_max_size: float = 44.0
 @export var flag_vertical_offset: float = 0.0
 
 @export_category("Count")

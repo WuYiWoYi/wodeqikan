@@ -17,11 +17,19 @@ var settlement_type: SettlementType = SettlementType.VILLAGE
 
 var world_position: Vector2 = Vector2.ZERO
 var faction_id: String = ""
-## 地点所属家族（持久化）；仅用于地图名称旁的家族旗帜，不影响外交。
+## 地点旗帜/外观家族（持久化），与 FamilyRegistry.family_id 对齐。
+## 政治归属以下方的 owner_house_id 为权威；family_id 只负责视觉身份。
 var family_id: String = ""
-## 封地所有者 LordData.lord_id；空字符串表示无主。
-## 只有 owner_lord_id 与当前领主 ID 相同才允许征召采邑。
-var owner_lord_id: String = ""
+## 直接拥有该地点的家族（HouseData.house_id）；空字符串表示无主。
+var owner_house_id: String = ""
+## 实际代表家族管理封地的贵族（NobleData.noble_id）；可选。
+var owner_noble_id: String = ""
+## 旧字段别名：与 owner_noble_id 指向同一贵族，避免新旧所有权字段并存。
+var owner_lord_id: String:
+	get:
+		return owner_noble_id
+	set(value):
+		owner_noble_id = value
 
 ## 该地点对应的小场景路径。空字符串表示使用村庄/城镇/城堡的默认模板。
 ## 初期所有村庄共用同一个基础场景，后续可逐村替换。
@@ -65,7 +73,7 @@ func get_candidate(candidate_id: String) -> AdventurerCandidateData:
 
 
 func has_owner() -> bool:
-	return not owner_lord_id.is_empty()
+	return not owner_house_id.is_empty() or not owner_noble_id.is_empty()
 
 
 func to_dict() -> Dictionary:
@@ -80,7 +88,10 @@ func to_dict() -> Dictionary:
 		"world_position": [world_position.x, world_position.y],
 		"faction_id": faction_id,
 		"family_id": family_id,
-		"owner_lord_id": owner_lord_id,
+		"owner_house_id": owner_house_id,
+		"owner_noble_id": owner_noble_id,
+		# 兼容旧读取方：所有权仍以 owner_noble_id 为唯一来源。
+		"owner_lord_id": owner_noble_id,
 		"scene_path": scene_path,
 		"population": population,
 		"prosperity": prosperity,
@@ -106,7 +117,12 @@ static func from_dict(data: Dictionary) -> SettlementData:
 	settlement.world_position = _read_vector2(data.get("world_position", []))
 	settlement.faction_id = str(data.get("faction_id", ""))
 	settlement.family_id = str(data.get("family_id", ""))
-	settlement.owner_lord_id = str(data.get("owner_lord_id", ""))
+	settlement.owner_house_id = str(
+		data.get("owner_house_id", settlement.family_id)
+	)
+	settlement.owner_noble_id = str(
+		data.get("owner_noble_id", data.get("owner_lord_id", ""))
+	)
 	settlement.scene_path = str(data.get("scene_path", ""))
 	settlement.population = maxi(0, int(data.get("population", 0)))
 	settlement.prosperity = maxi(0, int(data.get("prosperity", 0)))

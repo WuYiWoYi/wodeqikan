@@ -1,6 +1,6 @@
 # 我的骑砍 · 项目总索引
 
-**文档版本：** V0.28（阶段 7 第一步：封地所有权、采邑征召与村庄冒险者）
+**文档版本：** V0.31（阶段 10：战后追击、AI 助攻、增援部署与大地图交互完善）
 **更新日期：** 2026-11-22
 **引擎：** Godot 4.6.1 / GDScript
 **源规划：** [2D 中世纪沙盒战略游戏核心架构设计与开发规划 V0.2](../md/2D%20中世纪沙盒战略游戏核心架构设计与开发规划.md)
@@ -42,7 +42,10 @@ WorldContext（一局游戏，跨场景常驻）
 ├── ItemManager      消耗品/杂物静态配置
 ├── PartyManager
 ├── SettlementManager
-├── LordManager      领主与封地归属
+├── NobleManager     贵族（继承 LordManager）
+├── HouseManager     家族
+├── KingdomManager   王国
+├── LordManager      领主与封地归属（兼容入口）
 ├── FiefRecruitmentManager     采邑储备/征召
 ├── AdventurerRecruitmentManager 村庄候选人
 ├── FactionManager   阵营关系
@@ -67,7 +70,7 @@ WorldContext（一局游戏，跨场景常驻）
 | 文档 | 职责 |
 |---|---|
 | [01_Core_Architecture.md](01_Core_Architecture.md) | 分层、依赖方向、更新管线、数据权威、事件契约 |
-| [02_Development_Roadmap.md](02_Development_Roadmap.md) | 阶段 0–7 的任务、依赖与验收标准 |
+| [02_Development_Roadmap.md](02_Development_Roadmap.md) | 阶段 0–8 的任务、依赖与验收标准 |
 | [03_Design_Conventions.md](03_Design_Conventions.md) | 命名、代码、数据、场景、文档规范 |
 | [04_Change_Log.md](04_Change_Log.md) | 重要变更历史 |
 
@@ -84,6 +87,8 @@ WorldContext（一局游戏，跨场景常驻）
 | [Systems/Combat_System.md](Systems/Combat_System.md) | BattleSession、援军、战斗结算 |
 | [Systems/AI_System.md](Systems/AI_System.md) | 单位/部队/领主三层 AI 与调度频率 |
 | [Systems/Lord_System.md](Systems/Lord_System.md) | 领主数据、封地归属与 AI 战略决策 |
+| [Systems/Political_Hierarchy_System.md](Systems/Political_Hierarchy_System.md) | 贵族/家族/王国层级、选举、战争传播与统一关系查询 |
+| [Systems/Encyclopedia_System.md](Systems/Encyclopedia_System.md) | 百科入口、三级导航、动态刷新与暂停规则 |
 | [Systems/Settlement_System.md](Systems/Settlement_System.md) | 村庄/城镇/城堡数据、封地信息与交互 |
 | [Systems/Fief_Recruitment_System.md](Systems/Fief_Recruitment_System.md) | 采邑储备、成组征召、资源成本与 AI 征召 |
 | [Systems/Adventurer_Recruitment_System.md](Systems/Adventurer_Recruitment_System.md) | 村庄冒险者候选人、刷新、1 金币招募与清理 |
@@ -133,6 +138,9 @@ WorldContext（一局游戏，跨场景常驻）
 - 阶段 6（合并原阶段 6/7）：村庄小场景与交互、追逐焦点保护、背包/马匹、金币与工资、三级兵种/晋升、世界日历与大地图部队 UI 已实现；城镇/城堡小场景、商店、招募、工资扣除未实现。
 - 阶段 5（原路线图 AI 领主）：部分完成。领主数据/仓储、玩家领主分离、封地归属与 AI 征召已实现；战略攻击/撤退与性格权重未开始。
 - 阶段 7：部分完成。封地所有权、采邑征召、村庄人口/税收缓存、冒险者候选人、共享日志与 Schema v4 已实现；任务、交易、训练、外交、城堡攻防、领地管理、军团与世界战争未开始。
+- 阶段 8：完成。战场扩至 1800×1024 并参数化；新遭遇与增援分流，增援加入既有会话并在后方展开；贵族/家族/王国数据与管理器、领袖死亡选举、战争传播与统一关系查询；世界地图 5000×3000，新增伯克纳尼亚/奥林两王国与城镇/城堡/村庄；百科三级导航；Schema v5。
+- 阶段 9：完成。9 个地点按王国/家族重新聚类，缩短跨区域距离并同步道路与 AI 巡逻点；部队圆形标记内部旗帜由 30 放大到 38，圆形底盘、边框、点击区域与移动表现不变。
+- 阶段 10：完成。修复战后追击/遭遇卡死与冷却恢复；强盗统一对所有政治家族敌对；AI 通过视野发现并加入既有战斗（全敌对不建第三侧）；增援按初始战斗侧锚点部署；新增行动意图悬浮、战斗摘要悬浮、WASD 自由镜头、主动攻击二次确认，部队旗帜由 38 放大到 44。
 - 阶段 5（动作表现与攻击体验）：完成。协调步兵步态、马匹整体动态、玩家自由空挥、长矛攻击后保持 4 秒、骑乘战斗速度 0.84、部署间距约 906 已自动化与动画截图验证。
 - 阶段 5（待机与动作表现二次优化）：完成。克制腿幅、部队 UI 待机动画、跃马式前后腿分组、长矛方向性前摇/戳击已自动化与真实渲染验证。
 - 最近验证：克制步态/跃马动画、UI 待机动画、长矛前摇/戳击/保持、自由攻击、骑乘战斗速度、战斗结算与 Milestone 2 全流程全部通过。
@@ -150,6 +158,9 @@ WorldContext（一局游戏，跨场景常驻）
 - 2026-11-21 阶段 6 后续（村庄表现/玩家扩编/战斗集群）：部队标记恢复 18/30 原尺寸；村庄改用半径 32、旗帜 76 的独立圆形标记，名称固定显示在标记正上方；玩家初始部队扩编为 12 人（1 英雄 + 5 民兵 + 6 职业步兵，4 名骑乘）；小地图战斗初始阵线间距 1100，双方半场列阵、接敌后队形放松，并通过目标占用、包围角度与局部分离减少扎堆。
 - 2026-11-21 阶段 6 后续（大地图表现/AI 恢复/存档/战斗 UI）：`SettlementIcon` 恢复原始村庄美术，家族徽章与名称合并为固定屏幕组合（徽章在左）；战斗结束给存活部队 30 世界秒运行时交战冷却并恢复路线/巡逻，不重置移动目标；存档 Schema v3 持久化世界日志，读档清理 `IN_BATTLE`/失效追击并校验领袖；玩家胜利结果面板延迟 3 物理秒；战斗汇总按 `side_index` 分列；悬浮默认只显示名称，按住左 Alt 显示总人数与兵种构成。
 - 2026-11-22 阶段 7 第一步：新增 `LordData`/`LordManager`、封地 `owner_lord_id` 与玩家领主/玩家角色分离；新游戏新增玩家村庄“青禾村”与玩家家族，玩家角色改为 180 HP/25 攻击；每村采邑储备 4、6 人成组征召、真实马匹装备、按人口/繁荣度补充、失败原子回滚；村庄最多 5 名冒险者候选人，1 金币招募并持久化外观；玩家地点面板/头人对话共用统一入口；AI 领主低于 12 人时前往自有封地征召；`TaxCalculator` 统一税收；世界日志新增采邑/冒险者事件并在村庄复用共享面板；存档 Schema v4 持久化领主/封地/候选人并校验所有权。
+- 2026-11-22 阶段 8：战场 1800×1024（初始距离 1580、边距 110）并参数化；新遭遇/增援分流，增援加入既有 `BattleSession`、后方 240 像素展开、逐单位 `is_reinforcement`/`reinforcement_battle_id`/`reinforcement_arrival_time`；仅 NPC 加入玩家侧时显示家族旗帜增援提示并排队；新增 `NobleData`/`NobleManager`、`HouseData`/`HouseManager`、`KingdomData`/`KingdomManager`，贵族独立部队、爵位/宗主/国王标记、领袖死亡选举；`FactionManager` 统一关系查询与战争传播；世界地图 5000×3000，新增伯克纳尼亚（城镇+村庄）与奥林（城堡+村庄）两王国，墨西西/巴里分别附庸，两王国交战、玩家中立；地点 1/2/3 级，仅村庄征召；百科三级屏幕面板；存档 Schema v5。
+- 2026-11-22 阶段 9：世界保持 5000×3000，9 个地点按王国/家族聚类——伯克纳尼亚在上部（墨西西 2500,700、伯克纳尼亚 2900,750、北境村 2250,1000、伯克纳 3200,1000），奥林在下部（奥林德斯堡 2950,1850、奥林 3250,2050、巴里 2600,2100、灰石城堡 2900,2350），青禾村中立位于 (1600,1500)；地点 ID/名称/类型/归属/交互与征召不变；`flag_max_size` 30 → 38，圆形半径 18/边框 2/点击区域/移动动画不变；新增 `world_map_layout_test`。
+- 2026-11-22 阶段 10：遭遇检测不再要求 MOVING，玩家追击焦点跨目标移动/战斗保留并在战后冷却结束后恢复；战后冷却继续由 `BattleManager` 统一写入；`FactionManager` 统一强盗对所有政治家族贵族敌对；AI 通过 `VisionManager`（含战斗参战方）发现并加入既有战斗，检查全部战斗侧且不自动创建第三侧；增援按初始侧锚点 + 3 列网格部署，排满时半场扫描；大地图新增行动意图悬浮、仅悬浮显示的战斗摘要、WASD 自由镜头与主动攻击二次确认；`flag_max_size` 38 → 44；新增 `faction_bandit_hostility_test`、`party_intent_hover_test`、`party_attack_confirmation_test`。
 
 详见 [Development/Current_Status.md](Development/Current_Status.md)。
 
@@ -220,6 +231,9 @@ Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/fief_a
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/player_party_expansion_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/battle_cluster_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/battle_occupancy_ui_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/political_hierarchy_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/battle_reinforcement_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/encyclopedia_ui_test.tscn
 
 # 跨进程存档：先保存退出，再新进程读取
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/milestone1_restart_test.tscn -- save

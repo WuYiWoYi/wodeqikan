@@ -59,7 +59,7 @@ func _setup_fixture() -> void:
 	_parties = PartyManager.new()
 	_parties.setup(_units, _ids)
 	_factions = FactionManager.new()
-	_factions.setup_defaults()
+	_factions.setup_defaults(_parties)
 	_factions.register_faction(NEUTRAL_FACTION_ID, "中立者")
 	_factions.register_faction(RAIDER_FACTION_ID, "劫掠者")
 	_factions.set_relation(
@@ -198,18 +198,15 @@ func _test_third_side_join() -> void:
 		return
 	_raider.world_position = Vector2(1030.0, 1000.0)
 	var side := _battle.get_join_side(_raider.party_id, session.battle_id)
-	_check(side == 2, "与双方都敌对的部队获得独立第三方战斗侧")
+	_check(side < 0, "与双方都敌对的部队不自动获得第三方战斗侧")
 	_check(
-		_battle.try_join_battle(_raider.party_id, session.battle_id),
-		"第三方加入战斗"
+		not _battle.try_join_battle(_raider.party_id, session.battle_id),
+		"与所有战斗侧敌对时不能以协助名义加入"
 	)
-	_check(session.get_side_count() == 3, "战斗侧数量增加到 3")
+	_check(session.get_side_count() == 2, "第三方加入失败不改变战斗侧数量")
 	_check(
-		session.get_side_of_party(_raider.party_id)
-		!= session.get_side_of_party(_merchant.party_id)
-		and session.get_side_of_party(_raider.party_id)
-		!= session.get_side_of_party(_bandit.party_id),
-		"第三方不与任何现有侧同侧"
+		not session.is_party_involved(_raider.party_id),
+		"第三方未进入参战列表"
 	)
 	_check(_battle.abort_battle(session.battle_id), "中止第三方加入测试")
 
@@ -245,17 +242,15 @@ func _test_distance_and_duplicate_rules() -> void:
 
 func _test_multi_side_auto_resolve() -> void:
 	_reset_positions()
-	var session := _battle.start_battle(
-		[_merchant.party_id], [_bandit.party_id], Vector2(1000.0, 1000.0), true
+	# 第三方现在只能由显式多方入口创建，不再通过 get_join_side 自动生成。
+	var session := _battle.start_battle_by_sides(
+		[[_merchant.party_id], [_bandit.party_id], [_raider.party_id]],
+		Vector2(1000.0, 1000.0),
+		true
 	)
 	_check(session != null, "创建多方自动结算战斗")
 	if session == null:
 		return
-	_raider.world_position = Vector2(1030.0, 1000.0)
-	_check(
-		_battle.try_join_battle(_raider.party_id, session.battle_id),
-		"第三方加入自动结算战斗"
-	)
 	_check(session.get_side_count() == 3, "自动结算前存在 3 个战斗侧")
 
 	_check(_battle.resolve_current_battle_now(), "多方离屏战斗按小时推进并结算")

@@ -49,7 +49,7 @@ func _run() -> void:
 
 
 func _test_family_configs() -> void:
-	_check(_context.family_registry.get_all_configs().size() == 3, "注册三个家族")
+	_check(_context.family_registry.get_all_configs().size() == 5, "注册五个家族")
 	var bari := _context.family_registry.get_config(WorldInitializer.FAMILY_BARI_ID)
 	var moxixi := _context.family_registry.get_config(
 		WorldInitializer.FAMILY_MOXIXI_ID
@@ -342,8 +342,11 @@ func _test_serialization_roundtrip() -> void:
 	loaded.name = "FamilyReloadContext"
 	add_child(loaded)
 	_check(loaded.load_from_save_data(save), "完整存档可恢复")
-	_check(loaded.party_manager.get_all_parties().size() == 8,
-		"读档不重复生成新家族/强盗部队")
+	_check(
+		loaded.party_manager.get_all_parties().size()
+		== _context.party_manager.get_all_parties().size(),
+		"读档不重复生成新家族/强盗部队"
+	)
 	var loaded_party := _find_party_in(loaded, WorldInitializer.MOXIXI_KNIGHT_PARTY_NAME)
 	_check(loaded_party != null and loaded_party.member_unit_ids.size() == 10,
 		"读档后家族部队人数保持 10")

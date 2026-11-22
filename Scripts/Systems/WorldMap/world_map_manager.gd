@@ -141,6 +141,8 @@ func stop_party(party_id: String) -> bool:
 	party.current_order = PartyData.OrderType.NONE
 	party.current_target_id = ""
 	party.attack_intent = false
+	party.battle_response_id = ""
+	party.battle_response_until = 0.0
 	return true
 
 
@@ -171,7 +173,15 @@ func _refresh_follow_party(party: PartyData) -> bool:
 	var target := _party_manager.get_party(party.current_target_id)
 	if target == null or target.party_id == party.party_id:
 		return false
-	if not target.is_available_for_world() or target.member_unit_ids.is_empty():
+	if target.member_unit_ids.is_empty():
+		return false
+	# 目标正在离屏战斗中：保持追击关系但原地等待，战斗结束后自动恢复跟随。
+	# 不能直接清除跟随指令，否则玩家追上后目标刚打完仗，双方会僵在原地。
+	if not target.is_available_for_world():
+		if target.battle_state == PartyData.BattleState.IN_BATTLE:
+			party.movement_state = PartyData.MovementState.IDLE
+			party.target_position = party.world_position
+			return true
 		return false
 	# 玩家主动点击的追击不因目标离开视野而中断；地图图标始终可见，
 	# 中断会让远距离点击巡逻部队时永远无法接触。

@@ -108,8 +108,10 @@ Idle
 
 - `FactionManager` 是唯一关系查询入口：
   - 默认阵营：玩家 / 商队 / 强盗 / 治安队 / 本地势力。
-  - 关系：友好、中立、敌对；同阵营始终友好；未知组合默认中立。
-  - `is_hostile()` / `is_friendly()` / `is_neutral()` 对所有 AI 可用。
+  - 阶段 8 起，部队关系优先按政治身份解析：`leader_noble_id` → 家族 → 王国；无家族时回退阵营。
+  - 关系：友好、中立、敌对；同阵营且无政治冲突时友好；未知组合默认中立。
+  - `is_party_hostile()` / `is_party_friendly()` / `is_party_neutral()` 供 AI、视野与遭遇统一使用；`is_hostile()` 保留阵营级查询。
+  - 玩家家族默认中立；王国开战会传播到双方成员家族。
 - `VisionManager` 是唯一视野查询入口：
   - 距离 `<= observer.sight_range` 即可见；
   - 观察者必须 `AVAILABLE` 且有存活士兵；
@@ -121,7 +123,7 @@ Idle
 ### 3.2 商队往返
 
 - 路线由 `WorldInitializer` 在新建世界时写入 `oak_village.settlement_id` 与 `riverside_village.settlement_id`。
-- 新游戏时商队初始化在巴里 `(500,500)`；首次决策后前往墨西西，之后持续往返。
+- 新游戏时商队初始化在 `(900,1500)`，`ai_route_index = 0`；首次决策前往巴里 `(2600,2100)`，之后在巴里与墨西西 `(2500,700)` 之间持续往返（阶段 9 布局坐标）。
 - `AIManager` 通过 `SettlementManager.get_settlement(id)` 读取真实地点坐标，不使用数组下标或硬编码坐标。
 - 两个地点之间持续循环，无额外等待。
 - 路线地点缺失时停止该部队的移动并输出警告。
@@ -384,3 +386,41 @@ AI 参数应可配置：
   - `_try_respond_to_battle()` 直接返回 false，不接近附近战斗。
 - `EncounterManager.update_encounters()` 跳过任一方处于冷却的敌对组合，避免接触距离内逐 tick 重新开战。
 - 冷却不写入存档；读档统一清零，AI 按当前世界状态重新决策。
+
+## 12. 战后追击、强盗敌对与视野助攻（阶段 10）
+
+### 12.1 追击与遭遇不再依赖移动状态
+
+- `EncounterManager.update_encounters()` 只要求双方有效、关系敌对、距离进入遭遇半径，并且攻击意图或追击焦点成立；`MOVING` 不再是必要条件。
+- 目标停下、转向或被其他战斗锁定时，AI 保留攻击意图与追击目标；战后冷却期间先脱离接触，冷却结束后重新评估。
+- 玩家追击使用 `focus_party_id` + `FOLLOW_PARTY`；目标进入离屏战斗时 `WorldMapManager` 保留焦点并原地等待，战后自动恢复（详见 `World_Map_System.md`）。
+
+### 12.2 强盗与贵族敌对
+
+- 关系解析统一在 `FactionManager.get_party_relation()`：强盗（`party_kind == BANDIT` 或强盗阵营）对任何政治家族贵族（独立家族、统治家族、附庸家族、玩家家族）一律 `HOSTILE`。
+- 不依赖名称；同家族/同王国、王国战争、商队中立与治安队友好规则不变。
+- 因此强盗 AI 会将国王卫队、家族骑士、玩家部队都视为可追击目标；玩家家族也永久敌对（暂无外交/招安，KI511）。
+
+### 12.3 视野门槛的战场助攻
+
+- `VisionManager` 提供 `include_in_battle` 查询，使观察者能在 `sight_range` 内“看见”正在离屏战斗的参战方。
+- `AIManager._try_respond_to_battle()` 仅在满足以下条件时响应：
+  - 通过视野发现该战斗，且至少看见一名参战方；
+  - 自身与战斗位置进入 `BATTLE_APPROACH_RADIUS`；
+  - `BattleManager.get_join_side()` 返回有效侧。
+- 发现后写入 `battle_response_id/until`，保持约 15 秒接近目标，避免视野抖动导致反复放弃。
+- 商队不响应；家族骑士/卫队、强盗、治安队可以响应。
+- 实际加入统一经 `EncounterManager`/`BattleManager`，复用既有 `BattleSession`，不新建战斗。
+
+### 12.4 加入规则检查全部战斗侧
+
+- 必须恰好存在一个与自身敌对的侧，且至少存在一个与自身非敌对的侧，才加入该非敌对侧。
+- 与所有侧敌对时 `get_join_side()` 返回 -1，不自动生成第三战斗侧；全中立同样拒绝。
+- 已处于其他战斗中的部队拒绝加入。
+- 三方及以上多方战斗只能通过显式多方入口创建，不由助攻自动产生。
+
+### 12.5 冷却与恢复
+
+- 战后冷却仍由 `BattleManager` 统一设置；冷却期间 AI 恢复路线/巡逻或保持追击等待，任务层不反复发起遭遇。
+- 冷却结束后强盗重新评分并追击，玩家追击也重新触发遭遇。
+- 多场并行战斗结束后，幸存者统一回到 `AVAILABLE` 并由下一次 AI tick 恢复移动。

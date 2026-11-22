@@ -23,6 +23,9 @@ const LORD_DECISION_INTERVAL: float = 30.0
 const AI_ARRIVAL_RADIUS: float = 4.0
 ## 发现离屏战斗后开始接近的范围。
 const BATTLE_APPROACH_RADIUS: float = 700.0
+## 已经看见战场并开始接近后，失去视野仍保持目标的时间（世界秒）。
+## 防止部队在“发现/失去视野”之间每个决策周期来回抖动。
+const BATTLE_RESPONSE_HOLD_SECONDS: float = 15.0
 
 ## 强盗目标评分：最终评分 = 基础优先级分 - 距离 × 权重。
 const BANDIT_TARGET_SCORE_MERCHANT: float = 300.0
@@ -140,13 +143,14 @@ func _tick_party_tactical() -> void:
 func _update_bandit_party(party: PartyData) -> void:
 	# 刚结束战斗：先脱离接触并恢复游荡，不立即追回同一目标。
 	if _is_in_post_battle_cooldown(party):
+		_clear_battle_response(party)
 		party.attack_intent = false
 		party.current_target_id = ""
 		_update_bandit_route(party)
 		return
 	# 附近有可加入的战斗时优先响应，再考虑自己的追击目标。
 	if _try_respond_to_battle(party):
-		party.attack_intent = false
+		_clear_chase_intent(party)
 		return
 
 	var had_target: bool = not party.current_target_id.is_empty()
@@ -169,12 +173,13 @@ func _update_bandit_party(party: PartyData) -> void:
 func _update_guard_party(party: PartyData) -> void:
 	# 刚结束战斗：先脱离接触并恢复巡逻，不立即追回同一目标。
 	if _is_in_post_battle_cooldown(party):
+		_clear_battle_response(party)
 		party.attack_intent = false
 		party.current_target_id = ""
 		_update_patrol_party(party)
 		return
 	if _try_respond_to_battle(party):
-		party.attack_intent = false
+		_clear_chase_intent(party)
 		return
 
 	var had_target: bool = not party.current_target_id.is_empty()
@@ -265,7 +270,7 @@ func _find_bandit_threatening_friendly(guard: PartyData) -> PartyData:
 		var victim := _party_manager.get_party(hostile.current_target_id)
 		if victim == null or victim.party_id == guard.party_id:
 			continue
-		if not _faction_manager.is_friendly(guard.faction_id, victim.faction_id):
+		if not _faction_manager.is_party_friendly(guard.party_id, victim.party_id):
 			continue
 		var distance := guard.world_position.distance_to(hostile.world_position)
 		if distance < best_distance:
@@ -281,16 +286,42 @@ func _chase_target(party: PartyData, target: PartyData) -> void:
 	_world_map_manager.set_party_target(party.party_id, target.world_position)
 
 
-## 响应附近正在进行的离屏战斗：只负责接近；实际加入由 EncounterManager 统一判定。
+## 响应附近正在进行的离屏战斗：只负责发现、判断与接近；
+## 实际加入仍由 EncounterManager 与 BattleManager 统一完成。
+##
+## 关键约束：
+## 1. 只能通过 VisionManager 发现参战方，不能仅凭与战场中心距离就“知道”战斗；
+## 2. 阵营关系全部交给 BattleManager.get_join_side()，本类不复制关系算法；
+## 3. 看见后保持一段时间的接近目标，避免丢失视野时来回抖动。
 func _try_respond_to_battle(party: PartyData) -> bool:
-	if _is_in_post_battle_cooldown(party):
+	if party == null or _world_map_manager == null:
 		return false
-	if _battle_manager == null:
+	if _is_in_post_battle_cooldown(party):
+		_clear_battle_response(party)
+		return false
+	if _battle_manager == null or _vision_manager == null:
 		return false
 	# 已参战部队不再响应其他战场。
 	if _battle_manager.get_battle_for_party(party.party_id) != null:
+		_clear_battle_response(party)
 		return false
-	# 在所有有效离屏战斗中寻找可加入且距离最近的一场。
+
+	var visible_ids: Dictionary = _visible_party_ids_including_battles(party)
+
+	# 已发现并开始接近：在保持时间内即使暂时看不见也继续前往。
+	if not party.battle_response_id.is_empty():
+		var held := _battle_manager.get_battle(party.battle_response_id)
+		if held != null and held.offscreen \
+				and _battle_manager.get_join_side(party.party_id, held.battle_id) >= 0:
+			if _battle_has_visible_participant(held, visible_ids):
+				party.battle_response_until = TimeManager.world_elapsed_seconds \
+					+ BATTLE_RESPONSE_HOLD_SECONDS
+			if party.battle_response_until > TimeManager.world_elapsed_seconds:
+				_world_map_manager.set_party_target(party.party_id, held.world_position)
+				return true
+		_clear_battle_response(party)
+
+	# 新发现：必须实际看见至少一名参战部队。
 	var target: BattleSession = null
 	var best_distance: float = INF
 	for battle: BattleSession in _battle_manager.get_active_battles():
@@ -301,13 +332,55 @@ func _try_respond_to_battle(party: PartyData) -> bool:
 		var distance: float = party.world_position.distance_to(battle.world_position)
 		if distance > BATTLE_APPROACH_RADIUS:
 			continue
+		if not _battle_has_visible_participant(battle, visible_ids):
+			continue
 		if distance < best_distance:
 			best_distance = distance
 			target = battle
 	if target == null:
+		_clear_battle_response(party)
 		return false
+
+	party.battle_response_id = target.battle_id
+	party.battle_response_until = TimeManager.world_elapsed_seconds \
+		+ BATTLE_RESPONSE_HOLD_SECONDS
 	_world_map_manager.set_party_target(party.party_id, target.world_position)
 	return true
+
+
+## 视野查询必须包含正在战斗的参战方；否则永远无法“看见战斗”。
+func _visible_party_ids_including_battles(party: PartyData) -> Dictionary:
+	var ids: Dictionary = {}
+	if _vision_manager == null:
+		return ids
+	for visible: PartyData in _vision_manager.get_visible_parties(party.party_id, true):
+		if visible != null:
+			ids[visible.party_id] = true
+	return ids
+
+
+func _battle_has_visible_participant(
+	battle: BattleSession, visible_ids: Dictionary
+) -> bool:
+	if battle == null:
+		return false
+	for party_id: String in battle.get_all_party_ids():
+		if visible_ids.has(party_id):
+			return true
+	return false
+
+
+## 开始响应战场时清除旧的追击意图，避免“正在追 A 却去战场”的状态冲突。
+func _clear_chase_intent(party: PartyData) -> void:
+	party.attack_intent = false
+	party.current_target_id = ""
+
+
+func _clear_battle_response(party: PartyData) -> void:
+	if party == null:
+		return
+	party.battle_response_id = ""
+	party.battle_response_until = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -356,6 +429,10 @@ func _update_bandit_route(party: PartyData) -> void:
 
 
 func _update_patrol_party(party: PartyData) -> void:
+	# 家族骑士与治安队等巡逻部队同样可以通过视野发现战场并前往协助。
+	if _try_respond_to_battle(party):
+		_clear_chase_intent(party)
+		return
 	# 部队可以携带自己的巡逻路线（家族骑士、特殊守卫）；
 	# 没有专属路线时继续使用全局默认巡逻点。
 	var points: Array[Vector2] = (

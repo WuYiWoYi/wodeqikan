@@ -4,6 +4,132 @@
 
 ---
 
+## 2026-11-22 · 阶段 10：战后追击、AI 助攻、增援部署与大地图交互完善
+
+### 新增
+
+- `faction_bandit_hostility_test`：强盗对国王、骑士、独立家族与玩家家族敌对；同家族/同王国友好；商队中立/治安队友好；改名后仍按类型判定。
+- `party_intent_hover_test`：悬浮“行动：XXX”覆盖待命、巡逻、前往地点、追击、跟随、战场响应、征召，意图变化自动刷新，Alt 构成展开只读。
+- `party_attack_confirmation_test`：主动攻击二次确认、取消零副作用、确认重校验、重复入口只建一场战斗、加入友军不弹确认。
+- `WorldMapManager` 相机 `FOLLOW_PLAYER` / `FREE_CAMERA` 模式；`PartyHoverActivity` 行；战斗摘要悬浮查询与显示接口。
+- `BattleManager.get_join_side()` 全侧检查与拒绝第三侧；`WorldMapManager` 攻击确认面板与统一 `begin_battle_with_party` 入口。
+
+### 变更
+
+- `EncounterManager.update_encounters()` 不再要求双方 `MOVING`；只按有效性、敌对关系、遭遇距离与攻击/追击意图判定。
+- 玩家追击使用 `focus_party_id` + `FOLLOW_PARTY`；目标移动、转向或进入离屏战斗时保留焦点并等待，战斗结束后恢复。
+- 战后冷却继续由 `BattleManager` 写入，冷却期间 AI 恢复路线/巡逻，到期后重新评估；不再永久卡死或连续开战。
+- `FactionManager.get_party_relation()` 增加强盗对任何政治家族贵族（含玩家家族）一律 `HOSTILE`。
+- `VisionManager` 支持 `include_in_battle` 查询；`AIManager` 要求实际看见参战方且进入接近半径才响应，并保持响应目标避免抖动。
+- AI 助攻加入必须“恰好一个敌对侧 + 至少一个非敌对侧”；与所有侧敌对/全中立拒绝，不自动创建第三战斗侧；商队不响应。
+- 增援后方由“当前友军质心”改为“该战斗侧初始锚点”；网格排满时在己方半场均匀扫描选择最远合法点，保证不重叠/不越界。
+- 部队悬浮新增行动意图行；战斗摘要面板默认隐藏、仅悬浮对应 `BattleMarker` 时显示；WASD 进入自由镜头并按缩放换算速度、限制边界。
+- 玩家主动攻击先弹二次确认；取消无副作用；确认重校验；重复确认不产生第二场战斗；加入友军不弹确认。
+- `PartyMarkerStyle.flag_max_size` 38 → 44；圆形底盘、边框、点击/悬浮区域、人数显示与动画不变。
+
+### 决策
+
+- D131：遭遇检测与移动状态解耦，追击关系跨战斗保持。
+- D132：战后冷却统一由 `BattleManager` 写入并在到期后重新评估。
+- D133：玩家追击焦点在目标战斗期间保留。
+- D134：强盗敌对关系统一在 `FactionManager` 解析。
+- D135：AI 战场助攻以视野发现参战方为门槛。
+- D136：助攻检查全部战斗侧，不自动创建第三侧。
+- D137：增援按初始战斗侧锚点部署，网格排满时半场扫描。
+- D138：悬浮行动文本由运行时字段派生，UI 只读。
+- D139：AI 对 AI 战斗摘要仅在悬浮战斗标记时显示。
+- D140：大地图相机区分跟随玩家与自由镜头。
+- D141：玩家主动攻击统一二次确认并重新校验。
+- D142：部队内部旗帜进一步放大到 44 像素。
+
+### 验证
+
+- 新增 `faction_bandit_hostility_test`、`party_intent_hover_test`、`party_attack_confirmation_test` 全部通过。
+- 扩展并通过：`ai_encounter_flow_test`、`player_pursuit_encounter_test`、`battle_reinforcement_test`、`world_map_battle_marker_test`、`world_map_input_test`。
+- 回归通过：`multi_party_battle_test`、`ai_manager_test`、`battle_scene_test`、`battle_cluster_test`、`save_persistence_test`、`milestone1_test`、`settlement_interaction_test`。
+- 按增量要求先跑最小相关测试，再执行相关回归链；未执行全项目套件，未做非 headless 视觉验收。未改变存档 Schema。
+
+---
+
+## 2026-11-22 · 阶段 9：大地图地点区域化布局与部队内部旗帜放大
+
+### 新增
+
+- `world_map_layout_test`：9 地点、世界尺寸、名称唯一、边界余量、最小间距、家族跨度、王国跨度与质心间隔、家族靠近所属王国、圆形半径与旗帜尺寸。
+- `WorldInitializer` 新增地点坐标常量：`BARI_VILLAGE_POSITION`、`MOXIXI_VILLAGE_POSITION`、`NORTH_VILLAGE_POSITION`、`GREY_CASTLE_POSITION`、`BURKNANIA_TOWN_POSITION`、`BURKNA_VILLAGE_POSITION`、`OLIN_CASTLE_POSITION`、`OLIN_VILLAGE_POSITION`。
+
+### 变更
+
+- 9 个地点按王国/家族重新聚类：
+  - 伯克纳尼亚王国（上部）：墨西西 (2500, 700)、伯克纳尼亚 (2900, 750)、北境村 (2250, 1000)、伯克纳 (3200, 1000)；
+  - 奥林王国（下部）：奥林德斯堡 (2950, 1850)、奥林 (3250, 2050)、巴里 (2600, 2100)、灰石城堡 (2900, 2350)；
+  - 青禾村 (1600, 1500) 位于两区域之间的西侧中立缓冲带。
+- 家族骑士、国王卫队与巡逻点同步移动到对应区域；AI 行为类型与巡逻规则不变。
+- `map_background.gd` 清空区与道路改用同一组坐标。
+- `PartyMarkerStyle.flag_max_size` 30 → 38；`marker_radius` 18、`border_width` 2、底盘、边框、点击/悬浮区域、地图位置与移动动画不变。
+- 无旗帜纹理时的回退三角形限制在 `inner_radius * 0.62` 内。
+- `encounter_dialogue_ui_test` 标记断言更新；`milestone1_test` 改为从 `WorldInitializer.BARI_VILLAGE_NAME` 动态读取巴里位置。
+
+### 决策
+
+- D128：保持 5000×3000 世界尺寸不变，通过坐标聚类缩短距离，避免波及世界边界、摄像机与存档尺寸。
+- D129：地点 ID、名称、类型、归属与交互配置完全不变，只换坐标；旧存档仍保留自身坐标。
+- D130：旗帜按贴图画布等比缩放并居中，尺寸参数化在 `PartyMarkerStyle`，圆形遮罩按实际半径裁剪。
+
+### 验证
+
+- 新增 `world_map_layout_test` 通过。
+- 更新后通过：`milestone1_test`、`encounter_dialogue_ui_test`。
+- 回归通过：`world_map_milestone6_test`、`settlement_interaction_test`、`fief_adventurer_system_test`、`world_map_input_test`。
+- 按需求只运行布局/地点/图标相关测试，未执行全项目套件；未做非 headless 视觉验收。
+
+---
+
+## 2026-11-22 · 阶段 8：战场扩建、增援表现、贵族王国体系、世界地图扩建与百科
+
+### 新增
+
+- `NobleData` / `NobleManager`：贵族 ID、名称、家族、爵位（Knight/Baron/Duke）、宗主、领袖/国王标记、独立部队、存活状态；引用与循环校验、领袖死亡选举与待定状态。
+- `HouseData` / `HouseManager`：领袖、贵族、封地、王国、宗主家族、旗帜 ID、玩家家族标记；视觉家族 → 政治家族 `banner_id` 映射。
+- `KingdomData` / `KingdomManager`：统治家族、国王、附庸家族、敌对王国、颜色、活动状态；战争传播到成员家族。
+- `EventBus.party_reinforced(battle_id, party_id, noble_id, side_index)`。
+- `FactionManager.get_party_relation()`、`get_house_relation()`、`are_houses_hostile()` 统一关系查询。
+- `Data/Families/family_burknania.tres`、`family_olin.tres`。
+- 大地图顶栏“百科”入口与三级屏幕面板（王国列表 / 王国详情 / 家族详情）。
+- 测试：`political_hierarchy_test`、`battle_reinforcement_test`、`encyclopedia_ui_test`。
+
+### 变更
+
+- 战场 1800×1024，初始部署距离 1580、边距 110；`battlefield_width/height`、`initial_army_distance`、`deployment_margin` 参数化。
+- 新遭遇与增援分流：增援加入既有 `BattleSession`，在战斗中心后方 240 像素、3 列网格展开，不重叠、不重置既有单位与冷却。
+- `BattleParticipant` / `BattleUnitState` 新增 `is_reinforcement`、`reinforcement_battle_id`、`reinforcement_arrival_time`。
+- 仅 NPC 加入玩家战斗侧时显示增援提示；有旗帜显示家族旗帜文本 + 徽章，无旗帜显示纯文本；消息排队、不暂停。
+- 世界尺寸 3000×2000 → 5000×3000；新增伯克纳尼亚（城镇+村庄）与奥林（城堡+村庄），墨西西附庸伯克纳尼亚、巴里附庸奥林，两王国交战，玩家中立。
+- 地点层级：村庄 1 级、城堡 2 级、城镇 3 级；仅村庄可征召；新地点全部归属家族。
+- 封地征召授权改为 `owner_noble_id` 本人或家族领袖。
+- 存档 Schema v4 → v5：新增 `nobles`、`houses`、`kingdoms`，保留 `lords` 兼容；读档不重复创建家族。
+- 地点图标新增城镇绘制；地图背景扩展清空区与道路。
+
+### 决策
+
+- D121：政治身份（家族/王国）优先于阵营，阵营作为无家族部队的回退。
+- D122：`NobleData extends LordData`、`NobleManager extends LordManager`，`lord_manager` 指向同一实例，保持旧接口与存档兼容。
+- D123：视觉家族 `FAMILY_*` 与政治家族 `HOUSE_*` 分离，通过 `HouseData.banner_id` 映射。
+- D124：增援只加入既有会话，不新建战斗；侧别由统一关系查询决定。
+- D125：领袖死亡按爵位降序、稳定 ID 升序选举；无候选时标记待定而非崩溃。
+- D126：百科读取真实管理器，签名轮询刷新，打开暂停世界但不重置相机。
+- D127：Schema v5 持久化政治层级并校验引用。
+
+### 验证
+
+- 新增 `political_hierarchy_test`、`battle_reinforcement_test`、`encyclopedia_ui_test` 通过。
+- 更新后通过：`milestone1_test`、`milestone1_restart_test`（save/load 两阶段）、`family_appearance_test`、`battle_scene_test`、`save_persistence_test`、`unit_party_serialization_test`、`battle_cluster_test`。
+- 修复 `FactionManager` 独立测试夹具：`setup_defaults(party_manager)` 允许只注入部队仓储并回退到阵营关系；`faction_vision_test`、`ai_manager_test`、`battle_result_test`、`multi_party_battle_test`、`offscreen_battle_hourly_test` 恢复通过。
+- 全量 `Tests/SystemTests` + `Tests/UnitTests`（60 个场景，另含跨进程 save/load）通过。
+- 仅执行 headless 自动测试，未做非 headless 视觉验收。
+
+---
+
 ## 2026-11-22 · 修复：多场并行战斗与 AI 离屏战斗自动结束
 
 ### 变更

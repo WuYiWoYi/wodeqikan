@@ -35,7 +35,7 @@ func _run() -> void:
 	_check(WorldInitializer.create_new_world(context), "初始化世界")
 	if not context.is_valid_world():
 		return
-	_check(SaveData.CURRENT_SCHEMA_VERSION == 4, "存档 Schema 版本为 4")
+	_check(SaveData.CURRENT_SCHEMA_VERSION == 5, "存档 Schema 版本为 5")
 
 	var player := context.get_player_party()
 	var bandit := _find_party_by_ai(context, PartyData.PartyAIType.BANDIT)
@@ -147,7 +147,7 @@ func _run() -> void:
 	_check(loaded != null, "读取成功")
 	if loaded == null:
 		return
-	_check(loaded.schema_version == 4, "读回的 Schema 为 4")
+	_check(loaded.schema_version == 5, "读回的 Schema 为 5")
 
 	var restored := WorldContext.new()
 	restored.name = "SavePersistenceRestoredContext"

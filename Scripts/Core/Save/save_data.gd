@@ -5,9 +5,10 @@ extends RefCounted
 ## 只保存数据，不保存场景节点。各实体以 ID 为键保存。
 ## Schema v3 增加世界日志；v4 增加领主、封地所有权、村庄人口/繁荣度、
 ## 采邑储备、冒险者候选人与玩家领主/玩家角色 ID。
-## 读取时保留 v1 → v2 的浅迁移入口，缺失的 v4 字段按安全默认值恢复。
+## v5 增加贵族、家族与王国数据；旧存档的 lords 会迁移为 nobles。
+## 读取时保留 v1 → v5 的浅迁移入口，缺失字段按安全默认值恢复。
 
-const CURRENT_SCHEMA_VERSION: int = 4
+const CURRENT_SCHEMA_VERSION: int = 5
 
 var schema_version: int = CURRENT_SCHEMA_VERSION
 var project_version: String = "0.2.0"
@@ -31,7 +32,12 @@ var world_log: Dictionary = {}
 ## 以下均为 { 实体 ID: 实体数据字典 }。
 var units: Dictionary = {}
 var parties: Dictionary = {}
+## 贵族数据（v5 权威字段）。
+var nobles: Dictionary = {}
+## 兼容 v4：旧存档只有 lords；读取时回退到 nobles。
 var lords: Dictionary = {}
+var houses: Dictionary = {}
+var kingdoms: Dictionary = {}
 var settlements: Dictionary = {}
 var factions: Dictionary = {}
 var quests: Dictionary = {}
@@ -61,7 +67,10 @@ func to_dict() -> Dictionary:
 		"world_log": world_log.duplicate(true),
 		"units": units.duplicate(true),
 		"parties": parties.duplicate(true),
+		"nobles": nobles.duplicate(true),
 		"lords": lords.duplicate(true),
+		"houses": houses.duplicate(true),
+		"kingdoms": kingdoms.duplicate(true),
 		"settlements": settlements.duplicate(true),
 		"factions": factions.duplicate(true),
 		"quests": quests.duplicate(true),
@@ -100,7 +109,10 @@ static func from_dict(payload: Dictionary) -> SaveData:
 	save.world_log = _as_dict(payload.get("world_log", {}))
 	save.units = _as_dict(payload.get("units", {}))
 	save.parties = _as_dict(payload.get("parties", {}))
+	save.nobles = _as_dict(payload.get("nobles", {}))
 	save.lords = _as_dict(payload.get("lords", {}))
+	save.houses = _as_dict(payload.get("houses", {}))
+	save.kingdoms = _as_dict(payload.get("kingdoms", {}))
 	save.settlements = _as_dict(payload.get("settlements", {}))
 	save.factions = _as_dict(payload.get("factions", {}))
 	save.quests = _as_dict(payload.get("quests", {}))
@@ -108,6 +120,8 @@ static func from_dict(payload: Dictionary) -> SaveData:
 	# Schema v1 -> v2 迁移：旧存档缺少 world 字段，保留原始 player 数据。
 	if save.schema_version < 2:
 		save.schema_version = 2
+	# v4 -> v5：旧存档只有 lords，没有独立 nobles/houses/kingdoms；
+	# 具体政治数据由 WorldContext 在加载后迁移，不在这里伪造实体。
 	return save
 
 

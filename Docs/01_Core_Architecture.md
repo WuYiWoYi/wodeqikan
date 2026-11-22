@@ -46,7 +46,10 @@ GameManager (Autoload)
     ├── ItemManager（消耗品静态配置）             │
     ├── PartyManager                              │
     ├── SettlementManager                         │
-    ├── LordManager（领主/封地归属）               │
+    ├── NobleManager（贵族，继承 LordManager）     │
+    ├── HouseManager（家族）                       │
+    ├── KingdomManager（王国）                     │
+    ├── LordManager（领主/封地归属，兼容入口）      │
     ├── FiefRecruitmentManager（采邑征召）         │
     ├── AdventurerRecruitmentManager（候选人）     │
     ├── FactionManager（阵营关系）                 │
@@ -102,6 +105,10 @@ GameManager (Autoload)
 | `PartyManager` | `PartyData` 增删查、成员关系维护、工资汇总 | 部队 AI |
 | `SettlementManager` | `SettlementData` 增删查、场景路径与序列化 | 地点图标、交互面板 |
 | `LordManager` | `LordData` 增删查、玩家领主查询、部队引用校验、序列化 | AI 决策、封地分配、UI |
+| `NobleManager` | `NobleData` 增删查、爵位/宗主/领袖/国王校验、独立部队绑定、领袖死亡选举 | 家族/王国聚合决策、UI |
+| `HouseManager` | `HouseData` 增删查、领袖/贵族/封地成员关系、家族按旗帜映射 | 王国战争决策、UI |
+| `KingdomManager` | `KingdomData` 增删查、统治家族/国王/附庸、敌对关系、战争传播 | 外交 UI、战役指挥 |
+| `FactionManager` | 阵营与政治身份的统一关系查询（敌对/友好/中立） | 修改家族/王国数据 |
 | `FiefRecruitmentManager` | 封地归属校验、采邑储备/补充、成组征召、资源成本、税收缓存 | UI、场景节点、世界日志 |
 | `AdventurerRecruitmentManager` | 村庄候选人池、刷新、1 金币招募、离开清理 | UI、场景节点、AI |
 | `SettlementEconomyConfig` | 采邑/税收/候选人参数（只读） | 单个地点运行时状态 |
@@ -303,6 +310,7 @@ Continue / Load Game
 | `battle_started` | `battle_id` | `BattleManager` | UI、场景控制器、音频 |
 | `battle_finished` | `battle_id`, `result` | `BattleManager` | UI、世界模拟 |
 | `battle_participant_joined` | `battle_id`, `party_id`, `side_index` | `BattleManager` | UI、统计、后续战斗场景 |
+| `party_reinforced` | `battle_id`, `party_id`, `noble_id`, `side_index` | `BattleManager`（`try_join_battle` / `add_reinforcement`） | 战斗场景增援表现、日志、统计 |
 | `battle_participants_updated` | `battle_id` | `BattleManager` | 大地图战斗标记/汇总 UI |
 | `entry_added`（WorldLogManager 自定义信号） | `WorldLogEntry` | `WorldLogManager` | 大地图世界日志面板 |
 | `player_encounter_requested` | `encounter_id`, `attacker_party_id`, `target_party_id` | `EncounterManager` | WorldMap 强制遭遇对话 |
@@ -319,7 +327,8 @@ Continue / Load Game
 ## 10. ID 与持久化
 
 - 所有持久化实体必须有唯一 ID：`UNIT_000001`、`PARTY_000001`、`LORD_000001`、`SETTLEMENT_000001`、`FACTION_000001`。
-- ID 只能由 `IdGenerator` 生成；计数器随存档保存，永不复用。
+- 政治实体使用固定语义 ID：`HOUSE_*`、`KINGDOM_*`；视觉家族配置使用 `FAMILY_*`，两者通过 `HouseData.banner_id` 映射。
+- ID 只能由 `IdGenerator` 生成；计数器随存档保存，永不复用。固定 ID 由初始化器显式注册，重复注册必须拒绝。
 - ID 不得依赖节点名、节点路径或数组下标。
 - 数据类必须提供 `to_dict()` / `from_dict()`；字段名使用 snake_case。
 - 存档只保存数据，不保存节点。详见 [Systems/Save_System.md](Systems/Save_System.md)。
