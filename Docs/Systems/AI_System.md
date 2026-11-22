@@ -1,7 +1,7 @@
 # AI 系统
 
 **核心调度：** `Scripts/Systems/AI/ai_manager.gd`
-**状态：** 商队/巡逻、强盗动态目标评分、治安队拦截、统一大地图遭遇、遭遇原因与选项规则、底部 NPC 遭遇对话、离屏多方战斗已实现；领主 AI 与复杂战术未实现
+**状态：** 商队/巡逻、强盗动态目标评分、治安队拦截、统一大地图遭遇、遭遇原因与选项规则、底部 NPC 遭遇对话、离屏多方战斗、领主前往自有封地征召已实现；复杂领主战略与战术未实现
 
 ---
 
@@ -165,11 +165,12 @@ Idle
 - 玩家追击 A 时路过无关敌对 B 不会被打断；B 只有在自己的攻击目标明确为玩家时才会拦截。
 - 同一追击关系只触发一次；接触后清除攻击意图、移动目标与焦点。
 - 强盗追击、治安队拦截会设置攻击意图。
-- 满足条件后：
-  - 双方都未参战 → `BattleManager.start_battle(..., offscreen = true)`；
-  - 一方已在离屏战斗 → `try_join_battle()` 检查另一方能否加入；
+- 满足条件后（世界可同时存在多场战斗，只检查这对部队自身所属战斗）：
+  - 双方都未参战 → `BattleManager.start_battle(..., offscreen = true)` 创建新的独立战斗；
+  - 一方已在离屏战斗、另一方空闲 → `try_join_battle(空闲方, 该方 battle_id)`；
+  - 双方已分别处于不同战斗 → 跳过本次遭遇，不合并会话，也不让任何一方同时参战；
   - 玩家被敌对 AI 主动拦截 → 停止双方、清除意图、记录待处理遭遇并请求 WorldMap 弹出遭遇对话；
-  - 一方已经参战且不可加入 / 双方已在同一战斗 → 不重复创建。
+  - 双方已在同一战斗 → 不重复创建或加入。
 - 遭遇距离 50 统一用于 AI 对 AI 与玩家被拦截；不在 AI 代码中各自维护。
 - 玩家主动接近非敌对 AI 不会触发遭遇对话；玩家主动追击敌对 AI 时，使用同一底部遭遇界面（`PLAYER_INITIATED`，保留战斗 / 离开）。
 - 离开后记录拒绝锁，离开 90 世界单位前不会重复触发同一场遭遇；世界恢复基础倍率，双方保留停止位置，AI 下一次决策可继续行动。
@@ -232,9 +233,11 @@ Idle
 
 - NPC 对 NPC 战斗使用 `offscreen = true`：不暂停世界，每 1 个游戏小时（6 世界秒）结算一次伤亡，直到一方全灭、平局或达到 48 小时安全上限。
 - 战斗期间参战部队锁定，其他 AI 仍正常决策。
-- 强盗/治安队在附近发现可加入的离屏战斗时只会先接近（`BATTLE_APPROACH_RADIUS = 700`）；
+- 世界可同时存在多场 AI 离屏战斗，互不阻塞；一场战斗不会阻止其他位置发生新战斗。
+- 强盗/治安队会遍历全部有效离屏战斗，在 `BATTLE_APPROACH_RADIUS = 700` 内选择可加入且距离最近的一场接近；
   实际加入由 `EncounterManager.update_encounters()` 统一判定与执行，AI 不调用 `try_join_battle()`。
-- 是否可加入、加入哪一侧由 `BattleManager.get_join_side()` 基于 `FactionManager` 决定：
+- 已处于战斗中的部队不参与响应，也不会覆盖或合并其他战斗会话。
+- 是否可加入、加入哪一侧由 `BattleManager.get_join_side(party_id, battle_id)` 基于 `FactionManager` 决定：
   - 与某侧无敌对、与另一侧有敌对 → 加入该侧；
   - 与所有现有侧敌对 → 建立独立第三方；
   - 与任何一方都无敌对 → 不加入。
@@ -277,7 +280,21 @@ Idle
 - 决策读部队与地点数据，产出命令。
 - 决策节奏远低于部队 AI，避免大量领主同时计算。
 
-详见 [Lord_System.md](Lord_System.md)。
+### 4.1 领主征召决策（阶段 7 实现）
+
+`AIManager._tick_lord_strategic()` 对每个非玩家、存活的领主：
+
+1. 取领主 `party_id` 对应的部队；无效或不可用则跳过。
+2. 部队人数低于 `SettlementEconomyConfig.ai_lord_recruit_threshold`（默认 12）时，查找最近的、`owner_lord_id` 为自己的、采邑储备 > 0 的村庄。
+3. 设置 `LordData.current_state = "RECRUITING"` 与 `current_target_settlement_id`，让部队移动到该村。
+4. 抵达后调用 `FiefRecruitmentManager.recruit_group()`；无论成功失败都清除征召状态和目标。
+5. `RECRUITING` 期间 `_tick_party_tactical()` 跳过该部队，避免巡逻/追击覆盖征召目标。
+
+- 征召使用与玩家完全相同的管理器接口和资源扣除。
+- 成功事实通过 `EventBus.fief_recruited` 进入世界日志；AIManager 不直接写日志。
+- 找不到自有封地、储备为 0 或部队不可用时不做任何修改，下一次分频重新判断。
+
+详见 [Lord_System.md](Lord_System.md) 与 [Fief_Recruitment_System.md](Fief_Recruitment_System.md)。
 
 ## 5. 调度与性能
 
@@ -337,7 +354,7 @@ AI 参数应可配置：
 | 中立/无关部队不自动打断 | 已实现（普通对话只对主动点击目标；自动遭遇需实际追击关系） |
 | `UnitAI` | AI/玩家双模式、360°定向矩形、单次单目标、搜索/接近/攻击状态、外围进攻点、降速、实体碰撞、队形槽位与局部避让已实现；复杂战术/寻路 TODO |
 | 远程单位 AI | 已实现：射程内站定射击、射程外接近、过近后撤、换目标、独立 3 秒冷却；无预判/齐射/弹药 |
-| `LordAI` | TODO(阶段5) |
+| `LordAI` | 部分实现：自有封地征召（低于人数阈值 → 前往村庄 → 招募一组）；战略攻击/撤退/性格权重 TODO |
 | 空间查询 | TODO(阶段2) |
 | 统一随机源 | TODO(阶段3) |
 

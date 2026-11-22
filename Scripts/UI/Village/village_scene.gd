@@ -17,6 +17,7 @@ const PLAYER_START_POSITION := Vector2(960.0, 860.0)
 const ELDER_POSITION := Vector2(1260.0, 560.0)
 const ELDER_NAME: String = "村庄头人"
 const ELDER_CLICK_RADIUS: float = 46.0
+const CANDIDATE_CLICK_RADIUS: float = 46.0
 const INTERACT_DISTANCE: float = 130.0
 ## 场景内移动表现速度倍率；不修改 UnitData.move_speed。
 const VILLAGE_MOVE_SPEED_MULTIPLIER: float = 2.0
@@ -34,6 +35,9 @@ var _player_unit: UnitData = null
 var _player_visual: UnitVisual = null
 var _npc_visual: UnitVisual = null
 var _npc_unit_data: UnitData = null
+## 候选人表现：{ candidate_id: UnitVisual } / { candidate_id: Label }。
+var _candidate_visuals: Dictionary = {}
+var _candidate_labels: Dictionary = {}
 var _camera: Camera2D = null
 var _camera_rig: SceneCameraRig = null
 
@@ -61,6 +65,9 @@ var _dialogue_speaker_label: Label = null
 var _dialogue_text_label: Label = null
 var _dialogue_choices: VBoxContainer = null
 
+## 与大地图共用的世界日志面板。
+var _world_log_panel: WorldLogPanel = null
+
 
 func _ready() -> void:
 	_context = GameManager.world_context
@@ -78,6 +85,7 @@ func _ready() -> void:
 
 	_build_camera()
 	_build_actor_visuals()
+	_build_adventurer_candidates()
 	_build_ui()
 	_update_header()
 	queue_redraw()
@@ -176,6 +184,58 @@ func _build_actor_visuals() -> void:
 	add_child(npc_label)
 
 
+## 从权威候选人数据生成村庄 NPC 表现；不创建 UnitManager 单位。
+func _build_adventurer_candidates() -> void:
+	if _settlement == null or _context == null:
+		return
+	for candidate: AdventurerCandidateData in _settlement.adventurer_candidates:
+		if candidate == null:
+			continue
+		var spawn_position: Vector2 = candidate.world_position
+		if spawn_position == Vector2.ZERO:
+			spawn_position = AdventurerRecruitmentManager.CANDIDATE_POSITIONS[
+				_candidate_visuals.size()
+				% AdventurerRecruitmentManager.CANDIDATE_POSITIONS.size()
+			]
+		var unit := UnitData.new()
+		unit.unit_id = candidate.candidate_id
+		unit.config_id = candidate.unit_config_id
+		unit.display_name = candidate.display_name
+		unit.faction_id = _settlement.faction_id
+		unit.appearance = candidate.appearance.duplicate(true)
+		unit.family_id = str(candidate.appearance.get("family_id", ""))
+
+		var visual := UnitVisualScript.new()
+		visual.name = "AdventurerCandidateVisual_%s" % candidate.candidate_id
+		visual.position = position
+		visual.z_index = 100
+		add_child(visual)
+		visual.setup(unit)
+		visual.set_facing(-1.0)
+		visual.reset_locomotion()
+		_candidate_visuals[candidate.candidate_id] = visual
+
+		var label := _make_label("", 14)
+		label.name = "AdventurerCandidateName_%s" % candidate.candidate_id
+		label.position = position + Vector2(-70.0, -78.0)
+		label.size = Vector2(140.0, 20.0)
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		add_child(label)
+		_candidate_labels[candidate.candidate_id] = label
+		_refresh_candidate_label(candidate)
+
+
+func _refresh_candidate_label(candidate: AdventurerCandidateData) -> void:
+	if candidate == null:
+		return
+	var label := _candidate_labels.get(candidate.candidate_id) as Label
+	if label == null:
+		return
+	label.text = candidate.display_name
+	if not candidate.is_available():
+		label.text = "%s（已招募）" % candidate.display_name
+
+
 func _visual_equipment_configs(unit: UnitData) -> Dictionary:
 	var configs: Dictionary = {}
 	if unit == null or _context == null:
@@ -203,7 +263,21 @@ func _build_ui() -> void:
 
 	_build_header()
 	_build_exit_countdown()
+	_build_world_log_panel()
 	_build_dialogue_panel()
+
+
+## 与大地图共用同一世界日志组件；村庄放在右上角避免遮挡底部对话。
+func _build_world_log_panel() -> void:
+	_world_log_panel = WorldLogPanel.new()
+	_ui_root.add_child(_world_log_panel)
+	_world_log_panel.anchor_left = 1.0
+	_world_log_panel.anchor_right = 1.0
+	_world_log_panel.offset_left = -WorldLogPanel.PANEL_WIDTH - 12.0
+	_world_log_panel.offset_right = -12.0
+	_world_log_panel.offset_top = 112.0
+	_world_log_panel.offset_bottom = 112.0 + WorldLogPanel.PANEL_HEIGHT
+	_world_log_panel.setup(_context.world_log_manager)
 
 
 func _build_header() -> void:
@@ -231,7 +305,9 @@ func _build_header() -> void:
 	_village_label.name = "VillageNameLabel"
 	column.add_child(_village_label)
 
-	_hint_label = _make_label("WASD 移动　左键点击村庄头人交谈　F 自由视角", 14)
+	_hint_label = _make_label(
+		"WASD 移动　左键点击头人或冒险者交谈　F 自由视角", 14
+	)
 	_hint_label.name = "VillageHintLabel"
 	_hint_label.modulate = Color(0.92, 0.9, 0.82)
 	column.add_child(_hint_label)
@@ -336,6 +412,10 @@ func _physics_process(delta: float) -> void:
 		_player_visual.update_locomotion(delta, _moving)
 	if is_instance_valid(_npc_visual):
 		_npc_visual.update_locomotion(delta, false)
+	for value: Variant in _candidate_visuals.values():
+		var visual := value as UnitVisual
+		if visual != null and is_instance_valid(visual):
+			visual.update_locomotion(delta, false)
 	if _camera_rig != null:
 		_camera_rig.update(delta, _player_position, true, not _dialogue_open)
 
@@ -363,11 +443,22 @@ func _read_input() -> Vector2:
 func _update_interaction_hint() -> void:
 	if _status_label == null or _dialogue_open:
 		return
+	var near_candidate: bool = false
+	if _settlement != null:
+		for candidate: AdventurerCandidateData in _settlement.adventurer_candidates:
+			if candidate == null:
+				continue
+			if _player_position.distance_to(_find_candidate_position(candidate)) \
+					<= INTERACT_DISTANCE:
+				near_candidate = true
+				break
 	var distance := _player_position.distance_to(ELDER_POSITION)
 	if distance <= INTERACT_DISTANCE:
 		_hint_label.text = "左键点击村庄头人交谈"
+	elif near_candidate:
+		_hint_label.text = "左键点击冒险者交谈"
 	else:
-		_hint_label.text = "WASD 移动　走近村庄头人后可以交谈"
+		_hint_label.text = "WASD 移动　走近头人或冒险者后可以交谈"
 
 
 func _update_exit_state(delta: float) -> void:
@@ -409,10 +500,92 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	var mouse_world := get_global_mouse_position()
+	var candidate := _find_candidate_at(mouse_world)
+	if candidate != null:
+		get_viewport().set_input_as_handled()
+		try_interact_with_candidate(candidate.candidate_id)
+		return
 	if mouse_world.distance_to(ELDER_POSITION) > ELDER_CLICK_RADIUS:
 		return
 	get_viewport().set_input_as_handled()
 	try_interact_with_elder()
+
+
+func _find_candidate_at(world_position: Vector2) -> AdventurerCandidateData:
+	if _settlement == null:
+		return null
+	var nearest: AdventurerCandidateData = null
+	var nearest_distance: float = CANDIDATE_CLICK_RADIUS
+	for candidate: AdventurerCandidateData in _settlement.adventurer_candidates:
+		if candidate == null:
+			continue
+		var visual := _candidate_visuals.get(candidate.candidate_id) as UnitVisual
+		if visual == null or not is_instance_valid(visual):
+			continue
+		var distance := world_position.distance_to(visual.position)
+		if distance <= nearest_distance:
+			nearest_distance = distance
+			nearest = candidate
+	return nearest
+
+
+func _find_candidate_position(candidate: AdventurerCandidateData) -> Vector2:
+	if candidate == null:
+		return Vector2.ZERO
+	var visual := _candidate_visuals.get(candidate.candidate_id) as UnitVisual
+	if visual != null and is_instance_valid(visual):
+		return visual.position
+	return candidate.world_position
+
+
+## 与冒险者候选人交互。距离不足时不打开对话。
+func try_interact_with_candidate(candidate_id: String) -> bool:
+	if _returning or _dialogue_open or _settlement == null:
+		return false
+	var candidate := _settlement.get_candidate(candidate_id)
+	if candidate == null:
+		return false
+	if _player_position.distance_to(_find_candidate_position(candidate)) \
+			> INTERACT_DISTANCE:
+		_status_label.text = "距离太远，走近冒险者后再交谈"
+		return false
+	return _open_candidate_dialogue(candidate)
+
+
+func _open_candidate_dialogue(candidate: AdventurerCandidateData) -> bool:
+	if candidate == null:
+		return false
+	var data := DialogueData.new()
+	data.dialogue_id = "adventurer_%s" % candidate.candidate_id
+	data.speaker_name = candidate.display_name
+	data.start_node_id = "start"
+	var available: bool = candidate.is_available()
+	var text: String = ""
+	if available:
+		text = "我听说%s需要人手。付我 1 金币，我就加入你的队伍。" \
+			% get_village_name()
+	else:
+		text = "我已经加入你的队伍，等你离开%s时一起走。" % get_village_name()
+	var choices: Array = []
+	if available:
+		choices.append({
+			"text": "招募他（1 金币）",
+			"next_node_id": "",
+			"action": "recruit_adventurer",
+			"candidate_id": candidate.candidate_id,
+		})
+	choices.append({"text": "暂时不了", "next_node_id": ""})
+	data.nodes = {
+		"start": {
+			"text": text,
+			"choices": choices,
+		}
+	}
+	if not _context.dialogue_manager.start_dialogue(data):
+		_status_label.text = "无法开始对话"
+		return false
+	_show_dialogue()
+	return true
 
 
 ## 与村庄头人交互。距离不足时不打开对话，返回 false。
@@ -431,10 +604,50 @@ func _open_dialogue() -> bool:
 		push_error("村庄对话配置加载失败: %s" % VILLAGE_ELDER_DIALOGUE_PATH)
 		_status_label.text = "对话配置缺失"
 		return false
+	if _can_player_recruit_fief():
+		data = _build_elder_dialogue_with_fief(data)
 	if not _context.dialogue_manager.start_dialogue(data):
 		_status_label.text = "无法开始对话"
 		return false
+	_show_dialogue()
+	return true
 
+
+## 玩家拥有该村庄时，在头人对话中增加封地征召选项；其余对话仍来自数据配置。
+func _build_elder_dialogue_with_fief(base: DialogueData) -> DialogueData:
+	var data := DialogueData.new()
+	data.dialogue_id = base.dialogue_id
+	data.speaker_name = base.speaker_name
+	data.start_node_id = base.start_node_id
+	data.nodes = base.nodes.duplicate(true)
+	var start_node: Dictionary = data.get_node_data(data.start_node_id)
+	var choices_value: Variant = start_node.get("choices", [])
+	var choices: Array = (choices_value as Array).duplicate(true) \
+		if choices_value is Array else []
+	choices.append({
+		"text": "征召 1 组采邑（6 人，剩余 %d 组）"
+			% _settlement.fief_recruitment_stock,
+		"next_node_id": "",
+		"action": "recruit_fief",
+	})
+	start_node["choices"] = choices
+	data.nodes[data.start_node_id] = start_node
+	return data
+
+
+func _can_player_recruit_fief() -> bool:
+	if _settlement == null or _context == null:
+		return false
+	if _settlement.settlement_type != SettlementData.SettlementType.VILLAGE:
+		return false
+	if _settlement.fief_recruitment_stock <= 0:
+		return false
+	var player_lord: LordData = _context.get_player_lord()
+	return player_lord != null \
+		and _settlement.owner_lord_id == player_lord.lord_id
+
+
+func _show_dialogue() -> void:
 	_dialogue_open = true
 	_moving = false
 	_player_visual.update_locomotion(0.0, false)
@@ -443,7 +656,6 @@ func _open_dialogue() -> bool:
 		TimeManager.push_pause(GameManager.PAUSE_REASON_WORLD_DIALOGUE)
 		_dialogue_pause_active = true
 	_refresh_dialogue_ui()
-	return true
 
 
 func _refresh_dialogue_ui() -> void:
@@ -473,10 +685,50 @@ func _refresh_dialogue_ui() -> void:
 func _on_dialogue_choice(index: int) -> void:
 	if not _dialogue_open:
 		return
+	var choices: Array = _context.dialogue_manager.get_choices()
+	var action_message: String = ""
+	if index >= 0 and index < choices.size() and choices[index] is Dictionary:
+		var choice: Dictionary = choices[index]
+		var action: String = str(choice.get("action", ""))
+		if not action.is_empty():
+			action_message = _execute_dialogue_action(action, choice)
+			_close_dialogue()
+			if not action_message.is_empty():
+				_status_label.text = action_message
+			return
 	if _context.dialogue_manager.choose(index):
 		_refresh_dialogue_ui()
 		return
 	_close_dialogue()
+
+
+## 对话选项只触发统一业务接口，不直接创建单位或修改地点数据。
+func _execute_dialogue_action(action: String, choice: Dictionary) -> String:
+	match action:
+		"recruit_adventurer":
+			var candidate_id: String = str(choice.get("candidate_id", ""))
+			var success: bool = _context.adventurer_recruitment_manager.recruit_candidate(
+				_settlement.settlement_id, candidate_id, _context.player_profile
+			)
+			if success:
+				var candidate: AdventurerCandidateData = _settlement.get_candidate(
+					candidate_id
+				)
+				_refresh_candidate_label(candidate)
+				return "冒险者已加入你的队伍。"
+			return _context.adventurer_recruitment_manager.last_error
+		"recruit_fief":
+			var player_lord: LordData = _context.get_player_lord()
+			if player_lord == null:
+				return "没有有效的玩家领主身份"
+			var recruited: bool = _context.fief_recruitment_manager.recruit_group(
+				_settlement.settlement_id, player_lord.lord_id
+			)
+			if recruited:
+				return "已征召 1 组采邑，共 6 人。"
+			return _context.fief_recruitment_manager.last_error
+		_:
+			return ""
 
 
 ## 关闭对话界面并恢复玩家移动。
@@ -504,9 +756,14 @@ func _request_exit() -> void:
 
 	if _dialogue_open:
 		_close_dialogue()
+	var settlement_id: String = _settlement.settlement_id if _settlement != null else ""
+	# 离开村庄后清理本次已招募的候选人记录；已加入部队的单位不受影响。
+	if not settlement_id.is_empty():
+		_context.adventurer_recruitment_manager.cleanup_departed_candidates(
+			settlement_id
+		)
 	if not _auto_return_enabled:
 		return
-	var settlement_id: String = _settlement.settlement_id if _settlement != null else ""
 	GameManager.pending_settlement_latch_id = settlement_id
 	TimeManager.set_base_world_speed(GameManager.small_scene_return_base_speed)
 	TimeManager.pop_pause(GameManager.PAUSE_REASON_SMALL_SCENE)
@@ -619,6 +876,23 @@ func get_player_position() -> Vector2:
 
 func get_elder_position() -> Vector2:
 	return ELDER_POSITION
+
+
+func get_candidate_count() -> int:
+	return _candidate_visuals.size()
+
+
+func get_candidate_visual(candidate_id: String) -> UnitVisual:
+	return _candidate_visuals.get(candidate_id) as UnitVisual
+
+
+func get_candidate_position(candidate_id: String) -> Vector2:
+	var visual := get_candidate_visual(candidate_id)
+	return visual.position if visual != null else Vector2.ZERO
+
+
+func get_world_log_panel() -> WorldLogPanel:
+	return _world_log_panel
 
 
 func get_village_name() -> String:

@@ -12,6 +12,7 @@ const GUARD_FACTION_ID: String = "FACTION_GUARD"
 
 const FAMILY_BARI_ID: String = "FAMILY_BARI"
 const FAMILY_MOXIXI_ID: String = "FAMILY_MOXIXI"
+const FAMILY_PLAYER_ID: String = "FAMILY_PLAYER"
 
 const PLAYER_START_POSITION: Vector2 = Vector2(760.0, 620.0)
 const PLAYER_MOVE_SPEED: float = 150.0
@@ -66,10 +67,15 @@ const WASTE_BANDIT_PARTY_NAME: String = "荒野强盗"
 
 const BARI_VILLAGE_NAME: String = "巴里"
 const MOXIXI_VILLAGE_NAME: String = "墨西西"
+const PLAYER_VILLAGE_NAME: String = "青禾村"
+const PLAYER_VILLAGE_POSITION: Vector2 = Vector2(650.0, 1500.0)
 const BARI_KNIGHT_PARTY_NAME: String = "巴里骑士"
 const MOXIXI_KNIGHT_PARTY_NAME: String = "墨西西骑士"
 const BARI_KNIGHT_LEADER_NAME: String = "巴里骑士"
 const MOXIXI_KNIGHT_LEADER_NAME: String = "墨西西骑士"
+const PLAYER_LORD_NAME: String = "玩家领主"
+const BARI_LORD_NAME: String = "巴里领主"
+const MOXIXI_LORD_NAME: String = "墨西西领主"
 
 ## 家族骑士编制（每队）：
 ## 1 领袖（三级）+ 1 骑乘侍从（三级）+ 3 骑乘军士（二级）
@@ -109,9 +115,19 @@ static func create_new_world(context: WorldContext) -> bool:
 	player_party.control_type = PartyData.ControlType.PLAYER
 	player_party.movement_speed = PLAYER_MOVE_SPEED
 	player_party.sight_range = PLAYER_SIGHT_RANGE
+	player_party.family_id = FAMILY_PLAYER_ID
 	context.player_party_id = player_party.party_id
 	context.ai_manager.player_party_id = player_party.party_id
 	context.battle_manager.player_party_id = player_party.party_id
+	context.adventurer_recruitment_manager.player_party_id = player_party.party_id
+
+	# 玩家领主是战略层身份，与玩家角色 UnitData 分离；封地所有权只认领主 ID。
+	var player_lord: LordData = context.lord_manager.create_lord(
+		PLAYER_LORD_NAME, PLAYER_FACTION_ID, player_party.party_id, true
+	)
+	if player_lord == null:
+		return false
+	context.player_lord_id = player_lord.lord_id
 
 	var merchant_party := context.party_manager.create_party(
 		MERCHANT_FACTION_ID,
@@ -167,6 +183,18 @@ static func create_new_world(context: WorldContext) -> bool:
 		moxixi_knights.movement_speed = FAMILY_KNIGHT_MOVE_SPEED
 		moxixi_knights.sight_range = FAMILY_KNIGHT_SIGHT_RANGE
 
+	# 两名 NPC 领主各自拥有一支家族骑士部队；封地归属稍后在村庄创建后写入。
+	var bari_lord: LordData = null
+	var moxixi_lord: LordData = null
+	if bari_knights != null:
+		bari_lord = context.lord_manager.create_lord(
+			BARI_LORD_NAME, LOCAL_FACTION_ID, bari_knights.party_id, false
+		)
+	if moxixi_knights != null:
+		moxixi_lord = context.lord_manager.create_lord(
+			MOXIXI_LORD_NAME, LOCAL_FACTION_ID, moxixi_knights.party_id, false
+		)
+
 	# 两支新强盗部队：沿用现有 BANDIT 阵营与 AI，只是拥有独立 ID、出生点和路线。
 	var east_bandits := context.party_manager.create_party(
 		BANDIT_FACTION_ID,
@@ -200,13 +228,34 @@ static func create_new_world(context: WorldContext) -> bool:
 	var grey_castle := _create_settlement(
 		context, "灰石城堡", SettlementData.SettlementType.CASTLE, Vector2(1800.0, 1300.0), 0, 60
 	)
-	for village: SettlementData in [bari_village, moxixi_village, north_village]:
+	# 玩家封地放在已有地点之后创建，保持“第一个村庄”等旧流程稳定。
+	var player_village := _create_settlement(
+		context,
+		PLAYER_VILLAGE_NAME,
+		SettlementData.SettlementType.VILLAGE,
+		PLAYER_VILLAGE_POSITION,
+		110,
+		38,
+		PLAYER_FACTION_ID
+	)
+	for village: SettlementData in [
+		bari_village, moxixi_village, north_village, player_village
+	]:
 		if village != null:
 			village.scene_path = DEFAULT_VILLAGE_SCENE_PATH
 	if bari_village != null:
 		bari_village.family_id = FAMILY_BARI_ID
+		if bari_lord != null:
+			bari_village.owner_lord_id = bari_lord.lord_id
 	if moxixi_village != null:
 		moxixi_village.family_id = FAMILY_MOXIXI_ID
+		if moxixi_lord != null:
+			moxixi_village.owner_lord_id = moxixi_lord.lord_id
+	if player_village != null:
+		player_village.family_id = FAMILY_PLAYER_ID
+		player_village.owner_lord_id = context.player_lord_id
+	if north_village != null:
+		north_village.family_id = ""
 
 	if merchant_party != null and bari_village != null and moxixi_village != null:
 		# 商队从巴里路线起点出发，首次决策后前往墨西西。
@@ -276,8 +325,28 @@ static func create_new_world(context: WorldContext) -> bool:
 	if not create_test_battle_forces(context):
 		push_error("初始测试兵力生成失败")
 		return false
+	if not initialize_fief_economy(context):
+		push_error("封地经济初始化失败")
+		return false
 
 	return context.is_valid_world()
+
+
+## 新游戏封地经济：所有村庄获得采邑储备、税收缓存与初始冒险者候选人。
+static func initialize_fief_economy(context: WorldContext) -> bool:
+	if context == null:
+		return false
+	for settlement: SettlementData in context.settlement_manager.get_all_settlements():
+		if settlement == null:
+			continue
+		if settlement.settlement_type == SettlementData.SettlementType.VILLAGE:
+			context.fief_recruitment_manager.initialize_settlement(settlement, true)
+			context.adventurer_recruitment_manager.initialize_settlement(settlement, true)
+		else:
+			settlement.fief_recruitment_capacity = 0
+			settlement.fief_recruitment_stock = 0
+			context.fief_recruitment_manager.clamp_settlement(settlement)
+	return true
 
 
 ## 调试用测试兵力：玩家 5 民兵 + 6 职业步兵（4 名骑乘）+ 玩家角色；其余三方各 3 民兵 + 2 职业步兵。
@@ -387,10 +456,18 @@ static func _populate_player_party(
 			TEST_PROMOTION_ITEM_ID, TEST_PROMOTION_ITEM_STOCK - current_tokens
 		)
 
+	var player_family := context.family_registry.get_config(FAMILY_PLAYER_ID)
 	var mounted_count: int = 0
 	for config: UnitConfig in configs:
+		var family: FamilyConfig = player_family if config.is_player_character else null
 		var unit := _create_world_unit(
-			context, party, config, null, "", 0, false
+			context,
+			party,
+			config,
+			family,
+			"",
+			0,
+			config.is_player_character
 		)
 		if unit == null:
 			return false
@@ -399,6 +476,7 @@ static func _populate_player_party(
 		# BattleScene 在运行时决定。玩家部队的领袖也通过统一字段记录。
 		if unit.is_player_character:
 			party.leader_unit_id = unit.unit_id
+			context.player_unit_id = unit.unit_id
 
 		# 前 4 名职业步兵装备马匹；其余职业步兵保持步战，不新增骑兵兵种。
 		if config.config_id == trained.config_id \
@@ -559,13 +637,14 @@ static func _create_settlement(
 	settlement_type: SettlementData.SettlementType,
 	world_position: Vector2,
 	population: int,
-	prosperity: int
+	prosperity: int,
+	faction_id: String = LOCAL_FACTION_ID
 ) -> SettlementData:
 	return context.settlement_manager.create_settlement(
 		display_name,
 		settlement_type,
 		world_position,
-		LOCAL_FACTION_ID,
+		faction_id,
 		population,
 		prosperity
 	)

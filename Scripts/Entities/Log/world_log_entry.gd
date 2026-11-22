@@ -12,6 +12,8 @@ enum EventType {
 	PLAYER_ENCOUNTER,
 	SETTLEMENT_ENTERED,
 	SETTLEMENT_EXITED,
+	FIEF_RECRUITED,
+	ADVENTURER_RECRUITED,
 }
 
 var event_type: EventType = EventType.OTHER
@@ -34,7 +36,8 @@ func to_dict() -> Dictionary:
 static func from_dict(data: Dictionary) -> WorldLogEntry:
 	var entry := WorldLogEntry.new()
 	var type_value: int = int(data.get("event_type", EventType.OTHER))
-	if type_value < int(EventType.OTHER) or type_value > int(EventType.SETTLEMENT_EXITED):
+	if type_value < int(EventType.OTHER) \
+			or type_value > int(EventType.ADVENTURER_RECRUITED):
 		type_value = int(EventType.OTHER)
 	entry.event_type = type_value as EventType
 	entry.world_time_seconds = float(data.get("world_time_seconds", 0.0))

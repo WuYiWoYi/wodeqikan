@@ -4,6 +4,98 @@
 
 ---
 
+## 2026-11-22 · 修复：多场并行战斗与 AI 离屏战斗自动结束
+
+### 变更
+
+- `BattleManager` 改为多战斗注册表：`active_battles: { battle_id: BattleSession }`、`party_battle_lookup: { party_id: battle_id }`。
+- `current_battle` 仅表示玩家当前屏幕战斗；AI 离屏战斗不再写入该字段。
+- 新增 `get_battle()`、`get_battle_for_party()`、`get_active_battles()`、`has_any_active_battles()`。
+- `start_battle_by_sides()` 删除“已有战斗即拒绝”的全局限制；只拒绝参战部队自身不可用或已参加其他战斗。玩家仍最多一场屏幕战斗。
+- `finish_battle(battle_id, result)` 按 ID 只结算/解锁/清理本场；结束 AI 战斗不触碰玩家战斗或其他 AI 战斗。
+- `tick()` 复制有效战斗快照后逐场推进；每场离屏战斗使用独立 `OffscreenBattleResolver` 与随机序列。
+- 加入接口显式传 `battle_id`：`get_join_side()`、`can_party_join()`、`try_join_battle()`、`add_reinforcement()`。
+- `OffscreenBattleResolver.count_living_sides()` 只统计至少有一名存活单位的战斗侧；一方全灭立即结束，双方全灭按平局。
+- `EncounterManager` 按双方各自所属战斗创建/加入/跳过，禁止合并不同战斗；玩家只加入实际接近且最近的战斗。
+- `AIManager._try_respond_to_battle()` 遍历全部离屏战斗，选择可加入且距离最近的一场。
+- 大地图改为 `_battle_markers: { battle_id: BattleMarker }`；参战图标按“是否参与任意进行中战斗”隐藏，结束一场只恢复该场图标。
+- `WorldLogManager` 按 `battle_id` 关联日志；`GameManager.save_game()` 使用 `has_any_active_battles()`。
+- 暂停规则不变：AI 离屏战斗不暂停世界；玩家屏幕战斗压入 `battle`；结束 AI 战斗不改变其他暂停原因。
+
+### 测试
+
+- 扩展 `battle_manager_test`、`offscreen_battle_hourly_test`、`multi_party_battle_test`、`ai_manager_test`、`world_map_battle_marker_test`，覆盖两场并行战斗、同一 tick 独立推进、0 人战斗侧不计入、一方/双方全灭、双战斗标记与独立图标恢复。
+- 更新 `battle_occupancy_ui_test`：其他战斗不再阻塞无关部队开战。
+- 回归通过玩家战斗、场景切换、存档校验与世界日志相关测试。战斗会话仍不进入存档；进行中战斗会阻止保存。
+
+---
+
+## 2026-11-22 · 修复：恢复“先移动到地点、到达后再交互”
+
+### 变更
+
+- `WorldMap.handle_left_click()` 点击地点不再直接调用 `_open_settlement()`，改为 `_request_settlement_interaction()`。
+- 新增运行时状态 `_pending_settlement_interaction_id`：记录玩家主动点击、正在前往的地点，不进入存档。
+- 新增 `SETTLEMENT_INTERACTION_RADIUS = 40.0` 与 `_check_pending_settlement_interaction()`：
+  - 远距离点击：设置 `WorldMapManager.set_party_target()`，基础倍率切回 1x，清除追逐/跟随，不暂停、不弹面板。
+  - 已在 40 像素内：允许直接打开面板。
+  - 到达检测：pending 有效、玩家可用、移动已停止、距离 ≤ 40、移动目标仍指向该地点，才消费 pending 并调用 `_open_settlement()`。
+- 普通地图点击、点击部队、切换地点目标、外部停止、进入战斗或离开大地图时清除 pending；点击另一个地点直接替换目标 ID。
+- `_open_settlement()` 仍统一负责停止部队、基础倍率 0、`ui_panel` 暂停与面板显示。
+- 不改 `WorldMapManager` 移动/到达逻辑，不改 NPC AI、遭遇与追逐规则。
+
+### 测试
+
+- 修改 `world_map_milestone6_test` 中错误的“点击即打开”期望为真实移动到达流程。
+- 新增 `settlement_interaction_test`：远距离点击、到达、路过、追逐、指令覆盖、切换地点、已在地点附近、中途停止、城堡/城镇、面板内容。
+- `village_flow_test` 增加“从村庄返回不残留 pending、不自动重开面板”断言。
+- 通过：`world_map_milestone6_test`、`settlement_interaction_test`、`world_map_input_test`、`village_flow_test`。
+
+---
+
+## 2026-11-22 · 阶段 7 第一步：封地所有权、采邑征召与村庄冒险者
+
+### 新增
+
+- `LordData` / `LordManager`：领主 ID、名称、阵营、部队、玩家领主标记、战略状态/目标、关系与存活状态；`validate()` 校验部队引用与唯一性。
+- `SettlementData` 扩展：`owner_lord_id`、`population`、`prosperity`、`tax_base`、`tax_income_per_day`、`fief_recruitment_stock/capacity/elapsed`、`adventurer_candidates`、`adventurer_refresh_elapsed`。
+- `SettlementEconomyConfig`（`Data/Settlements/settlement_economy_config.tres`）：采邑编制/储备/成本/周期、冒险者上限/刷新/费用、税收基数与 AI 阈值。
+- `TaxCalculator.compute_daily_tax()`：统一税收公式。
+- `FiefRecruitmentManager`：归属校验、储备补充、6 人成组征召、真实马匹装备、资源扣除与原子回滚。
+- `AdventurerRecruitmentManager`：每村候选人池、持久化姓名/位置/外观、世界时间刷新、1 金币招募、离开清理。
+- `AdventurerCandidateData`：`AVAILABLE` / `RECRUITED_PENDING_DEPARTURE` 状态机。
+- `WorldLogPanel`：从大地图抽出的共享日志组件，村庄右上角复用。
+- `EventBus.fief_recruited` / `adventurer_recruited` 与 `WorldLogEntry` 新事件类型。
+- `Data/Families/family_player.tres`、玩家村庄“青禾村”、`PartyIcon.show_floating_text()`。
+- `fief_adventurer_system_test`、`fief_adventurer_ui_test`。
+
+### 变更
+
+- 新游戏新增玩家领主与 NPC 家族领主，地点归属通过 `owner_lord_id` 表达；地点数量 4 → 5。
+- `player_hero.tres` 改为三级：180 HP、25 攻击、0 工资；玩家角色使用玩家家族外观。
+- 玩家地点面板新增领主/家族/人口/繁荣度/税收/采邑储备与征召按钮；村庄头人对话新增采邑征召选项。
+- `AIManager` 新增领主征召决策：低于 12 人时前往最近自有村庄征召一组，`RECRUITING` 期间跳过战术 AI。
+- `WorldSimulation` 在移动/视野后推进采邑与候选人计时。
+- 存档 Schema v3 → v4：新增 `lords`、玩家领主/角色 ID、封地与候选人字段；读档新增所有权校验。
+- `StatCalculator.STAT_KEYS` 补齐远程/身高派生字段。
+
+### 决策
+
+- D108：`owner_lord_id` 为封地归属唯一权威，玩家领主与玩家角色分离。
+- D109：税收统一由 `TaxCalculator` 计算。
+- D110：采邑成组征召全有或全无。
+- D111：冒险者候选人状态机与外观持久化。
+- D112：AI 领主征召使用 `RECRUITING` 协作状态。
+- D113：Schema v4 持久化领主/封地/候选人并校验所有权。
+
+### 验证
+
+- 全量 `Tests/SystemTests` 与 `Tests/UnitTests` 通过，包含新增 `fief_adventurer_system_test`、`fief_adventurer_ui_test`。
+- 更新期望后通过：`party_economy_ui_test`（49/57）、`milestone1_test`（13 实体）、`family_appearance_test`（3 家族）、`stat_calculator_test`、`unit_party_serialization_test`。
+- 仅执行 headless 自动测试，未做非 headless 视觉验收。
+
+---
+
 ## 2026-11-21 · 阶段 6 后续：弓箭手与远程箭矢
 
 ### 新增

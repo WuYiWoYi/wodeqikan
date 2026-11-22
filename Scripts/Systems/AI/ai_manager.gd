@@ -50,6 +50,9 @@ var _settlement_manager: SettlementManager = null
 var _faction_manager: FactionManager = null
 var _vision_manager: VisionManager = null
 var _battle_manager: BattleManager = null
+var _lord_manager: LordManager = null
+var _fief_recruitment_manager: FiefRecruitmentManager = null
+var _economy_config: SettlementEconomyConfig = null
 var _party_timer: float = 0.0
 var _lord_timer: float = 0.0
 
@@ -61,7 +64,10 @@ func setup(
 	settlement_manager: SettlementManager,
 	faction_manager: FactionManager = null,
 	vision_manager: VisionManager = null,
-	battle_manager: BattleManager = null
+	battle_manager: BattleManager = null,
+	lord_manager: LordManager = null,
+	fief_recruitment_manager: FiefRecruitmentManager = null,
+	economy_config: SettlementEconomyConfig = null
 ) -> void:
 	_unit_manager = unit_manager
 	_party_manager = party_manager
@@ -70,6 +76,11 @@ func setup(
 	_faction_manager = faction_manager
 	_vision_manager = vision_manager
 	_battle_manager = battle_manager
+	_lord_manager = lord_manager
+	_fief_recruitment_manager = fief_recruitment_manager
+	_economy_config = economy_config if economy_config != null \
+		else SettlementEconomyConfig.new()
+	_economy_config.sanitize()
 
 
 func tick(world_delta: float) -> void:
@@ -99,6 +110,9 @@ func _tick_party_tactical() -> void:
 				or party.party_id == player_party_id:
 			continue
 		if not party.is_available_for_world():
+			continue
+		# 领主正在执行封地征召时，普通巡逻/路线 AI 不得覆盖移动目标。
+		if _is_lord_recruiting(party.party_id):
 			continue
 
 		match party.ai_type:
@@ -271,16 +285,29 @@ func _chase_target(party: PartyData, target: PartyData) -> void:
 func _try_respond_to_battle(party: PartyData) -> bool:
 	if _is_in_post_battle_cooldown(party):
 		return false
-	if _battle_manager == null or _battle_manager.current_battle == null:
+	if _battle_manager == null:
 		return false
-	if _battle_manager.get_join_side(party.party_id) < 0:
+	# 已参战部队不再响应其他战场。
+	if _battle_manager.get_battle_for_party(party.party_id) != null:
 		return false
-	var battle := _battle_manager.current_battle
-	var distance := party.world_position.distance_to(battle.world_position)
-	if distance <= BATTLE_APPROACH_RADIUS:
-		_world_map_manager.set_party_target(party.party_id, battle.world_position)
-		return true
-	return false
+	# 在所有有效离屏战斗中寻找可加入且距离最近的一场。
+	var target: BattleSession = null
+	var best_distance: float = INF
+	for battle: BattleSession in _battle_manager.get_active_battles():
+		if not battle.offscreen:
+			continue
+		if _battle_manager.get_join_side(party.party_id, battle.battle_id) < 0:
+			continue
+		var distance: float = party.world_position.distance_to(battle.world_position)
+		if distance > BATTLE_APPROACH_RADIUS:
+			continue
+		if distance < best_distance:
+			best_distance = distance
+			target = battle
+	if target == null:
+		return false
+	_world_map_manager.set_party_target(party.party_id, target.world_position)
+	return true
 
 
 # ---------------------------------------------------------------------------
@@ -352,9 +379,80 @@ func _update_patrol_party(party: PartyData) -> void:
 	_world_map_manager.set_party_target(party.party_id, target)
 
 
+## 领主战略层：人数低于阈值时，前往自己的封地征召一组采邑。
+## 普通巡逻/路线 AI 在 current_state == RECRUITING 期间被跳过，避免覆盖目标。
 func _tick_lord_strategic() -> void:
-	# TODO(阶段5)：领主招募、驻防、参战与撤退等战略决策。
-	pass
+	if _lord_manager == null or _party_manager == null \
+			or _world_map_manager == null or _fief_recruitment_manager == null:
+		return
+
+	for lord: LordData in _lord_manager.get_all_lords():
+		if lord == null or not lord.is_alive or lord.is_player_lord:
+			continue
+		var party := _party_manager.get_party(lord.party_id)
+		if party == null or not party.is_available_for_world():
+			continue
+
+		if party.member_unit_ids.size() >= _economy_config.ai_lord_recruit_threshold:
+			_clear_lord_recruit_state(lord)
+			continue
+
+		var target: SettlementData = _find_owned_recruit_settlement(lord, party)
+		if target == null:
+			_clear_lord_recruit_state(lord)
+			continue
+
+		if party.world_position.distance_to(target.world_position) <= AI_ARRIVAL_RADIUS:
+			# 到达后只尝试一次；成功/失败都退出征召状态，恢复普通 AI。
+			lord.current_state = "RECRUITING"
+			lord.current_goal = "FIEF_RECRUIT"
+			lord.current_target_settlement_id = target.settlement_id
+			_fief_recruitment_manager.recruit_group(target.settlement_id, lord.lord_id)
+			_clear_lord_recruit_state(lord)
+			continue
+
+		lord.current_state = "RECRUITING"
+		lord.current_goal = "FIEF_RECRUIT"
+		lord.current_target_settlement_id = target.settlement_id
+		_world_map_manager.set_party_target(party.party_id, target.world_position)
+
+
+func _find_owned_recruit_settlement(
+	lord: LordData, party: PartyData
+) -> SettlementData:
+	if _settlement_manager == null:
+		return null
+	var nearest: SettlementData = null
+	var nearest_distance: float = INF
+	for settlement: SettlementData in _settlement_manager.get_all_settlements():
+		if settlement == null \
+				or settlement.settlement_type != SettlementData.SettlementType.VILLAGE:
+			continue
+		if settlement.owner_lord_id != lord.lord_id:
+			continue
+		if settlement.fief_recruitment_stock <= 0:
+			continue
+		var distance := party.world_position.distance_to(settlement.world_position)
+		if distance < nearest_distance:
+			nearest_distance = distance
+			nearest = settlement
+	return nearest
+
+
+func _clear_lord_recruit_state(lord: LordData) -> void:
+	if lord == null:
+		return
+	if lord.current_state == "RECRUITING" or lord.current_goal == "FIEF_RECRUIT":
+		lord.current_state = "IDLE"
+		lord.current_goal = ""
+		lord.current_target_settlement_id = ""
+
+
+func _is_lord_recruiting(party_id: String) -> bool:
+	if _lord_manager == null or party_id.is_empty():
+		return false
+	var lord: LordData = _lord_manager.get_lord_by_party_id(party_id)
+	return lord != null and lord.current_state == "RECRUITING"
 
 
 func _wrapped_index(index: int, size: int) -> int:

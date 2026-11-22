@@ -3,7 +3,7 @@
 **核心数据：** `Scripts/Systems/Combat/battle_session.gd`、`battle_unit_state.gd`
 **核心逻辑：** `Scripts/Systems/Combat/battle_manager.gd`
 **场景与表现：** `Scripts/UI/Battle/battle_scene.gd`、`Scripts/Systems/Combat/unit_actor.gd`、`unit_controller.gd`
-**状态：** 双方/多方实时战斗、按游戏小时结算的离屏战斗、360°定向矩形攻击、玩家自由攻击、武器决定攻击距离、实体碰撞、统一攻击规则、多人围攻、控制权转移与观战、双方半场列阵/接敌放松/目标分流/局部避让、克制步态/待机动画、跃马式马腿动画、长矛前后摇与攻击后保持、骑乘战斗加速、左右手武器独立层级、人物头部/头盔分离、满血隐藏生命条、1920×1080 显示、统一 BattleResult、经验/奖励与撤退已实现；复杂战术指挥、显式攻击槽位、受击动画与士气未实现
+**状态：** 双方/多方实时战斗、多场 AI 离屏战斗并行、按游戏小时结算的离屏战斗、360°定向矩形攻击、玩家自由攻击、武器决定攻击距离、实体碰撞、统一攻击规则、多人围攻、控制权转移与观战、双方半场列阵/接敌放松/目标分流/局部避让、克制步态/待机动画、跃马式马腿动画、长矛前后摇与攻击后保持、骑乘战斗加速、左右手武器独立层级、人物头部/头盔分离、满血隐藏生命条、1920×1080 显示、统一 BattleResult、经验/奖励与撤退已实现；复杂战术指挥、显式攻击槽位、受击动画与士气未实现
 
 > 本文是项目实际的战斗系统文档。任务书中提到的 `Battle_System.md` 与本文对应，未另建重复文档。
 
@@ -92,6 +92,30 @@
 - `finalized` 只在 `finish_battle()` 中置为 true；之后不得修改。
 - 结果面板使用 `apply = false` 的预览；点击返回大地图时执行最终结算。
 
+### BattleManager 多战斗注册表
+
+`BattleManager` 管理世界上所有进行中的战斗，而不是单一全局会话：
+
+| 字段 | 说明 |
+|---|---|
+| `active_battles` | `battle_id → BattleSession`，所有进行中的战斗 |
+| `party_battle_lookup` | `party_id → battle_id`，每支部队当前所属战斗 |
+| `current_battle` | **仅玩家当前屏幕战斗**；AI 离屏战斗不写入此字段 |
+
+查询接口：
+
+- `get_battle(battle_id)`：按 ID 获取进行中的战斗，已结束返回 `null`。
+- `get_battle_for_party(party_id)`：查询部队正在参与的战斗。
+- `get_active_battles()`：全部进行中战斗快照（按 `battle_id` 排序）。
+- `has_any_active_battles()`：世界上是否存在任意战斗。
+
+约束：
+
+- 世界可同时存在任意多场 AI 离屏战斗，互不阻塞。
+- 每支部队同一时间最多参与一场战斗。
+- 玩家同一时间最多参与一场屏幕战斗。
+- `current_battle` 不再承担“世界唯一战斗”的职责；任何“世界上是否还有战斗”的判断必须使用 `has_any_active_battles()`。
+
 ## 3. 进入战斗
 
 ```text
@@ -135,7 +159,9 @@
 - `offscreen = false`：屏幕战斗，暂停世界，等待 `BattleScene`。
 - `offscreen = true`：NPC 对 NPC 的离屏战斗，不暂停世界，每游戏小时结算一次伤亡。
 - 玩家参与的离屏战斗会被强制转换为屏幕战斗。
-- 同一时间只允许一场战斗；已参战部队不能再加入其他战斗。
+- 世界可同时存在多场战斗；每支部队同一时间只能参与一场战斗，已参战部队不能加入其他战斗。
+- 同一位置/部队自身可用性才是否决创建的理由；世界其他战斗不会阻塞新战斗。
+- 玩家屏幕战斗仍然只有一场，并由 `current_battle` 表示。
 
 ### 3.1 大地图交互
 
@@ -143,9 +169,12 @@
 - 面板显示部队名称、阵营、`member_unit_ids.size()` 兵力。
 - 离开：关闭面板并移除 `ui_panel` 暂停，恢复此前基础倍率。
 - 发起战斗：创建会话后先压入 `battle` 暂停，再移除 `ui_panel`，随后切换场景。
-- 已有战斗时不再显示笼统的“无法开始战斗”：
-  - 点击方是当前战斗参战方且玩家可加入 → 按钮变为“加入战斗”，调用 `try_join_battle` 复用同一场战斗；
-  - 点击方与当前战斗无关 → 禁用按钮并显示“世界上已有另一场战斗正在进行，暂时无法另开战场”；
+- 对话只检查**被点击部队自己所在的那场战斗**，世界其他战斗不会阻塞本次开战：
+  - 点击方正在某场离屏战斗且玩家可加入 → 按钮变为“加入战斗”，调用 `try_join_battle(party_id, battle_id)` 复用同一场战斗；
+  - 点击方正在屏幕战斗中 → 显示“对方正在屏幕战斗中，暂时无法开战”；
+  - 点击方正在离屏战斗中但玩家无法加入 → 显示“对方正在战斗中，靠近战场后可加入战斗”；
+  - 点击方不在任何战斗中，且玩家也不在战斗中 → 正常“发起战斗”，创建新的独立会话；
+  - 玩家自身已在战斗中 → 显示“玩家部队当前正在战斗中”并禁用按钮；
   - 对方 `IN_BATTLE` / `RETURNING` / `DISABLED` → 显示对应状态说明。
 - 空部队（例如被击溃）不再触发交互；玩家或敌方无兵时战斗按钮禁用。
 - 交互检测使用“上一帧位置 → 当前位置”线段，避免高倍速穿过目标。
@@ -341,7 +370,7 @@ BattleScene (Node2D)
 
 ### 6.2 结算顺序
 
-1. 校验 `current_battle` 与 `battle_id`，防止重复结算。
+1. 通过 `get_battle(battle_id)` 从 `active_battles` 取会话，防止无效 ID 和重复结算。
 2. 根据结果确定获胜/失败侧，生成 `BattleResultData`（预览或最终）。
 3. 基于战斗中的 `BattleUnitState` 统计各部队阵亡/存活。
 4. 结算经验：存活单位基础经验 + 获胜侧额外经验；通过 `UnitManager.add_exp()` 升级。
@@ -350,7 +379,7 @@ BattleScene (Node2D)
    - 存活：`UnitData.current_hp = battle_hp`（clamp 到 `[0, max_hp]`）。
    - 阵亡：`current_hp = 0`，经 `PartyManager.remove_member()` 清空归属，再 `UnitManager.remove_unit()` 删除数据，广播 `unit_died`。
 7. 解锁部队：有存活成员的恢复为 `AVAILABLE`，全员阵亡的置为 `DISABLED`；清空当前命令与移动目标。
-8. 将 `BattleResultData` 标记为 finalized，保存到 `session.final_result`；清理 `current_battle`。
+8. 将 `BattleResultData` 标记为 finalized，保存到 `session.final_result`；从 `active_battles` 与 `party_battle_lookup` 中只移除本场战斗，若它是玩家屏幕战斗再清理 `current_battle`。
 9. 移除 `battle` 暂停原因，恢复此前世界时间状态；广播 `battle_finished`。
 10. 场景控制器切换回大地图。
 
@@ -393,7 +422,7 @@ BattleScene (Node2D)
 - 屏幕内战斗压入 `battle` 暂停原因，WorldTime = 0；战斗场景用物理帧独立推进。
 - 玩家遭遇对话使用独立的 `encounter_dialogue` 暂停原因；进入战斗后移除，战斗暂停接管。
 - `WorldContext` 在战斗期间保持存在，参战部队锁定。
-- `GameManager.save_game()` 在 `current_battle != null` 时返回 `ERR_BUSY`，禁止战斗中存档。
+- `GameManager.save_game()` 在 `has_any_active_battles()` 为真时返回 `ERR_BUSY`，禁止任意战斗（包括 AI 离屏战斗）期间存档，避免静默丢失进行中的战斗。
 - `BattleSession` 不进入存档；不改变存档 Schema。
 
 ## 8. 中途加入
@@ -401,11 +430,11 @@ BattleScene (Node2D)
 ```text
 其他部队进入战斗区域
   → 检查距离 <= JOIN_RADIUS(60) 且部队可用、未参战、有存活士兵
-  → get_join_side(party_id) 根据 FactionManager 关系选择战斗侧
+  → get_join_side(party_id, battle_id) 根据 FactionManager 关系选择战斗侧
       ├── 对某侧所有成员均无敌对关系，且对另一侧存在敌对 → 加入该侧
       ├── 对现有所有侧都敌对 → 新建独立战斗侧
       └── 与任何一方都没有敌对关系 → 不加入
-  → try_join_battle(party_id)
+  → try_join_battle(party_id, battle_id)
       ├── 部队锁定为 IN_BATTLE
       ├── 为存活成员创建 BattleUnitState
       ├── 加入 participants / side_unit_ids
@@ -414,17 +443,22 @@ BattleScene (Node2D)
 ```
 
 - `BattleManager.add_reinforcement(party_id, battle_id)` 复用 `try_join_battle()`。
-- 同一部队不能同时参与两场战斗；`current_battle` 全局只允许一个会话。
-- AI 的 `_try_respond_to_battle()` 会先接近附近可加入的离屏战斗，再执行自身追击/巡逻逻辑。
+- 加入接口必须显式传入 `battle_id`，禁止在多场战斗环境下通过 `current_battle` 猜测目标战斗。
+- 同一部队不能同时参与两场战斗：`party_battle_lookup` 与 `get_battle_for_party()` 是唯一归属判断。
+- AI 的 `_try_respond_to_battle()` 遍历全部离屏战斗，选择可加入且距离最近的一场接近，实际加入仍由 EncounterManager 处理。
+- EncounterManager 的两支部队若已分别处于不同战斗，不会合并会话，也不会让任何一方同时参战。
 
 ## 9. 离屏战斗（按游戏小时结算）
 
 玩家未参与的 NPC 对 NPC 战斗不创建小地图场景，使用 `BattleSession` + `BattleUnitState` 数据模拟：
 
 - `start_battle(..., offscreen = true)` 不压入 `battle` 暂停，世界继续推进。
-- `WorldSimulation.on_world_tick` 调用 `BattleManager.tick(delta)`；累计满 1 个游戏小时
+- `WorldSimulation.on_world_tick` 调用 `BattleManager.tick(delta)`；它先复制全部有效战斗快照，再逐场推进。
+- 每场离屏战斗各自累计世界时间，满 1 个游戏小时
   （`OffscreenBattleConfig.settlement_interval_world_seconds = 6` 世界秒）后执行一次伤亡结算。
-- 只有 `offscreen == true` 的战斗会推进小时结算；屏幕战斗期间世界暂停，两者互斥。
+- 只有 `offscreen == true` 的战斗会推进小时结算；屏幕战斗期间世界暂停，其结算由 BattleScene 驱动。
+- 某场战斗结束并删除后，本次 tick 继续处理其他战斗，不提前退出。
+- 每场离屏战斗拥有独立 `OffscreenBattleResolver` 与随机序列；一场战斗的创建、结算或结束不会改变其他战斗的随机状态。固定 `random_seed` 时仍可稳定复现。
 - 每次结算都写入 `BattleUnitState`；阵亡单位立即从 `PartyData.member_unit_ids` 移除，但 `UnitData` 保留到最终结算，避免提前丢失战利品与阵亡事件；最终统一走 `finish_battle()` 写回、删除阵亡单位、发放经验/奖励并解锁部队。
 - 同一场战斗只结算一次；达到一方全灭、平局或 48 小时安全上限时结束。
 - 战斗期间参战部队锁定在大地图上，第三方可以接近并中途加入。
@@ -463,10 +497,12 @@ BattleScene (Node2D)
 
 ### 9.2 结束与结果
 
-- 每次小时结算后检查存活战斗侧：
-  - 只剩一个侧 → 该侧获胜；
-  - 所有侧均无存活单位 → 平局；
+- 每次小时结算后检查存活战斗侧。存活侧只统计至少拥有一名 `alive == true` 且 `battle_hp > 0` 单位的战斗侧，0 人战斗侧不计入：
+  - 只剩一个侧 → 该侧获胜，立即结束；
+  - 所有侧均无存活单位 → 平局，立即结束；
+  - 多于一个侧存活 → 继续战斗；
   - 达到 `max_settlement_hours`（默认 48）仍有多侧存活 → 比较剩余总战力，最高者获胜；并列则平局。
+- 不得要求双方都全灭才结束；一方全灭即按上述规则立即结算。
 - 结束统一调用 `finish_battle()`，生成 `BattleResultData`，写回存活 HP、移除阵亡单位、发放经验与玩家奖励（仅玩家参与且获胜）。
 - 离屏战斗的胜负侧索引仍然写入 `winning_side_index`；0/1 使用旧 `ATTACKER_VICTORY` / `DEFENDER_VICTORY`，其他侧使用 `SIDE_VICTORY`。
 
@@ -511,8 +547,11 @@ BattleScene (Node2D)
 | 玩家单角色控制 | 已实现（其余友军 AI） |
 | 同侧不互相攻击 | 已实现（按战斗侧构建敌人列表） |
 | 自动索敌 / 移动 / 攻击 / 死亡 | 已实现 |
-| 单场战斗禁止存档 | 已实现 |
-| 离屏 AI 对 AI 按小时结算 | 已实现（每游戏小时伤亡、战力/等级/骑乘/随机、48 小时上限） |
+| 战斗中禁止存档 | 已实现（检查全部进行中战斗，含 AI 离屏战斗） |
+| 多场战斗并行 | 已实现（`active_battles` / `party_battle_lookup`；AI 离屏战斗互不阻塞，玩家屏幕战斗仍只有一场） |
+| 离屏 AI 对 AI 按小时结算 | 已实现（每游戏小时伤亡、战力/等级/骑乘/随机、48 小时上限；每场独立 Resolver） |
+| 一方全灭立即结束 | 已实现（存活侧只统计有存活单位的战斗侧，0 人不计入） |
+| 大地图多战斗标记 | 已实现（按 `battle_id` 独立创建/更新/删除，参战图标只按自身战斗隐藏） |
 | 战斗摄像机跟随/自由视角 | 已实现（共享 `SceneCameraRig`，F 切换，战场边界） |
 | 左右手武器独立层级 | 已实现（右手 -10 / 左手 -45，左手低于马头） |
 | 人物头部与头盔分离 | 已实现（独立 Head / Helmet 部件；装备视觉按 `EquipmentConfig` 注入） |

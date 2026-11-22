@@ -113,12 +113,26 @@ func _test_two_side_regression() -> void:
 		and _bandit.battle_state == PartyData.BattleState.IN_BATTLE,
 		"双方部队被锁定"
 	)
-	_check(
-		_battle.start_battle(
-			[_guard.party_id], [_raider.party_id], Vector2.ZERO
-		) == null,
-		"已有战斗时拒绝创建第二场战斗"
+	var independent := _battle.start_battle(
+		[_guard.party_id], [_raider.party_id], Vector2(200.0, 200.0), true
 	)
+	_check(
+		independent != null,
+		"玩家战斗进行中仍可在其他位置创建独立 AI 离屏战斗"
+	)
+	_check(
+		_battle.get_active_battles().size() == 2,
+		"玩家屏幕战斗与 AI 离屏战斗同时存在"
+	)
+	if independent != null:
+		_check(
+			_battle.abort_battle(independent.battle_id),
+			"中止独立 AI 离屏战斗"
+		)
+		_check(
+			_battle.get_battle(session.battle_id) == session,
+			"结束 AI 战斗不影响玩家屏幕战斗"
+		)
 	_check(_battle.abort_battle(session.battle_id), "中止双方战斗")
 
 
@@ -131,8 +145,14 @@ func _test_friendly_join() -> void:
 	if session == null:
 		return
 	_guard.world_position = Vector2(1040.0, 1000.0)
-	_check(_battle.can_party_join(_guard.party_id), "治安队可加入商队一方")
-	_check(_battle.try_join_battle(_guard.party_id), "治安队加入战斗")
+	_check(
+		_battle.can_party_join(_guard.party_id, session.battle_id),
+		"治安队可加入商队一方"
+	)
+	_check(
+		_battle.try_join_battle(_guard.party_id, session.battle_id),
+		"治安队加入战斗"
+	)
 	_check(
 		session.get_side_of_party(_guard.party_id)
 		== session.get_side_of_party(_merchant.party_id),
@@ -157,10 +177,13 @@ func _test_neutral_cannot_join() -> void:
 		return
 	_neutral.world_position = Vector2(1020.0, 1000.0)
 	_check(
-		_battle.get_join_side(_neutral.party_id) < 0,
+		_battle.get_join_side(_neutral.party_id, session.battle_id) < 0,
 		"与任何一方都无敌对关系的中立部队不能加入"
 	)
-	_check(not _battle.try_join_battle(_neutral.party_id), "中立部队加入失败")
+	_check(
+		not _battle.try_join_battle(_neutral.party_id, session.battle_id),
+		"中立部队加入失败"
+	)
 	_check(not session.is_party_involved(_neutral.party_id), "中立部队未进入参战列表")
 	_check(_battle.abort_battle(session.battle_id), "中止中立加入测试")
 
@@ -174,9 +197,12 @@ func _test_third_side_join() -> void:
 	if session == null:
 		return
 	_raider.world_position = Vector2(1030.0, 1000.0)
-	var side := _battle.get_join_side(_raider.party_id)
+	var side := _battle.get_join_side(_raider.party_id, session.battle_id)
 	_check(side == 2, "与双方都敌对的部队获得独立第三方战斗侧")
-	_check(_battle.try_join_battle(_raider.party_id), "第三方加入战斗")
+	_check(
+		_battle.try_join_battle(_raider.party_id, session.battle_id),
+		"第三方加入战斗"
+	)
 	_check(session.get_side_count() == 3, "战斗侧数量增加到 3")
 	_check(
 		session.get_side_of_party(_raider.party_id)
@@ -197,10 +223,19 @@ func _test_distance_and_duplicate_rules() -> void:
 	if session == null:
 		return
 	_guard.world_position = Vector2(1000.0 + BattleManager.JOIN_RADIUS + 10.0, 1000.0)
-	_check(not _battle.can_party_join(_guard.party_id), "超出加入半径不能加入")
+	_check(
+		not _battle.can_party_join(_guard.party_id, session.battle_id),
+		"超出加入半径不能加入"
+	)
 	_guard.world_position = Vector2(1020.0, 1000.0)
-	_check(_battle.try_join_battle(_merchant.party_id) == false, "已在战斗中的部队不能重复加入")
-	_check(_battle.get_join_side(_merchant.party_id) < 0, "已参战部队没有可加入侧")
+	_check(
+		_battle.try_join_battle(_merchant.party_id, session.battle_id) == false,
+		"已在战斗中的部队不能重复加入"
+	)
+	_check(
+		_battle.get_join_side(_merchant.party_id, session.battle_id) < 0,
+		"已参战部队没有可加入侧"
+	)
 	_check(
 		not session.is_party_involved(_guard.party_id),
 		"未成功加入的部队不在参战列表"
@@ -217,11 +252,14 @@ func _test_multi_side_auto_resolve() -> void:
 	if session == null:
 		return
 	_raider.world_position = Vector2(1030.0, 1000.0)
-	_check(_battle.try_join_battle(_raider.party_id), "第三方加入自动结算战斗")
+	_check(
+		_battle.try_join_battle(_raider.party_id, session.battle_id),
+		"第三方加入自动结算战斗"
+	)
 	_check(session.get_side_count() == 3, "自动结算前存在 3 个战斗侧")
 
 	_check(_battle.resolve_current_battle_now(), "多方离屏战斗按小时推进并结算")
-	_check(_battle.current_battle == null, "多方离屏战斗自动结算")
+	_check(_battle.get_battle(session.battle_id) == null, "多方离屏战斗自动结算")
 	_check(session.status == BattleSession.Status.ENDED, "战斗会话标记为结束")
 	for party: PartyData in [_merchant, _bandit, _raider]:
 		_check(
@@ -319,9 +357,9 @@ func _make_party(faction_id: String, party_name: String, unit_count: int) -> Par
 
 
 func _reset_positions() -> void:
-	if _battle.current_battle != null:
+	for session: BattleSession in _battle.get_active_battles():
 		_battle.finish_battle(
-			_battle.current_battle.battle_id, BattleSession.BattleResult.ABORTED
+			session.battle_id, BattleSession.BattleResult.ABORTED
 		)
 	for party: PartyData in [_player, _merchant, _guard, _bandit, _raider, _neutral]:
 		party.battle_state = PartyData.BattleState.AVAILABLE
@@ -355,10 +393,11 @@ func _check(condition: bool, message: String) -> void:
 
 
 func _cleanup() -> void:
-	if _battle != null and _battle.current_battle != null:
-		_battle.finish_battle(
-			_battle.current_battle.battle_id, BattleSession.BattleResult.ABORTED
-		)
+	if _battle != null:
+		for session: BattleSession in _battle.get_active_battles():
+			_battle.finish_battle(
+				session.battle_id, BattleSession.BattleResult.ABORTED
+			)
 	GameManager.world_context = null
 	GameManager.player_party_id = ""
 	TimeManager.stop_session()

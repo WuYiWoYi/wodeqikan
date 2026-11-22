@@ -1,7 +1,7 @@
 # 我的骑砍 · 项目总索引
 
-**文档版本：** V0.27（阶段 6 后续：弓箭手、远程箭矢与高度命中）
-**更新日期：** 2026-11-21
+**文档版本：** V0.28（阶段 7 第一步：封地所有权、采邑征召与村庄冒险者）
+**更新日期：** 2026-11-22
 **引擎：** Godot 4.6.1 / GDScript
 **源规划：** [2D 中世纪沙盒战略游戏核心架构设计与开发规划 V0.2](../md/2D%20中世纪沙盒战略游戏核心架构设计与开发规划.md)
 
@@ -42,8 +42,12 @@ WorldContext（一局游戏，跨场景常驻）
 ├── ItemManager      消耗品/杂物静态配置
 ├── PartyManager
 ├── SettlementManager
+├── LordManager      领主与封地归属
+├── FiefRecruitmentManager     采邑储备/征召
+├── AdventurerRecruitmentManager 村庄候选人
 ├── FactionManager   阵营关系
 ├── FamilyRegistry   家族视觉配置（旗帜/罩袍/缨饰）
+├── SettlementEconomyConfig 采邑/税收/候选人参数（只读）
 ├── VisionManager    视野查询
 ├── WorldMapManager  移动/跟随
 ├── EncounterManager 统一遭遇/中途参战
@@ -79,8 +83,10 @@ WorldContext（一局游戏，跨场景常驻）
 | [Systems/Party_System.md](Systems/Party_System.md) | 部队数据、成员关系、编队接口 |
 | [Systems/Combat_System.md](Systems/Combat_System.md) | BattleSession、援军、战斗结算 |
 | [Systems/AI_System.md](Systems/AI_System.md) | 单位/部队/领主三层 AI 与调度频率 |
-| [Systems/Lord_System.md](Systems/Lord_System.md) | AI 领主数据与战略决策 |
-| [Systems/Settlement_System.md](Systems/Settlement_System.md) | 村庄/城镇/城堡数据与交互 |
+| [Systems/Lord_System.md](Systems/Lord_System.md) | 领主数据、封地归属与 AI 战略决策 |
+| [Systems/Settlement_System.md](Systems/Settlement_System.md) | 村庄/城镇/城堡数据、封地信息与交互 |
+| [Systems/Fief_Recruitment_System.md](Systems/Fief_Recruitment_System.md) | 采邑储备、成组征召、资源成本与 AI 征召 |
+| [Systems/Adventurer_Recruitment_System.md](Systems/Adventurer_Recruitment_System.md) | 村庄冒险者候选人、刷新、1 金币招募与清理 |
 | [Systems/Dialogue_System.md](Systems/Dialogue_System.md) | 对话数据、条件、效果与时间规则 |
 | [Systems/Village_System.md](Systems/Village_System.md) | 村庄场景、NPC、对话 UI、越界返回 |
 | [Systems/Inventory_Economy_System.md](Systems/Inventory_Economy_System.md) | 背包、马匹、金币、工资、三级兵种与晋升 |
@@ -125,7 +131,8 @@ WorldContext（一局游戏，跨场景常驻）
 - 阶段 4：部分完成。双方/多方实时战斗、按小时离屏结算、中途加入、玩家角色、控制权转移、基础队形、结果/经验/奖励已实现；高级指挥/士气/正式动画未开始。
 - 阶段 5（战斗结算与战后处理）：完成。统一 BattleResult、玩家角色、攻击判定/多人围攻、临时部件美术、骑乘系统、控制权转移、经验/奖励、撤退与返回大地图均已自动化验证。
 - 阶段 6（合并原阶段 6/7）：村庄小场景与交互、追逐焦点保护、背包/马匹、金币与工资、三级兵种/晋升、世界日历与大地图部队 UI 已实现；城镇/城堡小场景、商店、招募、工资扣除未实现。
-- 阶段 5（原路线图 AI 领主）、阶段 7：未开始。
+- 阶段 5（原路线图 AI 领主）：部分完成。领主数据/仓储、玩家领主分离、封地归属与 AI 征召已实现；战略攻击/撤退与性格权重未开始。
+- 阶段 7：部分完成。封地所有权、采邑征召、村庄人口/税收缓存、冒险者候选人、共享日志与 Schema v4 已实现；任务、交易、训练、外交、城堡攻防、领地管理、军团与世界战争未开始。
 - 阶段 5（动作表现与攻击体验）：完成。协调步兵步态、马匹整体动态、玩家自由空挥、长矛攻击后保持 4 秒、骑乘战斗速度 0.84、部署间距约 906 已自动化与动画截图验证。
 - 阶段 5（待机与动作表现二次优化）：完成。克制腿幅、部队 UI 待机动画、跃马式前后腿分组、长矛方向性前摇/戳击已自动化与真实渲染验证。
 - 最近验证：克制步态/跃马动画、UI 待机动画、长矛前摇/戳击/保持、自由攻击、骑乘战斗速度、战斗结算与 Milestone 2 全流程全部通过。
@@ -142,6 +149,7 @@ WorldContext（一局游戏，跨场景常驻）
 - 2026-11-21 阶段 6 后续（统一部队架构与遭遇交互）：`PartyData` 增加 `control_type`/`party_kind`/`banner_texture_path`，旧存档读取时推断且不改位置/路线/成员；`AIManager` 只调度 AI 控制部队；遭遇面板迁至屏幕下方并复用 `UnitVisual` 显示领袖头像/默认剪影；`EncounterReason` 区分 `ENEMY_PURSUIT` 等来源，敌对追击成功时禁止离开；对白来自 `EncounterTextConfig`。
 - 2026-11-21 阶段 6 后续（村庄表现/玩家扩编/战斗集群）：部队标记恢复 18/30 原尺寸；村庄改用半径 32、旗帜 76 的独立圆形标记，名称固定显示在标记正上方；玩家初始部队扩编为 12 人（1 英雄 + 5 民兵 + 6 职业步兵，4 名骑乘）；小地图战斗初始阵线间距 1100，双方半场列阵、接敌后队形放松，并通过目标占用、包围角度与局部分离减少扎堆。
 - 2026-11-21 阶段 6 后续（大地图表现/AI 恢复/存档/战斗 UI）：`SettlementIcon` 恢复原始村庄美术，家族徽章与名称合并为固定屏幕组合（徽章在左）；战斗结束给存活部队 30 世界秒运行时交战冷却并恢复路线/巡逻，不重置移动目标；存档 Schema v3 持久化世界日志，读档清理 `IN_BATTLE`/失效追击并校验领袖；玩家胜利结果面板延迟 3 物理秒；战斗汇总按 `side_index` 分列；悬浮默认只显示名称，按住左 Alt 显示总人数与兵种构成。
+- 2026-11-22 阶段 7 第一步：新增 `LordData`/`LordManager`、封地 `owner_lord_id` 与玩家领主/玩家角色分离；新游戏新增玩家村庄“青禾村”与玩家家族，玩家角色改为 180 HP/25 攻击；每村采邑储备 4、6 人成组征召、真实马匹装备、按人口/繁荣度补充、失败原子回滚；村庄最多 5 名冒险者候选人，1 金币招募并持久化外观；玩家地点面板/头人对话共用统一入口；AI 领主低于 12 人时前往自有封地征召；`TaxCalculator` 统一税收；世界日志新增采邑/冒险者事件并在村庄复用共享面板；存档 Schema v4 持久化领主/封地/候选人并校验所有权。
 
 详见 [Development/Current_Status.md](Development/Current_Status.md)。
 
@@ -207,6 +215,8 @@ Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/world_
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/world_log_ui_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/neutral_party_interaction_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/encounter_dialogue_ui_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/fief_adventurer_system_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/fief_adventurer_ui_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/player_party_expansion_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/battle_cluster_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/battle_occupancy_ui_test.tscn

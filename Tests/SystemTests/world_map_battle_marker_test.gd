@@ -126,7 +126,10 @@ func _run() -> void:
 
 	# 治安队加入商队一方：新部队自动进入同侧分组。
 	_guard.world_position = _battle_position + Vector2(20.0, 0.0)
-	_check(_context.battle_manager.try_join_battle(_guard.party_id), "治安队加入已有战斗")
+	_check(
+		_context.battle_manager.try_join_battle(_guard.party_id, session.battle_id),
+		"治安队加入已有战斗"
+	)
 	await _wait_frames(2)
 	summary = str(_map.call("get_battle_summary_text"))
 	_check(summary.contains(_guard.party_name), "新参战部队自动加入汇总")
@@ -169,6 +172,103 @@ func _run() -> void:
 		)
 		_check(_map.call("get_battle_summary_text") == "", "三方战斗结束后清空汇总")
 
+	await _test_parallel_battle_markers()
+
+
+## 两场同时进行的离屏战斗各自拥有独立标记与图标隐藏范围。
+func _test_parallel_battle_markers() -> void:
+	_merchant.world_position = _battle_position
+	_bandit.world_position = _battle_position + Vector2(40.0, 0.0)
+	var second_position := Vector2(2400.0, 700.0)
+	# 使用已在大地图上有图标的部队，便于验证两场战斗各自隐藏参战图标。
+	var east_bandits := _find_party(WorldInitializer.EAST_BANDIT_PARTY_NAME)
+	_check(east_bandits != null and _icon(east_bandits) != null, "找到第二场战斗部队图标")
+	if east_bandits == null:
+		return
+	_guard.world_position = second_position
+	east_bandits.world_position = second_position + Vector2(40.0, 0.0)
+	var first := _context.battle_manager.start_battle(
+		[_merchant.party_id], [_bandit.party_id], _battle_position, true
+	)
+	var second := _context.battle_manager.start_battle(
+		[_guard.party_id], [east_bandits.party_id], second_position, true
+	)
+	_check(first != null and second != null, "同时创建两场离屏战斗")
+	if first == null or second == null:
+		return
+	await _wait_frames(4)
+
+	_check(_count_markers() == 2, "大地图同时显示两个战斗标记")
+	var marker_first := _map.call(
+		"get_battle_marker_for", first.battle_id
+	) as BattleMarker
+	var marker_second := _map.call(
+		"get_battle_marker_for", second.battle_id
+	) as BattleMarker
+	_check(
+		marker_first != null and marker_second != null
+		and marker_first != marker_second,
+		"两个战斗标记分别对应各自会话"
+	)
+	_check(
+		marker_first != null and marker_first.battle_id == first.battle_id
+		and marker_second != null and marker_second.battle_id == second.battle_id,
+		"战斗标记 ID 与会话一致"
+	)
+	_check(
+		not _icon(_merchant).visible and not _icon(_bandit).visible
+		and not _icon(_guard).visible and not _icon(east_bandits).visible,
+		"两场战斗的参战部队图标全部隐藏"
+	)
+	_check(_icon(_player).visible, "未参战部队图标保持显示")
+	_check(
+		marker_first != null
+		and marker_first.get_count_text() == str(_session_alive(first))
+		and marker_second != null
+		and marker_second.get_count_text() == str(_session_alive(second)),
+		"每个标记显示本场战斗自己的存活人数"
+	)
+
+	_context.battle_manager.finish_battle(
+		first.battle_id, BattleSession.BattleResult.ABORTED
+	)
+	await _wait_frames(4)
+	_check(_count_markers() == 1, "结束第一场后只删除对应标记")
+	_check(
+		_map.call("get_battle_marker_for", first.battle_id) == null
+		and _map.call("get_battle_marker_for", second.battle_id) != null,
+		"第二场标记仍然存在"
+	)
+	_check(
+		_icon(_merchant).visible and _icon(_bandit).visible,
+		"第一场存活部队恢复普通图标"
+	)
+	_check(
+		not _icon(_guard).visible and not _icon(east_bandits).visible,
+		"第二场参战部队图标仍然隐藏"
+	)
+
+	_context.battle_manager.finish_battle(
+		second.battle_id, BattleSession.BattleResult.ABORTED
+	)
+	await _wait_frames(4)
+	_check(_count_markers() == 0, "第二场结束后清除全部标记")
+	_check(
+		_icon(_guard).visible and _icon(east_bandits).visible,
+		"第二场结束后恢复其部队图标"
+	)
+
+
+func _session_alive(session: BattleSession) -> int:
+	if session == null:
+		return 0
+	var count: int = 0
+	for unit_id: String in session.get_all_unit_ids():
+		var state := session.get_unit_state(unit_id)
+		if state != null and state.alive and state.battle_hp > 0:
+			count += 1
+	return count
+
 
 func _wait_frames(count: int) -> void:
 	for i: int in range(count):
@@ -201,11 +301,11 @@ func _check(condition: bool, message: String) -> void:
 
 
 func _cleanup() -> void:
-	if _context != null and _context.battle_manager.current_battle != null:
-		_context.battle_manager.finish_battle(
-			_context.battle_manager.current_battle.battle_id,
-			BattleSession.BattleResult.ABORTED
-		)
+	if _context != null:
+		for session: BattleSession in _context.battle_manager.get_active_battles():
+			_context.battle_manager.finish_battle(
+				session.battle_id, BattleSession.BattleResult.ABORTED
+			)
 	TimeManager.stop_session()
 	TimeManager.clear_pauses()
 	GameManager.world_context = null

@@ -70,21 +70,16 @@ func _run() -> void:
 	_check(panel != null and panel.visible, "与墨西西骑士的对话正常打开")
 	if panel == null or fight_button == null or status == null:
 		return
-	_check(fight_button.disabled, "已有战斗时禁止另开战场")
+	# 世界其他位置存在战斗，不应阻塞玩家与无关部队开战。
+	_check(not fight_button.disabled, "世界上其他战斗不会阻塞另开战场")
 	_check(
-		status.text.contains("另一场战斗正在进行"),
-		"面板说明真实原因（另一场战斗正在进行）"
+		not status.text.contains("另一场战斗正在进行"),
+		"面板不再提示全局战斗占用"
 	)
 	_check(fight_button.text == "发起战斗", "非参战方按钮保持发起战斗")
-
-	var session: BattleSession = _map.begin_battle_with_party()
-	_check(session == null, "绕过按钮直接调用也会被拒绝")
 	_check(
-		status.text.contains("另一场战斗正在进行"),
-		"拒绝后仍显示具体原因，而不是笼统提示"
-	)
-	_check(
-		_context.battle_manager.current_battle == active,
+		_context.battle_manager.get_battle(active.battle_id) == active
+		and _context.battle_manager.get_active_battles().size() == 1,
 		"原有离屏战斗不受影响"
 	)
 

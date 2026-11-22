@@ -29,3 +29,13 @@ signal player_encounter_requested(
 )
 signal player_battle_interaction_requested(interaction_id: String, battle_id: String)
 signal unit_died(unit_id: String, party_id: String)
+
+## 封地征召成功的事实。招募方、村庄与组数由业务接口产生，不来自按钮本身。
+signal fief_recruited(
+	recruiter_party_id: String,
+	settlement_id: String,
+	groups: int,
+	is_player_recruiter: bool
+)
+## 普通冒险者被玩家招募成功的事实。
+signal adventurer_recruited(settlement_id: String, unit_id: String, unit_name: String)

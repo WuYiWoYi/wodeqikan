@@ -114,9 +114,19 @@ func settle_hour(session: BattleSession, unit_manager: UnitManager) -> Dictionar
 	return result
 
 
-## 当前存活战斗侧数量。
+## 当前存活战斗侧数量。只有至少存在一名存活单位的战斗侧才计入。
+## 例如 A 方 0 人、B 方 5 人时应返回 1，而不是统计字典的条目数 2。
 func count_living_sides(session: BattleSession) -> int:
-	return _count_living_by_side(session).size()
+	if session == null:
+		return 0
+	var count: int = 0
+	for side_index: int in session.get_side_indices():
+		for unit_id: String in session.get_side_unit_ids(side_index):
+			var state := session.get_unit_state(unit_id)
+			if state != null and state.alive and state.battle_hp > 0:
+				count += 1
+				break
+	return count
 
 
 ## 达到安全上限时按剩余战力选择获胜侧；返回 -1 表示平局。

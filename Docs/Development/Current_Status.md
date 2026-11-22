@@ -1,8 +1,8 @@
 # 当前开发状态
 
-**更新日期：** 2026-11-21
-**当前阶段：** 阶段 6 后续 · 弓箭手与远程箭矢完成
-**整体状态：** 三级弓箭手接入现有 UnitData/UnitController；弓与箭临时美术、抛物线箭矢、高度命中与自然射失完成；AI 与玩家共用固定终点发射入口和 3 秒冷却；新游戏玩家部队扩编到 15 人（含 3 名弓箭手）；远程与近战/存档相关测试通过
+**更新日期：** 2026-11-22
+**当前阶段：** 阶段 7 第一步 · 封地所有权、采邑征召与村庄冒险者完成
+**整体状态：** 领主/封地归属、玩家领主与玩家角色分离、每村采邑储备与按人口/繁荣度补充、6 人成组征召与原子回滚、AI 领主征召、每村最多 5 名冒险者候选人及 1 金币招募、共享世界日志与大地图浮动提示完成；地点交互恢复“点击设置移动目标、到达后停止/暂停/打开面板”；战斗系统支持多场 AI 离屏战斗并行、单场独立推进/结算、一方全灭立即结束、大地图多战斗标记；Schema v4；相关自动化测试通过
 
 ---
 
@@ -28,6 +28,7 @@
 | 6 村庄场景、交互与部队管理 | 完成 | 村庄小场景、对话、追逐保护、背包/马匹、金币/工资、三级兵种/晋升、世界日历、大地图部队 UI |
 | 6 大地图战斗与小地图视角 | 完成 | 统一摄像机/自由视角、按小时离屏结算、追击接触修复、战斗单标记与多方汇总 UI |
 | 6 世界日志、美术层级与战斗表现 | 完成 | 左下角世界日志、左右手独立层级、头部/头盔分离、中立部队不自动打断、满血隐藏生命条 |
+| 7 第一步 封地/采邑/冒险者 | 完成 | 领主与封地所有权、玩家领主/角色分离、采邑储备与成组征召、冒险者候选人、AI 领主征召、共享日志、Schema v4 |
 | 6 后续 · 统一部队架构与遭遇交互 | 完成 | 统一 Party 控制类型/类型标识、底部 NPC 遭遇对话、领袖头像/默认剪影、遭遇原因、ENEMY_PURSUIT 禁止离开、旧存档安全推断 |
 | 6 后续 · 村庄表现/玩家扩编/战斗集群 | 完成 | 部队标记恢复原尺寸、村庄圆形标记放大、名称位于上方、玩家 12 人、初始部署距离 1100、半场列阵/接敌放松/目标分流/局部避让 |
 | 6 后续 · 大地图表现/AI 恢复/存档/战斗 UI | 完成 | 村庄原始美术 + 徽章名称组合、AI 战后恢复与冷却、Schema v3 世界日志与读档清理、胜利 3 秒延迟、按 side_index 分列、左 Alt 详细悬浮 |
@@ -1101,7 +1102,9 @@
 - 阵型编辑 UI 与完整战术指挥。
 - 集群参数仍为集中常量，需实机观察后微调（KI404）。
 
-## 8.15 战斗占用提示修复
+## 8.15 战斗占用提示修复（已被 §8.20 取代）
+
+> 本节的“全局单战斗”前提已由 §8.20 取消；以下内容仅作历史记录。
 
 ### 问题
 
@@ -1117,7 +1120,7 @@
 - 目标 `IN_BATTLE` / `RETURNING` / `DISABLED` 和玩家自身不可参战时显示对应状态，不再复用同一句模糊提示。
 - `begin_battle_with_party()` 增加同样的分支；即使绕过按钮直接调用，也会拒绝并在面板内写明原因。
 - 加入路径复用 `BattleManager.try_join_battle()`，不新建战斗；成功后的暂停顺序仍为“先压入 battle，再移除 ui_panel”。
-- `BattleManager` 的“一场战斗”规则未改变；本修复只解决提示与入口问题。
+- ~~`BattleManager` 的“一场战斗”规则未改变；本修复只解决提示与入口问题。~~（§8.20 已取消全局单战斗限制。）
 
 ### 测试
 
@@ -1220,6 +1223,126 @@
 - 移动目标预判、齐射/集火、独立弓手线与战术保护。
 - 正式弓/箭美术与瞄准指示线。
 
+## 8.18 阶段 7 第一步 · 封地所有权、采邑征召与村庄冒险者
+
+### 数据与配置
+
+- 新增 `LordData` / `LordManager`：`lord_id`、`display_name`、`faction_id`、`party_id`、`is_player_lord`、`current_state`、`current_target_settlement_id`、关系与存活状态，随存档往返。
+- `SettlementData` 扩展：`owner_lord_id`、`population`、`prosperity`、`tax_base`、`tax_income_per_day`、`fief_recruitment_stock/capacity/elapsed`、`adventurer_candidates`、`adventurer_refresh_elapsed`。
+- 新增 `SettlementEconomyConfig`（`Data/Settlements/settlement_economy_config.tres`）：每组 6 人、储备上限 4、初始 4、骑乘马匹、人口/繁荣度成本、补充周期 144 秒、冒险者上限 5/刷新 144 秒/费用 1 金币/初始 2、税收基数 20、AI 征召阈值 12。
+- 新增 `TaxCalculator.compute_daily_tax(population, prosperity, tax_base)`，UI 不重复公式。
+- `player_hero.tres` 改为三级：180 HP、25 攻击、0 工资；新增玩家家族 `family_player.tres` 与玩家村庄“青禾村”。
+
+### 封地归属与新游戏
+
+- 巴里、墨西西、青禾村分别归属巴里领主、墨西西领主、玩家领主；北境村与灰石城堡无主。
+- 玩家领主 `player_lord_id` 与玩家角色 `player_unit_id` 分开保存；玩家角色属于玩家家族并使用玩家风格旗帜/罩袍/缨饰/长矛。
+- 新游戏地点数量 4 → 5；玩家部队 15 人不变。
+
+### 采邑征召
+
+- `FiefRecruitmentManager`：归属校验、储备/补充、人口/繁荣度成本、税收缓存、6 人成组创建、真实马匹装备、失败原子回滚。
+- 编制：1 骑马扈从（三级）+ 1 骑马军士 + 1 军士 + 2 步兵 + 1 弓箭手；全部经 `UnitManager` 创建、`PartyManager.add_member()` 加入。
+- 储备按人口/繁荣度修正周期补充，暂停时停止；成功后发 `EventBus.fief_recruited`。
+- 玩家入口：大地图地点面板按钮 + 村庄头人对话；只有自有村庄显示，储备为 0 时禁用。
+- AI：低于 12 人的非玩家领主前往最近自有村庄征召一组，`RECRUITING` 期间跳过战术 AI。
+
+### 冒险者
+
+- 每村最多 5 名候选人，新游戏初始 2 名；按世界时间刷新；候选人姓名、位置、外观、状态与关联单位持久化。
+- 1 金币招募，失败不扣款；招募成功后创建真实单位并复制候选人外观；重复招募拒绝。
+- 已招募候选人在离开村庄前保留并标记；离开时只清理候选人记录，真实单位保留；清理幂等。
+- 村庄生成候选 NPC，复用距离交互与底部对话；再次进入不显示已招募候选人。
+
+### 世界日志与 UI
+
+- 新增 `FIEF_RECRUITED` / `ADVENTURER_RECRUITED` 事件，使用真实村庄、部队与单位名。
+- 抽出共享 `WorldLogPanel`，大地图左下角与村庄右上角复用同一日志历史。
+- 地点面板新增领主/家族/人口/繁荣度/税收/采邑储备信息与征召按钮。
+- `PartyIcon.show_floating_text()` 在征召成功后显示“招募了N组采邑”。
+
+### 存档
+
+- Schema v3 → v4：新增顶层 `lords`、`player.player_lord_id`、`player.player_unit_id`、地点封地/经济/候选人字段。
+- 读档新增领主、成员关系与封地所有权校验；引用悬空拒绝加载，不自动改写。
+- 旧存档缺少领主时为玩家部队补建玩家领主，不伪造地点归属；采邑/候选人初始化保留存档储备与计时。
+
+### 测试
+
+- 新增 `fief_adventurer_system_test`：归属、编制/马匹、成本/税收、回滚、日志、AI 征召、候选人刷新/招募/清理、存档往返。
+- 新增 `fief_adventurer_ui_test`：候选 NPC/对话、已招募标记与离开清理、地图面板字段/按钮/浮动提示、非自有村庄隐藏入口。
+- 全量测试通过；同步修正 `party_economy_ui_test` 工资期望（49/57）、`milestone1_test` 实体数（13）、`family_appearance_test` 家族数（3）、`stat_calculator_test` 属性键集合。
+
+### 明确未实现
+
+- 每日税收实际入账、人口/繁荣度自然增长、工资扣除与经济循环。
+- 城镇/城堡采邑征召、封地转让/继承/战争占领、领主死亡。
+- 候选人职业差异、好感度、谈判与 AI 使用冒险者池。
+- 正式旗帜/罩袍/长矛美术替换与更多玩家家族配置。
+
+## 8.19 修复 · 恢复地点交互的移动到达机制
+
+### 行为
+
+- 点击地点不再直接打开面板；`handle_left_click()` 改为调用 `_request_settlement_interaction()`。
+- 远距离点击：记录 `_pending_settlement_interaction_id`，通过 `WorldMapManager.set_party_target()` 设置移动目标，清除追逐/跟随，基础倍率切回 1x；不暂停、不压入 `ui_panel`。
+- 已在地点 40 像素交互半径内：直接打开面板。
+- `_process()` 调用 `_check_pending_settlement_interaction()`；只有 pending 有效、玩家可用、移动停止、距离 ≤ 40、移动目标仍指向该地点时才消费 pending 并打开面板。
+- 普通移动、追逐、跟随、路过不创建 pending，不自动暂停或弹窗。
+- 点击普通地图位置、点击部队、切换地点、外部停止、进入战斗或离开大地图时清除 pending；切换地点直接替换 ID。
+- `_open_settlement()` 继续统一负责 `stop_party()`、基础倍率 0、`ui_panel` 暂停与面板显示。
+- 未修改 `WorldMapManager` 移动/到达逻辑、NPC AI、遭遇与追逐规则。
+
+### 测试
+
+- `world_map_milestone6_test`：原“点击即打开”期望改为“远距离移动 → 到达后打开”。
+- 新增 `settlement_interaction_test`：覆盖远距离点击、到达、已在地点附近、普通移动路过、追逐路过、普通地图覆盖、切换地点、中途停止、城堡/城镇、面板内容不变。
+- `village_flow_test`：增加返回后 pending 为空、不自动重开面板的断言。
+- 通过：`world_map_milestone6_test`、`settlement_interaction_test`、`world_map_input_test`、`village_flow_test`。
+
+## 8.20 修复 · 多场并行战斗与 AI 离屏战斗自动结束
+
+### BattleManager
+
+- 新增 `active_battles: { battle_id: BattleSession }` 与 `party_battle_lookup: { party_id: battle_id }`。
+- `current_battle` 仅表示玩家当前屏幕战斗；AI 离屏战斗不再写入该字段。
+- 新增 `get_battle()`、`get_battle_for_party()`、`get_active_battles()`、`has_any_active_battles()`。
+- `start_battle_by_sides()` 删除“已有战斗即拒绝”的全局限制；只校验参战部队存在、存活、可用且未在其他战斗中。玩家仍最多一场屏幕战斗。
+- `finish_battle(battle_id, result)` 按 ID 只结算、解锁、清理本场；结束 AI 战斗不影响玩家屏幕战斗或其他 AI 战斗。
+- `tick()` 复制有效战斗快照后逐场推进，单场结束不跳过其他战斗。
+- 每场离屏战斗创建独立 `OffscreenBattleResolver` 与随机序列。
+- 加入接口显式传入 `battle_id`：`get_join_side()`、`can_party_join()`、`try_join_battle()`、`add_reinforcement()`。
+
+### 离屏结束判定
+
+- `OffscreenBattleResolver.count_living_sides()` 只统计至少有一名 `alive` 且 `battle_hp > 0` 单位的战斗侧。
+- 一方 0 人 → 立即结束并判存活方胜利；双方全灭 → 平局；多于一方存活 → 继续；48 小时上限按剩余战力判定。
+- 战斗结束后只清理本场会话、阵亡单位与部队锁定；全员阵亡部队进入 `DISABLED`。
+
+### 遭遇与 AI
+
+- `EncounterManager` 按双方各自 `get_battle_for_party()` 判断：都未参战则新建；一方参战则加入该场；双方在不同战斗则跳过，不合并。
+- 玩家接近离屏战斗时，只选择自己实际接近且距离最近的一场。
+- `AIManager._try_respond_to_battle()` 遍历全部离屏战斗，选择可加入且距离最近的一场；已参战部队不响应。
+
+### 大地图与跨系统
+
+- `world_map.gd` 改为 `_battle_markers: { battle_id: BattleMarker }`；新增 `get_battle_marker_for()` / `get_battle_marker_count()`。
+- 参战图标按“是否参与任意进行中战斗”隐藏；结束一场只恢复该场存活部队图标。
+- 汇总面板优先玩家 `current_battle`，否则取战斗 ID 最小的一场；不混用两场战斗数据。
+- `WorldLogManager` 通过 `get_battle(battle_id)` 关联开始/结束日志。
+- `GameManager.save_game()` 使用 `has_any_active_battles()`，任意战斗进行中拒绝存档。
+
+### 测试
+
+- `battle_manager_test`：两场并行战斗、独立会话、部队唯一归属、结束一场不影响另一场。
+- `offscreen_battle_hourly_test`：0 人战斗侧不计入、一方/双方全灭、两场战斗同一 tick 独立推进与结算。
+- `multi_party_battle_test`：玩家屏幕战斗与 AI 离屏战斗并行。
+- `ai_manager_test`：两组部队并行遭遇、AI 分别响应最近战场。
+- `world_map_battle_marker_test`：双战斗标记、四个参战图标隐藏、结束一场只恢复对应图标。
+- 更新 `battle_occupancy_ui_test`：世界其他战斗不再阻塞无关部队开战。
+- 回归通过：`battle_scene_test`、`battle_result_delay_test`、`battle_result_test`、`player_battle_interaction_test`、`ai_encounter_flow_test`、`milestone2_flow_test`、`save_persistence_test`、`world_log_ui_test`、`neutral_party_interaction_test`、`encounter_dialogue_ui_test`、`player_encounter_test`、`battle_retreat_test`、`battle_side_result_test`、`party_dialogue_test`、`player_pursuit_encounter_test`、`player_control_test`、`battle_cluster_test`、`battle_formation_test`。
+
 ## 9. 自动化验收
 
 ### 测试套件
@@ -1232,7 +1355,7 @@
 | `Tests/UnitTests/unit_party_serialization_test.tscn` | 5 名士兵与多部队存档往返、等级/经验/装备/当前 HP 恢复、读档重算、旧存档缺失字段、无效装备清理、继续转队、损坏引用拒绝加载 |
 | `Tests/SystemTests/party_panel_test.tscn` | 大地图部队按钮、面板打开/关闭、概览、完整初始成员列表、详情属性、装备槽位、步兵/骑兵 SubViewport 美术预览、预览只读、暂停原因栈 |
 | `Tests/UnitTests/faction_vision_test.tscn` | 阵营关系组合与对称性、视野发现/离开、敌友中立筛选、失效观察者与目标 |
-| `Tests/UnitTests/multi_party_battle_test.tscn` | 双方回归、友军加入、独立第三方、中立拒绝、距离/重复校验、多方离屏结算、多侧战斗场景 |
+| `Tests/UnitTests/multi_party_battle_test.tscn` | 双方回归、友军加入、独立第三方、中立拒绝、距离/重复校验、玩家战斗与其他 AI 战斗并行、多方离屏结算、多侧战斗场景 |
 | `Tests/SystemTests/ai_encounter_flow_test.tscn` | 玩家加入离屏战斗、玩家实际战斗侧、`battle_started` 自动进入战斗场景 |
 | `Tests/SystemTests/player_encounter_test.tscn` | 敌对 AI 主动拦截玩家、ENEMY_PURSUIT 原因、底部布局与领袖头像、无离开选项、暂停原因栈、防重复、异常清理、进入战斗场景 |
 | `Tests/SystemTests/world_map_milestone6_test.tscn` | 村庄原始美术/位置/缩放、固定尺寸徽章+名称组合、徽章读取家族、无家族隐藏、左 Alt 输入切换、简单/详细悬浮 |
@@ -1240,7 +1363,7 @@
 | `Tests/SystemTests/encounter_dialogue_ui_test.tscn` | 部队标记恢复原尺寸、底部 NPC 对话、领袖头像/默认剪影、敌对追击无离开、玩家主动接近保留离开、配置文本 |
 | `Tests/SystemTests/player_party_expansion_test.tscn` | 玩家 15 人编制（含 3 名弓箭手）、完整 UnitData、兵种/骑乘数量、领袖、马匹库存、存档往返不丢失或重复生成 |
 | `Tests/SystemTests/battle_cluster_test.tscn` | 初始部署距离、战场边界、双方半场列阵、接近/接敌后无严重重叠、局部拥挤上限、目标分流、纵深分布 |
-| `Tests/SystemTests/battle_occupancy_ui_test.tscn` | 已有战斗时独立部队禁止另开战场、原因文本、绕过按钮拒绝、参战方“加入战斗”复用同一会话 |
+| `Tests/SystemTests/battle_occupancy_ui_test.tscn` | 世界其他位置战斗不阻塞无关部队开战、参战方“加入战斗”复用同一会话 |
 | `Tests/SystemTests/player_battle_interaction_test.tscn` | 接近离屏战斗加入/离开面板、加入已有战斗、离开拒绝与重触发、战斗结束/异常清理、暂停与倍率保护 |
 | `Tests/UnitTests/unit_controller_test.tscn` | 接近、攻击间隔、伤害、死亡、重新索敌、手动移动、5v5 自动战斗收敛 |
 | `Tests/UnitTests/combat_attack_rules_test.tscn` | 三人围攻、被围攻反击、独立冷却、360°定向矩形、背后/横向/超距排除、玩家四方向、单次单目标、武器距离变化、实体碰撞、骑乘移动加成 |
@@ -1249,13 +1372,14 @@
 | `Tests/UnitTests/formation_manager_test.tscn` | 横向/纵深/松散/方阵站位、列数自动扩展、间距 |
 | `Tests/UnitTests/battle_result_test.tscn` | 胜负/伤亡/经验升级/金币/战利品/撤退/多方/离屏/中途加入/重复结算保护 |
 | `Tests/UnitTests/player_character_data_test.tscn` | 玩家角色创建、身份持久化、玩家档案金币/物品往返 |
-| `Tests/UnitTests/battle_manager_test.tscn` | 开始校验、锁定、玩家战败结算、剩余 HP 写回、重复结算拒绝 |
-| `Tests/UnitTests/ai_manager_test.tscn` | 商队往返、治安队巡逻、玩家/战斗/NONE 跳过、强盗动态评分/切换阈值/追击/失去视野、攻击意图、单方/双方意图遭遇、友方不遭遇、治安队拦截/恢复巡逻、离屏遭遇与中途加入、AI 字段序列化 |
+| `Tests/UnitTests/battle_manager_test.tscn` | 开始校验、锁定、玩家战败结算、剩余 HP 写回、重复结算拒绝、多战斗注册表、部队唯一归属、独立结算 |
+| `Tests/UnitTests/ai_manager_test.tscn` | 商队往返、治安队巡逻、玩家/战斗/NONE 跳过、强盗动态评分/切换阈值/追击/失去视野、攻击意图、单方/双方意图遭遇、友方不遭遇、治安队拦截/恢复巡逻、离屏遭遇与中途加入、两组部队并行遭遇、AI 分别响应最近战场、AI 字段序列化 |
 | `Tests/SystemTests/party_dialogue_test.tscn` | 接近 AI 部队、对话内容、暂停恢复、重复 UI、战斗准备、战斗中禁存档 |
 | `Tests/SystemTests/world_map_input_test.tscn` | 数字键 1/2/3、小键盘/echo、UI 屏蔽、点击切 1x、真实 tick 下 NPC 移动 |
 | `Tests/SystemTests/battle_scene_test.tscn` | 全部参战士兵生成（玩家 15 + 敌方 5）、唯一 unit_id、初始部署距离、边界、2 倍相机、1920×1080 设置、部件 z/贴图、骑乘保留人腿、实时伤害、死亡移除、胜利、结算与存档 |
 | `Tests/SystemTests/archer_battle_test.tscn` | 三级弓配置/属性、弓锚点与拉弓动画、抛物线/地面深度、静止命中、移动目标射失、头顶掠过、死亡目标、每箭单次伤害、远程 AI/冷却/接近/后撤、玩家固定终点、初始 3 名弓箭手与存档往返 |
 | `Tests/SystemTests/archer_scene_test.tscn` | 真实战斗场景 ProjectileManager 注入、接管弓箭手、鼠标世界坐标射击入口、3 秒冷却、箭矢伤害与冷却拒绝 |
+| `Tests/SystemTests/fief_adventurer_system_test.tscn` | 封地归属、6 人编制与马匹、人口/繁荣度/税收、失败回滚、采邑/冒险者日志、候选人刷新上限、1 金币招募/重复拒绝/离开清理、AI 领主征召、Schema v4 往返 |
 | `Tests/SystemTests/player_control_test.tscn` | 玩家角色控制、WASD/斜向、左键攻击/冷却、受伤、控制权转移、观战、战败结果 |
 | `Tests/SystemTests/battle_formation_test.tscn` | 队形槽位、同队间距、多友军 lane 分区、阵亡后重分配 |
 | `Tests/SystemTests/battle_side_result_test.tscn` | 同侧一支部队全灭但仍有友军时战斗继续；侧全灭后失败 |
@@ -1270,16 +1394,18 @@
 | `Tests/UnitTests/time_calendar_test.tscn` | 1103-01-01、6 秒/小时、144 秒/天、30 天/月、360 天/年、时间段、1x/2x/暂停 |
 | `Tests/SystemTests/village_scene_test.tscn` | 玩家权威数据、无武器表现、距离交互、对话关闭/移动、越界倒计时 |
 | `Tests/SystemTests/village_flow_test.tscn` | 新游戏 → 大地图 → 村庄 → 对话 → 越界返回 → 主菜单 |
-| `Tests/SystemTests/world_map_milestone6_test.tscn` | 日期 UI、人数图标、悬浮构成、追逐保护、主动交互恢复 |
+| `Tests/SystemTests/world_map_milestone6_test.tscn` | 日期 UI、人数图标、悬浮构成、追逐保护、远距离点击仅设置移动目标、到达后才打开面板 |
+| `Tests/SystemTests/settlement_interaction_test.tscn` | 点击地点→移动→到达打开、近距离直接打开、普通移动/追逐/路过不触发、切换地点替换待交互目标、外部停止清空、城堡/城镇一致、面板内容不变 |
 | `Tests/SystemTests/party_economy_ui_test.tscn` | 金币/工资显示、上马/下马、晋升按钮与工资总额更新 |
-| `Tests/UnitTests/offscreen_battle_hourly_test.tscn` | 离屏战斗 1 小时门槛、双方伤亡、tier 影响、小数累计、玩家加入保留伤亡、转换后停止结算、全灭结束 |
+| `Tests/UnitTests/offscreen_battle_hourly_test.tscn` | 离屏战斗 1 小时门槛、双方伤亡、tier 影响、小数累计、玩家加入保留伤亡、转换后停止结算、0 人战斗侧不计入存活侧、一方/双方全灭结束、两场战斗同一 tick 独立推进与结算 |
 | `Tests/SystemTests/small_scene_camera_test.tscn` | 统一视野、跟随、自由视角、边界限制、切回跟随、村庄摄像机 |
 | `Tests/SystemTests/player_pursuit_encounter_test.tscn` | 同向追击接触、停止/清目标、暂停与面板、撤退、拒绝锁、重新触发、进入战斗 |
-| `Tests/SystemTests/world_map_battle_marker_test.tscn` | 单战斗标记、参战图标隐藏、按 side_index 分列汇总、小时伤亡刷新、同侧加入、三方三列、结束清理 |
+| `Tests/SystemTests/world_map_battle_marker_test.tscn` | 单战斗标记、参战图标隐藏、按 side_index 分列汇总、小时伤亡刷新、同侧加入、三方三列、两场战斗双标记与独立图标隐藏/恢复、结束清理 |
 | `Tests/SystemTests/save_persistence_test.tscn` | Schema v3、世界日志往返、世界/地点/部队/士兵/经济恢复、战后成员与 HP、失效战斗状态清理、领袖校验 |
 | `Tests/SystemTests/battle_result_delay_test.tscn` | 胜利数据立即生成、面板约 3 秒延迟、失败即时、延迟期间退出取消、无重复展示 |
 | `Tests/UnitTests/world_log_manager_test.tscn` | 战斗/胜负/消灭/遭遇/地点事件文本、扩展事件、100 条上限、序列化预留 |
 | `Tests/SystemTests/world_log_ui_test.tscn` | 左下角日志面板、自动刷新、滚动区域、不阻挡地图移动 |
+| `Tests/SystemTests/fief_adventurer_ui_test.tscn` | 村庄候选 NPC/对话招募/已招募标记/离开清理、共享日志面板、地点封地字段、征召按钮状态、部队浮动提示、非自有村庄隐藏入口 |
 | `Tests/SystemTests/neutral_party_interaction_test.tscn` | 路过中立不弹窗、追击不被无关目标打断、主动点击对话、AI 追击遭遇、防重复 |
 
 ### 运行命令
@@ -1326,6 +1452,7 @@ Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/time_cal
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/village_scene_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/village_flow_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/world_map_milestone6_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/settlement_interaction_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/party_economy_ui_test.tscn
 
 # 阶段 6 大地图战斗与小地图视角优化
@@ -1362,6 +1489,20 @@ Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/main_menu_probe.tscn
 本次实际执行（战斗占用提示修复）：新增 `battle_occupancy_ui_test` 全部通过；回归通过 `party_dialogue_test`、`encounter_dialogue_ui_test`、`world_map_milestone6_test`、`player_encounter_test`、`ai_encounter_flow_test`。覆盖离屏战斗占用时的禁用与原因文本、绕过按钮直接拒绝、参战方加入已有战斗。未改变存档 Schema；未修改 BattleManager 单一战斗会话规则。
 
 本次实际执行（阶段 6 后续：大地图表现/AI 恢复/存档/战斗 UI）：新增 `save_persistence_test`、`battle_result_delay_test` 全部通过；更新后通过 `world_map_milestone6_test`、`world_map_battle_marker_test`、`battle_scene_test`、`milestone2_flow_test`、`multi_party_battle_test`；回归通过 `party_manager_test`、`unit_party_serialization_test`、`party_architecture_test`、`family_appearance_test`、`world_log_manager_test`、`battle_manager_test`、`battle_result_test`、`ai_manager_test`、`offscreen_battle_hourly_test`、`ai_encounter_flow_test`、`player_encounter_test`、`player_pursuit_encounter_test`、`encounter_dialogue_ui_test`、`world_map_input_test`、`world_log_ui_test`、`party_panel_test`、`neutral_party_interaction_test`、`battle_side_result_test`、`battle_retreat_test`、`player_control_test`、`milestone1_restart_test`（save/load 两进程）。存档 Schema 升至 v3；仅执行自动测试，未做非 headless 视觉验收。
+
+本次实际执行（阶段 7 第一步：封地/采邑/冒险者）：新增 `fief_adventurer_system_test`、`fief_adventurer_ui_test` 全部通过；执行完整 `Tests/SystemTests` 与 `Tests/UnitTests` 全量套件，全部通过（含 `save_persistence_test`、`milestone1_test`、`milestone1_restart_test`、`milestone2_flow_test`、`world_log_ui_test`、`village_scene_test`、`ai_manager_test`、`party_economy_ui_test`、`stat_calculator_test`、`family_appearance_test`、`unit_party_serialization_test`）。存档 Schema 升至 v4；仅执行自动测试，未做非 headless 视觉验收。
+
+本次实际执行（修复：恢复地点移动到达交互）：新增 `settlement_interaction_test` 全部通过；更新并回归 `world_map_milestone6_test`、`world_map_input_test`、`village_flow_test` 全部通过。覆盖远距离点击只设置移动目标且不暂停、到达后停止/暂停/打开、近距离直接打开、普通移动/追逐/路过不触发、切换地点替换待交互目标、外部停止清空、城堡/城镇一致、返回村庄不残留待交互状态。按小范围修复要求未执行无关全量套件；待交互状态仅运行时，不改变存档 Schema。
+
+本次实际执行（修复：多场并行战斗与 AI 离屏战斗自动结束）：更新并全部通过 `battle_manager_test`、`offscreen_battle_hourly_test`、`multi_party_battle_test`、`battle_result_test`、`ai_manager_test`、`world_map_battle_marker_test`、`ai_encounter_flow_test`、`player_battle_interaction_test`、`battle_occupancy_ui_test`、`battle_scene_test`、`battle_result_delay_test`、`milestone2_flow_test`、`save_persistence_test`、`world_log_manager_test`、`world_log_ui_test`、`neutral_party_interaction_test`、`encounter_dialogue_ui_test`、`player_encounter_test`、`battle_retreat_test`、`battle_side_result_test`、`party_dialogue_test`、`player_pursuit_encounter_test`、`player_control_test`、`battle_cluster_test`、`battle_formation_test`。覆盖多战斗注册表/部队唯一归属、两场离屏战斗同一 tick 独立推进、0 人战斗侧不计入存活侧、一方/双方全灭立即结束、两组部队并行遭遇、大地图双标记与独立图标恢复、其他战斗不阻塞开战。未执行非 headless 视觉验收；战斗会话仍不进入存档，进行中战斗会阻止保存。
+
+本次同步修正的测试期望：
+
+- `party_economy_ui_test`：玩家 15 人部队工资总额 49，晋升一名民兵后 57。
+- `milestone1_test`：5 个地点 + 8 支部队 = 13 个地图实体。
+- `family_appearance_test`：家族配置数量 2 → 3（新增玩家家族）。
+- `stat_calculator_test`：`STAT_KEYS` 补齐远程/身高派生字段。
+- `unit_party_serialization_test`：手工复制 `SaveData` 时同步复制 `lords`。
 
 ### 手动验证步骤
 
@@ -1439,12 +1580,21 @@ Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/main_menu_probe.tscn
 72. 小地图战斗开始时确认双方位于战场两侧，有明显接近距离；步兵与骑兵都能正常接敌。
 73. 接敌后观察 1–2 分钟，确认士兵不再全部叠在一点，后排不会全部挤到前排，骑兵有更大活动空间。
 74. 多方战斗/中途加入时确认各战斗侧保持自己的集群，不混成一个点；单位不越出战场边界或卡死。
+75. 新游戏点击“青禾村”，确认地点面板显示玩家领主、玩家家族、人口、繁荣度、税收与采邑储备，并出现“征召采邑”按钮。
+76. 点击征召，确认玩家部队增加 6 人（含 2 名骑乘）、村庄储备 -1、人口 -4、繁荣度 -2、税收缓存刷新，部队图标上方显示“招募了1组采邑”，世界日志出现一条记录。
+77. 点击巴里/墨西西等非自有村庄，确认不显示征召按钮；储备为 0 时按钮禁用。
+78. 进入青禾村，与头人对话确认出现征召选项；征召成功后回到大地图再次确认结果一致。
+79. 进入村庄点击冒险者候选人，确认对话显示姓名与 1 金币费用；招募后金币 -1、部队 +1、候选人标记“已招募”。
+80. 重复点击同一候选人确认没有招募选项；离开村庄再进入，确认已招募候选人不再出现，真实单位仍在部队中。
+81. 让世界时间推进超过 144 秒，确认村庄采邑储备与冒险者数量按配置补充，且不超过上限。
+82. 保存并读档，确认领主、封地归属、采邑储备/计时、人口/繁荣度、税收缓存与冒险者候选人均恢复；损坏的封地引用应拒绝读档并输出错误。
 
 ## 10. 下一步任务
 
-1. 村庄正式内容：商店、招募、任务、好感度、村庄头人作息与多选项对话。
-2. 城镇/城堡独立小场景；村庄碰撞、城门与出口通道。
-3. 工资定期扣除、士气、逃兵与经济循环；晋升凭证正式来源。
+1. 阶段 7 后续：每日税收实际入账、人口/繁荣度自然变化、封地转让/继承、城镇/城堡采邑征召。
+2. 村庄正式内容：商店、普通兵员招募、任务、好感度、村庄头人作息与多选项对话。
+3. 城镇/城堡独立小场景；村庄碰撞、城门与出口通道。
+4. 工资定期扣除、士气、逃兵与经济循环；晋升凭证正式来源。
 4. 完整背包/物品栏 UI、装备更换、商店与交易。
 5. 大地图寻路、地形阻挡、道路加成与速度系数；战斗寻路与更复杂队形。
 6. 强盗营地、强盗经济、装备获取与招募系统。

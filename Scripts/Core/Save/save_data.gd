@@ -3,10 +3,11 @@ extends RefCounted
 ## 单个存档的完整持久化容器。
 ##
 ## 只保存数据，不保存场景节点。各实体以 ID 为键保存。
-## Schema v3 增加世界日志（战斗结果、伤亡与遭遇历史）；
-## 不要求兼容 v2 存档，读取时仍保留 v1 → v2 的浅迁移入口。
+## Schema v3 增加世界日志；v4 增加领主、封地所有权、村庄人口/繁荣度、
+## 采邑储备、冒险者候选人与玩家领主/玩家角色 ID。
+## 读取时保留 v1 → v2 的浅迁移入口，缺失的 v4 字段按安全默认值恢复。
 
-const CURRENT_SCHEMA_VERSION: int = 3
+const CURRENT_SCHEMA_VERSION: int = 4
 
 var schema_version: int = CURRENT_SCHEMA_VERSION
 var project_version: String = "0.2.0"

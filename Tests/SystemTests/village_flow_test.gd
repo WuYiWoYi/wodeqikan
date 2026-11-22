@@ -114,6 +114,17 @@ func _run() -> void:
 		var returned_map := get_tree().current_scene
 		var latch_id: String = str(returned_map.call("get_settlement_latch_id"))
 		_check(latch_id == _village_id, "村口地点交互被锁住一次")
+		_check(
+			str(returned_map.call("get_pending_settlement_interaction_id")).is_empty(),
+			"从村庄返回不会残留待交互地点"
+		)
+		var returned_panel := returned_map.find_child(
+			"SettlementPanel", true, false
+		) as PanelContainer
+		_check(
+			returned_panel != null and not returned_panel.visible,
+			"从村庄返回不会自动重开地点面板"
+		)
 
 	var restored_player := context.get_player_party()
 	_check(restored_player != null, "返回后玩家部队仍存在")

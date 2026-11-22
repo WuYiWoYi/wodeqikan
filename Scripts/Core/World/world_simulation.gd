@@ -10,6 +10,8 @@ var _world_map_manager: WorldMapManager = null
 var _ai_manager: AIManager = null
 var _battle_manager: BattleManager = null
 var _encounter_manager: EncounterManager = null
+var _fief_recruitment_manager: FiefRecruitmentManager = null
+var _adventurer_recruitment_manager: AdventurerRecruitmentManager = null
 
 
 func bind(
@@ -18,7 +20,9 @@ func bind(
 	world_map_manager: WorldMapManager,
 	ai_manager: AIManager,
 	battle_manager: BattleManager = null,
-	encounter_manager: EncounterManager = null
+	encounter_manager: EncounterManager = null,
+	fief_recruitment_manager: FiefRecruitmentManager = null,
+	adventurer_recruitment_manager: AdventurerRecruitmentManager = null
 ) -> void:
 	_unit_manager = unit_manager
 	_party_manager = party_manager
@@ -26,6 +30,8 @@ func bind(
 	_ai_manager = ai_manager
 	_battle_manager = battle_manager
 	_encounter_manager = encounter_manager
+	_fief_recruitment_manager = fief_recruitment_manager
+	_adventurer_recruitment_manager = adventurer_recruitment_manager
 
 
 func on_world_tick(fixed_delta: float) -> void:
@@ -39,6 +45,13 @@ func on_world_tick(fixed_delta: float) -> void:
 	# 固定顺序：移动 -> 视野/遭遇 -> AI 决策 -> 地点模拟（阶段 5 接入）。
 	_world_map_manager.update_party_movement(fixed_delta)
 	_world_map_manager.update_visibility()
+
+	# 封地经济与候选人刷新只依赖 WorldTime；遭遇弹窗期间暂停时不会推进。
+	if _fief_recruitment_manager != null:
+		_fief_recruitment_manager.tick(fixed_delta)
+	if _adventurer_recruitment_manager != null:
+		_adventurer_recruitment_manager.tick(fixed_delta)
+
 	if _encounter_manager != null:
 		_encounter_manager.update_encounters()
 		_encounter_manager.update_player_battle_interaction()

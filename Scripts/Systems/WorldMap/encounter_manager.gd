@@ -106,7 +106,6 @@ func update_encounters() -> bool:
 		return false
 	_refresh_declined_encounter_latch()
 
-	var battle := _battle_manager.current_battle
 	var player_party_id: String = _battle_manager.player_party_id
 	var parties: Array[PartyData] = _party_manager.get_all_parties()
 	for i: int in range(parties.size()):
@@ -129,10 +128,18 @@ func update_encounters() -> bool:
 			var a_attacks_b: bool = a.attack_intent and a.current_target_id == b.party_id
 			var b_attacks_a: bool = b.attack_intent and b.current_target_id == a.party_id
 
+			# 查询双方各自正在参与的战斗；不同部队的战斗互不阻塞。
+			var a_battle: BattleSession = _battle_manager.get_battle_for_party(a.party_id)
+			var b_battle: BattleSession = _battle_manager.get_battle_for_party(b.party_id)
+			if a_battle != null and a_battle == b_battle:
+				# 已经在同一场战斗中，不得重复创建或加入。
+				continue
+
 			# 玩家被具有攻击意图的敌对 AI 拦截：交给 WorldMap 弹出遭遇对话。
 			if not player_party_id.is_empty() and (a.party_id == player_party_id \
 					or b.party_id == player_party_id):
-				if battle != null:
+				# 任意一方正在战斗时不触发新的玩家遭遇。
+				if a_battle != null or b_battle != null:
 					continue
 				if not a.is_available_for_world() or not b.is_available_for_world():
 					continue
@@ -162,24 +169,22 @@ func update_encounters() -> bool:
 				_begin_pending_player_encounter(attacker, target, reason)
 				return true
 
-			# NPC 对 NPC：已有离屏战斗时只处理“其中一方可加入”的情况。
-			if battle != null:
+			# NPC 对 NPC：双方已在不同战斗中时不得合并，也不能让一方同时参战。
+			if a_battle != null and b_battle != null:
+				continue
+			# 一方已参战、另一方空闲：尝试加入该方所在的离屏战斗。
+			if a_battle != null or b_battle != null:
+				var battle: BattleSession = a_battle if a_battle != null else b_battle
 				if not battle.offscreen:
 					continue
-				var engaged: PartyData = null
-				var available: PartyData = null
-				if battle.is_party_involved(a.party_id) and b.is_available_for_world():
-					engaged = a
-					available = b
-				elif battle.is_party_involved(b.party_id) and a.is_available_for_world():
-					engaged = b
-					available = a
-				if engaged == null:
+				var engaged := a if a_battle != null else b
+				var available := b if engaged == a else a
+				if not available.is_available_for_world():
 					continue
 				# 玩家加入离屏战斗由 battle interaction 流程处理。
 				if available.party_id == player_party_id:
 					continue
-				if _battle_manager.try_join_battle(available.party_id):
+				if _battle_manager.try_join_battle(available.party_id, battle.battle_id):
 					available.attack_intent = false
 					return false
 				continue
@@ -320,26 +325,43 @@ func update_player_battle_interaction() -> bool:
 	if not player.focus_party_id.is_empty():
 		return false
 
-	var battle := _battle_manager.current_battle
-	if _declined_battle_id != "" and (battle == null or battle.battle_id != _declined_battle_id):
-		_declined_battle_id = ""
-
-	if battle == null or not battle.offscreen:
-		return false
-	if battle.is_party_involved(player_party_id):
-		return false
 	if not player.is_available_for_world() or player.member_unit_ids.is_empty():
 		return false
-
-	var distance := player.world_position.distance_to(battle.world_position)
-	if _declined_battle_id == battle.battle_id:
-		if distance <= BATTLE_INTERACTION_EXIT_RADIUS:
-			return false
-		# 离开交互范围后允许再次触发。
-		_declined_battle_id = ""
-	if distance > BATTLE_INTERACTION_RADIUS:
+	# 玩家已在战斗中时不再提示加入其他战斗。
+	if _battle_manager.get_battle_for_party(player_party_id) != null:
 		return false
-	if _battle_manager.get_join_side(player_party_id) < 0:
+
+	# 已拒绝的战斗结束、或玩家离开交互范围后清除记录。
+	if _declined_battle_id != "":
+		var declined := _battle_manager.get_battle(_declined_battle_id)
+		if declined == null or player.world_position.distance_to(
+			declined.world_position
+		) > BATTLE_INTERACTION_EXIT_RADIUS:
+			_declined_battle_id = ""
+
+	# 玩家只能加入自己实际接近的那一场战斗；多场战斗时取最近的一场。
+	var battle: BattleSession = null
+	var best_distance: float = INF
+	for candidate: BattleSession in _battle_manager.get_active_battles():
+		if not candidate.offscreen:
+			continue
+		if candidate.is_party_involved(player_party_id):
+			continue
+		var candidate_distance: float = player.world_position.distance_to(
+			candidate.world_position
+		)
+		if _declined_battle_id == candidate.battle_id \
+				and candidate_distance <= BATTLE_INTERACTION_EXIT_RADIUS:
+			continue
+		if candidate_distance > BATTLE_INTERACTION_RADIUS:
+			continue
+		if _battle_manager.get_join_side(player_party_id, candidate.battle_id) < 0:
+			continue
+		if candidate_distance < best_distance:
+			best_distance = candidate_distance
+			battle = candidate
+
+	if battle == null:
 		return false
 
 	_interaction_serial += 1

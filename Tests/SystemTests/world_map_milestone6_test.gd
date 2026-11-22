@@ -290,6 +290,10 @@ func _test_chase_suppression() -> void:
 	_player.target_position = _village.world_position + Vector2(600.0, 0.0)
 	_map.call("_process", 0.016)
 	_check(not settlement_panel.visible, "正常移动经过村庄不打开地点界面")
+	_check(
+		str(_map.call("get_pending_settlement_interaction_id")).is_empty(),
+		"普通移动不创建待交互地点"
+	)
 
 	# 追逐部队时经过村庄同样不打断当前行动。
 	_player.focus_party_id = _merchant.party_id
@@ -297,11 +301,46 @@ func _test_chase_suppression() -> void:
 	_check(not settlement_panel.visible, "追击中经过村庄不打开地点界面")
 	_check(not party_panel.visible, "追击中不自动打开无关部队对话")
 
-	# 主动点击村庄才打开地点面板。
+	# 远距离点击村庄：只设置移动目标，不打开面板、不压入 ui_panel。
 	_player.focus_party_id = ""
+	_player.world_position = _village.world_position + Vector2(-600.0, 0.0)
+	_player.target_position = _player.world_position
 	_player.movement_state = PartyData.MovementState.IDLE
+	TimeManager.set_base_world_speed(TimeManager.SPEED_PAUSED)
 	_map.call("handle_left_click", _village.world_position)
-	_check(settlement_panel.visible, "主动点击村庄打开地点面板")
+	_check(
+		_player.target_position == _village.world_position,
+		"远距离点击村庄设置移动目标"
+	)
+	_check(
+		_player.movement_state == PartyData.MovementState.MOVING,
+		"远距离点击村庄后开始移动"
+	)
+	_check(not settlement_panel.visible, "远距离点击村庄不立即打开面板")
+	_check(
+		not TimeManager.has_pause_reason(GameManager.PAUSE_REASON_UI_PANEL),
+		"移动途中不压入地点面板暂停"
+	)
+	_check(
+		str(_map.call("get_pending_settlement_interaction_id"))
+			== _village.settlement_id,
+		"记录待交互村庄"
+	)
+
+	# 模拟真正到达：只有停止且位于交互半径内才消费 pending 并打开面板。
+	_player.world_position = _village.world_position
+	_player.target_position = _village.world_position
+	_player.movement_state = PartyData.MovementState.IDLE
+	_map.call("_check_pending_settlement_interaction")
+	_check(settlement_panel.visible, "到达村庄后打开地点面板")
+	_check(
+		str(_map.call("get_pending_settlement_interaction_id")).is_empty(),
+		"到达后消费待交互状态"
+	)
+	_check(
+		TimeManager.has_pause_reason(GameManager.PAUSE_REASON_UI_PANEL),
+		"到达后压入地点面板暂停"
+	)
 	if settlement_panel.visible:
 		var enter_button := _map.find_child(
 			"SettlementEnterButton", true, false
@@ -316,9 +355,22 @@ func _test_chase_suppression() -> void:
 		if leave_button != null:
 			leave_button.pressed.emit()
 
-	# 主动点击城堡同样打开面板，但不提供村庄入口。
+	# 城堡同样必须先移动再打开，但不提供村庄入口。
+	_player.world_position = _castle.world_position + Vector2(-600.0, 0.0)
+	_player.target_position = _player.world_position
+	_player.movement_state = PartyData.MovementState.IDLE
 	_map.call("handle_left_click", _castle.world_position)
-	_check(settlement_panel.visible, "主动点击城堡打开地点面板")
+	_check(
+		_player.target_position == _castle.world_position
+			and _player.movement_state == PartyData.MovementState.MOVING,
+		"远距离点击城堡先移动"
+	)
+	_check(not settlement_panel.visible, "远距离点击城堡不立即打开面板")
+	_player.world_position = _castle.world_position
+	_player.target_position = _castle.world_position
+	_player.movement_state = PartyData.MovementState.IDLE
+	_map.call("_check_pending_settlement_interaction")
+	_check(settlement_panel.visible, "到达城堡后打开地点面板")
 	if settlement_panel.visible:
 		var enter_button := _map.find_child(
 			"SettlementEnterButton", true, false

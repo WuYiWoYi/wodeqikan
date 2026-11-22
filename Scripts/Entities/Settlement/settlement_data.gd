@@ -1,6 +1,9 @@
 class_name SettlementData
 extends RefCounted
 ## 村庄、城镇、城堡的持久化运行时数据。
+##
+## 封地所有权、人口、繁荣度、采邑储备与冒险者候选人都属于权威数据；
+## 场景节点只负责显示，不持有唯一的游戏状态。
 
 enum SettlementType {
 	VILLAGE,
@@ -16,6 +19,8 @@ var world_position: Vector2 = Vector2.ZERO
 var faction_id: String = ""
 ## 地点所属家族（持久化）；仅用于地图名称旁的家族旗帜，不影响外交。
 var family_id: String = ""
+## 封地所有者 LordData.lord_id；空字符串表示无主。
+## 只有 owner_lord_id 与当前领主 ID 相同才允许征召采邑。
 var owner_lord_id: String = ""
 
 ## 该地点对应的小场景路径。空字符串表示使用村庄/城镇/城堡的默认模板。
@@ -24,11 +29,50 @@ var scene_path: String = ""
 
 var population: int = 0
 var prosperity: int = 0
+
+## 封地经济参数与缓存。tax_income_per_day 必须由 TaxCalculator 计算；
+## 不允许 UI 或场景节点自行维护另一套税收公式。
+var tax_base: int = 20
+var tax_income_per_day: int = 0
+
+## 采邑储备以“组”为单位；1 组固定生成 6 名士兵。
+var fief_recruitment_stock: int = 0
+var fief_recruitment_capacity: int = 4
+## 距离下一次采邑补充的累计世界时间（秒）。
+var fief_recruitment_elapsed: float = 0.0
+
+## 当前村庄的冒险者候选人与距离下一次刷新的累计世界时间。
+var adventurer_candidates: Array[AdventurerCandidateData] = []
+var adventurer_refresh_elapsed: float = 0.0
+
 var garrison_unit_ids: Array[String] = []
 var is_under_siege: bool = false
 
 
+func get_available_candidates() -> Array[AdventurerCandidateData]:
+	var result: Array[AdventurerCandidateData] = []
+	for candidate: AdventurerCandidateData in adventurer_candidates:
+		if candidate != null and candidate.is_available():
+			result.append(candidate)
+	return result
+
+
+func get_candidate(candidate_id: String) -> AdventurerCandidateData:
+	for candidate: AdventurerCandidateData in adventurer_candidates:
+		if candidate != null and candidate.candidate_id == candidate_id:
+			return candidate
+	return null
+
+
+func has_owner() -> bool:
+	return not owner_lord_id.is_empty()
+
+
 func to_dict() -> Dictionary:
+	var candidates: Array[Dictionary] = []
+	for candidate: AdventurerCandidateData in adventurer_candidates:
+		if candidate != null:
+			candidates.append(candidate.to_dict())
 	return {
 		"settlement_id": settlement_id,
 		"display_name": display_name,
@@ -40,6 +84,13 @@ func to_dict() -> Dictionary:
 		"scene_path": scene_path,
 		"population": population,
 		"prosperity": prosperity,
+		"tax_base": tax_base,
+		"tax_income_per_day": tax_income_per_day,
+		"fief_recruitment_stock": fief_recruitment_stock,
+		"fief_recruitment_capacity": fief_recruitment_capacity,
+		"fief_recruitment_elapsed": fief_recruitment_elapsed,
+		"adventurer_candidates": candidates,
+		"adventurer_refresh_elapsed": adventurer_refresh_elapsed,
 		"garrison_unit_ids": garrison_unit_ids.duplicate(),
 		"is_under_siege": is_under_siege,
 	}
@@ -57,9 +108,35 @@ static func from_dict(data: Dictionary) -> SettlementData:
 	settlement.family_id = str(data.get("family_id", ""))
 	settlement.owner_lord_id = str(data.get("owner_lord_id", ""))
 	settlement.scene_path = str(data.get("scene_path", ""))
-	settlement.population = int(data.get("population", 0))
-	settlement.prosperity = int(data.get("prosperity", 0))
+	settlement.population = maxi(0, int(data.get("population", 0)))
+	settlement.prosperity = maxi(0, int(data.get("prosperity", 0)))
+	settlement.tax_base = maxi(0, int(data.get("tax_base", 20)))
+	settlement.tax_income_per_day = maxi(
+		0, int(data.get("tax_income_per_day", 0))
+	)
+	settlement.fief_recruitment_capacity = maxi(
+		0, int(data.get("fief_recruitment_capacity", 4))
+	)
+	settlement.fief_recruitment_stock = clampi(
+		int(data.get("fief_recruitment_stock", 0)),
+		0,
+		settlement.fief_recruitment_capacity
+	)
+	settlement.fief_recruitment_elapsed = maxf(
+		0.0, float(data.get("fief_recruitment_elapsed", 0.0))
+	)
+	settlement.adventurer_refresh_elapsed = maxf(
+		0.0, float(data.get("adventurer_refresh_elapsed", 0.0))
+	)
 	settlement.is_under_siege = bool(data.get("is_under_siege", false))
+
+	var candidate_values: Variant = data.get("adventurer_candidates", [])
+	if candidate_values is Array:
+		for value: Variant in candidate_values:
+			if value is Dictionary:
+				var candidate := AdventurerCandidateData.from_dict(value)
+				if not candidate.candidate_id.is_empty():
+					settlement.adventurer_candidates.append(candidate)
 
 	var garrison_values: Variant = data.get("garrison_unit_ids", [])
 	if garrison_values is Array:

@@ -46,7 +46,7 @@ func _run() -> void:
 	_check(hero.config_id == "player_hero", "玩家角色使用 player_hero 配置")
 	_check(hero.current_party_id == player.party_id, "玩家角色属于玩家部队")
 	_check(hero.is_alive(), "玩家角色创建时存活")
-	_check(hero.max_hp == 80 and hero.attack == 10, "玩家角色使用配置最终属性")
+	_check(hero.max_hp == 180 and hero.attack == 25, "玩家角色使用三级配置最终属性")
 	_check(hero.level == 1 and hero.exp == 0, "玩家角色使用正常等级/经验")
 
 	# 普通士兵不能带玩家角色身份。

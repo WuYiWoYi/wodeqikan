@@ -3,7 +3,7 @@
 **所属层：** 玩法逻辑 / 表现
 **核心脚本：** `Scripts/Systems/WorldMap/world_map_manager.gd`、`Scripts/UI/WorldMap/world_map.gd`
 **场景：** `Scenes/WorldMap/world_map.tscn`
-**状态：** 基础移动、NPC 自主商队/巡逻/强盗/治安队、统一 Party 数据、恢复原尺寸的圆形部队标记、放大的村庄圆形标记与位于上方的固定屏幕名称、部队跟随、视野查询、地点交互与村庄入口、底部 NPC 遭遇对话（领袖头像/对白/动态选项）、遭遇原因与敌对追击禁离开、玩家追击接触、追逐焦点保护、人数图标与悬浮信息、日期/时间段 UI、单战斗标记与多方战斗汇总、世界日志面板已实现
+**状态：** 基础移动、NPC 自主商队/巡逻/强盗/治安队、统一 Party 数据、恢复原尺寸的圆形部队标记、放大的村庄圆形标记与位于上方的固定屏幕名称、部队跟随、视野查询、地点交互与村庄入口、底部 NPC 遭遇对话（领袖头像/对白/动态选项）、遭遇原因与敌对追击禁离开、玩家追击接触、追逐焦点保护、人数图标与悬浮信息、日期/时间段 UI、按战斗 ID 独立的多战斗标记与多方战斗汇总、世界日志面板、封地信息与采邑征召入口、部队浮动提示已实现
 
 ---
 
@@ -171,29 +171,33 @@ WorldSimulation 更新 PartyData.world_position
 
 ### 4.2 战斗中图标与战斗标记
 
-当 `BattleManager.current_battle` 非空时：
+大地图按 `battle_id` 独立管理每场战斗的标记：`_battle_markers: { battle_id: BattleMarker }`。
 
-- 同一场 `BattleSession` 的所有参战部队只显示一个 `BattleMarker`，位置为 `session.world_position`；
-- 参战部队原有 `PartyIcon` 暂时隐藏，未参战部队保持正常显示；
-- 战斗标记下方显示总存活人数；
-- 屏幕空间显示 `BattleSummaryPanel`，按 `side_index` 分组：
-  - 同一战斗侧的多个部队并列展示，不使用阵营代替战斗侧；
+- 每场进行中的 `BattleSession` 各自显示一个 `BattleMarker`，位置为该场 `session.world_position`；
+- 每次刷新读取 `BattleManager.get_active_battles()`：为新战斗创建标记、更新现有标记位置与存活人数、删除已结束战斗的标记；删除一场不清理其他标记；
+- 参战部队原有 `PartyIcon` 按“是否参与任意进行中战斗”隐藏；未参战部队保持正常显示；
+- 一场战斗结束时只恢复该场仍存活部队的图标，其他战斗的参战图标保持隐藏；
+- 战斗标记下方显示该场战斗自己的总存活人数；
+- 屏幕空间显示单个 `BattleSummaryPanel`，目标为 `current_battle`，否则为战斗 ID 最小的一场：
+  - 每次显示只对应一场战斗的数据，不得把战斗 A 的参战信息显示到战斗 B；
+  - 按 `side_index` 分组；同一战斗侧的多个部队并列展示，不使用阵营代替战斗侧；
   - 每支部队先列出名称，再按兵种 + 骑乘状态合并存活人数，例如「民兵（3）」「骑马职业步兵（2）」；
   - 不同战斗侧之间显示分隔线；
   - 只读取 `BattleUnitState`，不修改战斗或部队数据；
-- 每次离屏小时结算、部队加入或战斗结束时，面板文本与人数自动刷新；
-- 战斗结束后移除标记、清空汇总并恢复所有普通部队图标。
+- 每次离屏小时结算、部队加入或战斗结束时，标记与汇总自动刷新；
+- 无进行中的战斗时移除全部标记、清空汇总并恢复所有普通部队图标。
+- 测试接口：`get_battle_marker()`（汇总目标标记）、`get_battle_marker_for(battle_id)`、`get_battle_marker_count()`。
 
 ### 4.3 世界日志面板
 
-- 大地图左下角固定显示 `WorldLogPanel`，位于底部信息栏上方，不随摄像机移动。
+- 大地图左下角固定显示共享 `WorldLogPanel`，位于底部信息栏上方，不随摄像机移动；村庄右上角复用同一组件。
 - 面板只读取 `WorldContext.world_log_manager` 的 `WorldLogEntry` 列表：
   - 标题「世界日志」；
   - 时间 + 事件文本；
   - `ScrollContainer` 支持历史记录滚动；
   - 新事件通过 `entry_added` 自动刷新并滚动到最新。
 - 面板与滚动区域使用 `MOUSE_FILTER_PASS`，日志文本不拦截输入，不影响地图点击和移动。
-- 详细事件来源、上限与持久化预留见 [World_Log_System.md](World_Log_System.md)。
+- 详细事件来源、上限与存档恢复见 [World_Log_System.md](World_Log_System.md)。
 
 ### 4.4 时间显示
 
@@ -201,24 +205,59 @@ WorldSimulation 更新 PartyData.world_position
 - 时间段文字来自 `TimeManager.get_time_period()`；具体区间集中配置。
 - 倍率仍显示暂停 / 1x / 2x。
 
-## 5. 地点交互（Milestone 1，阶段 6 修订）
+## 5. 地点交互（Milestone 1，阶段 7 修订）
 
-地点交互只由玩家主动点击触发，不属于移动逻辑，也不再做逐帧距离检测：
+点击地点 = 设置移动目标；到达地点 = 停止、暂停、打开面板。两者严格分离：
 
 ```text
 左键点击地图
-  → 点击位置 <= 45 像素内存在地点：停止部队、时间设为暂停、打开面板
-  → 否则按原有逻辑处理部队点击或地图移动
+  → 点击位置 <= 45 像素内存在地点
+      ├── 玩家与地点距离 <= 40：直接停止、暂停、打开面板
+      └── 否则：
+          ├── 记录 _pending_settlement_interaction_id
+          ├── WorldMapManager.set_party_target(玩家, 地点坐标)
+          ├── 清除追逐焦点与跟随指令
+          ├── 基础倍率切回 1x
+          └── 不打开面板、不压入 ui_panel
+  → 世界继续运行，玩家部队自动移动
+  → _process 检测 pending：
+      地点存在 + 玩家可用 + 已停止 + 距离 <= 40 + 移动目标仍指向该地点
+      → 清空 pending → _open_settlement()
+      → stop_party + 基础倍率 0 + push_pause(ui_panel) + 显示面板
   → 面板关闭后保持暂停
 ```
 
-- 玩家正常寻路、追击部队或路过任何村庄/城镇/城堡时，都不会暂停或打开地点面板。
+- `_open_settlement()` 仍负责停止部队、暂停世界与显示面板；只有到达检测或已在地点附近时调用。
+- `_pending_settlement_interaction_id` 仅属于大地图运行时状态，不进入存档。
+- 玩家正常寻路、追击部队或路过任何村庄/城镇/城堡时，不会创建 pending，也不会暂停或打开地点面板。
 - 点击地点与其图标附近的部队重叠时，以点击位置更近的对象为准。
+- 点击普通地图位置、点击部队、点击另一个地点、外部停止、进入战斗或离开大地图时清除 pending；点击另一个地点直接替换目标 ID。
+- 已停止但离目标超过 40 像素时取消本次交互，不打开面板。
 - 打开面板压入 `ui_panel` 暂停原因，并设置基础倍率为 0。
 - 离开面板只移除暂停原因，不恢复基础倍率；玩家需主动选择 1x / 2x。
 - 村庄面板提供“进入村庄”：`WorldMap.enter_village()` 校验 `scene_path`、压入 `small_scene`、释放 `ui_panel` 并切换场景。
-- 从小场景返回时，`GameManager.pending_settlement_latch_id` 记录当前村口村庄，供地点面板的进入按钮使用；返回后不会自动打开面板。
-- 城镇/城堡与村庄共用同一套点击入口；只有村庄显示“进入村庄”按钮。
+- 从小场景返回时，`GameManager.pending_settlement_latch_id` 记录当前村口村庄，供地点面板的进入按钮使用；返回后不会自动打开面板，也不会残留 pending。
+- 城镇/城堡与村庄共用同一套点击、移动、到达规则；只有村庄显示“进入村庄”按钮。
+
+### 5.1 封地信息与采邑征召（阶段 7 新增）
+
+地点面板读取 `SettlementData` 与 `LordManager`，只读显示：
+
+| 节点 | 内容 |
+|---|---|
+| `SettlementOwnerLabel` | 归属领主显示名；无主时显示“无主” |
+| `SettlementFamilyLabel` | 家族显示名 |
+| `SettlementPopulationLabel` | 人口 |
+| `SettlementProsperityLabel` | 繁荣度 |
+| `SettlementTaxLabel` | `tax_income_per_day`（统一由 `TaxCalculator` 计算） |
+| `SettlementFiefLabel` | 采邑储备/上限与补充状态 |
+| `SettlementRecruitStatusLabel` | 上次征召结果或失败原因 |
+| `SettlementRecruitFiefButton` | 仅在玩家自有村庄显示；储备为 0 时禁用 |
+
+- 点击按钮调用 `FiefRecruitmentManager.recruit_group(settlement_id, player_lord_id)`；UI 不计算编制、成本或周期。
+- 成功后 `EventBus.fief_recruited` 触发玩家部队图标 `show_floating_text("招募了N组采邑")`，并刷新面板。
+- 非自有村庄隐藏按钮，不显示不可用入口。
+- 详细规则见 [Fief_Recruitment_System.md](Fief_Recruitment_System.md)。
 
 ## 6. 视野
 
@@ -250,23 +289,27 @@ WorldSimulation 更新 PartyData.world_position
   → 敌对阵营跳过（由主动遭遇流程处理）
   → 距离 <= 40 像素：停止玩家部队、打开 PartyDialoguePanel、压入 ui_panel 暂停
   → 离开面板：移除暂停原因，恢复此前基础倍率
-  → 发起战斗（世界上没有其它战斗）：
+  → 目标部队不在任何战斗中、玩家也不在战斗中：
       → BattleManager.start_battle([玩家], [敌方], 位置)
       → 先压入 battle 暂停，再释放 ui_panel
       → SceneManager.change_scene(BattleScene)
-  → 世界上已有另一场战斗（含 NPC 离屏战斗）：
-      → 点击方是当前战斗参战方且玩家可加入：按钮变为“加入战斗”
-          → BattleManager.try_join_battle(玩家)
-          → 复用同一场战斗并切换 BattleScene
-      → 其它情况：禁用战斗按钮并说明真实原因
-          “世界上已有另一场战斗正在进行，暂时无法另开战场”
+  → 目标部队正在某场离屏战斗、玩家可加入：
+      → 按钮变为“加入战斗”
+      → BattleManager.try_join_battle(玩家, 目标 battle_id)
+      → 复用同一场战斗并切换 BattleScene
+  → 目标部队正在屏幕战斗、玩家已在战斗、或无法加入：
+      → 禁用战斗按钮并说明本场战斗的真实原因
+          “对方正在屏幕战斗中，暂时无法开战”
           “对方正在战斗中，靠近战场后可加入战斗”
+          “玩家部队当前正在战斗中”
 ```
+
+世界其他位置存在战斗不会阻塞玩家与无关部队开战。
 
 - 普通寻路、追击其他目标时路过中立/友方部队不会自动打开对话。
 - 玩家点击部队后 `focus_party_id` 指向该部队；只有该目标会触发普通对话。
 - 目标被击溃、进入战斗、离开交互范围或玩家改为普通移动后清除焦点。
-- `BattleManager` 全局只允许一场战斗；普通部队对话必须读取 `current_battle`，不能只显示“无法开始战斗”。
+- 普通部队对话只读取**被点击部队自己所在的那场战斗**（`get_battle_for_party()`）；不得使用 `current_battle` 猜测，也不得因世界其他战斗而禁用按钮。
 - 目标 `IN_BATTLE` / `RETURNING` / `DISABLED` 时分别显示“对方正在战斗中”“对方正在返回途中”“该部队已无法参战”。
 
 ### 7.2 AI 主动遭遇
@@ -281,9 +324,12 @@ WorldSimulation 更新 PartyData.world_position
 - 接触成立后立即清除双方移动目标、追击指令、`focus_party_id` 与攻击意图，随后暂停时间并弹出底部遭遇对话；不会继续推挤、回弹或重复创建战斗。
 - 遭遇创建时记录实际原因：`ENEMY_PURSUIT`（敌对 AI 主动追击成功）、`PLAYER_INITIATED`（玩家主动接近/追击）、`PASSIVE_ENCOUNTER` 与 `OTHER`（预留）。原因决定对话文本与可用选项。
 - 满足条件后：
-  - 双方都未参战 → `BattleManager.start_battle(..., offscreen = true)`；
-  - 一方已在离屏战斗 → 检查另一方是否可以加入；
+  - 双方都未参战 → `BattleManager.start_battle(..., offscreen = true)` 创建新的独立战斗；
+  - 一方已在离屏战斗、另一方空闲 → 用该方自己的 `battle_id` 检查并加入；
+  - 双方已分别处于不同战斗 → 跳过本次遭遇，禁止合并会话或让一方同时参战；
+  - 双方已在同一场战斗 → 不重复创建或加入；
   - 玩家被主动拦截 → 停止双方并进入遭遇对话，不直接创建战斗。
+- 世界其他位置已有的战斗不阻塞新遭遇；每支部队只受自己所在战斗限制。
 - 普通巡逻/普通移动没有攻击意图，不会因为接近而触发战斗。
 - 中立部队与玩家、或与无关敌对部队的距离接近，不会自动暂停或弹窗；必须通过 `FactionManager` 敌对判定和实际追击关系。
 - 玩家追击目标 A 时，路过无关敌对部队 B 不会被打断；只有 B 自己的 `attack_intent` 指向玩家并实际追上时才会触发 AI 主动遭遇。
@@ -392,7 +438,7 @@ WorldSimulation 更新 PartyData.world_position
 | AI 对 AI 离屏战斗 | 已实现（每游戏小时结算伤亡，最多 48 小时） |
 | 玩家追击同向移动敌军 | 已实现（`focus_party_id` 作为追击意图，接触后立即停止） |
 | 玩家接近离屏战斗交互 | 已实现（加入/离开面板，独立暂停原因） |
-| 同一战斗单标记 + 多方汇总 UI | 已实现（按 `side_index` 分组，实时人数） |
+| 多战斗标记 + 多方汇总 UI | 已实现（按 `battle_id` 独立标记，按 `side_index` 分组，实时人数） |
 | 玩家中途加入离屏战斗 | 已实现（加入已有战斗，不重复创建） |
 | `battle_started` 自动进入战斗场景 | 已实现（玩家参与时） |
 | 玩家部队跟随目标部队 | 已实现（0.5 世界秒刷新） |
@@ -400,13 +446,16 @@ WorldSimulation 更新 PartyData.world_position
 | 点击地图后切 1x | 已实现（不清除暂停原因） |
 | 表现层图标 | 已实现（程序绘制） |
 | 摄像机跟随/平移/缩放 | 已实现 |
-| 地点交互 | 已实现（仅鼠标主动点击打开，路过不自动触发） |
+| 地点交互 | 已实现（点击设置移动目标，到达后打开；路过不触发） |
 | 追逐焦点保护 | 已实现（`focus_party_id`；无关部队/离屏战斗不打断） |
 | 村庄入口 | 已实现（点击地点面板进入村庄） |
 | 部队图标人数 | 已实现（去掉名称，只显示人数） |
 | 鼠标悬浮信息 | 已实现（名称 + 兵种/骑乘合并统计，不拦截点击） |
 | 世界时间 UI | 已实现（年月日 + 时间段） |
-| 左下角世界日志 | 已实现（`WorldLogManager` + 滚动面板） |
+| 左下角世界日志 | 已实现（`WorldLogManager` + 滚动面板，与村庄共享） |
+| 地点封地信息 | 已实现（领主/家族/人口/繁荣度/税收/采邑储备） |
+| 采邑征召入口 | 已实现（仅玩家自有村庄；调用统一管理器） |
+| 部队上方浮动提示 | 已实现（`PartyIcon.show_floating_text`，成功后显示“招募了N组采邑”） |
 | 中立/无关部队不自动弹窗 | 已实现（只对主动点击目标打开普通对话） |
 | AI 主动追击才自动遭遇 | 已实现（实际追击关系 + 敌对判定 + 单次触发） |
 
@@ -417,7 +466,7 @@ WorldSimulation 更新 PartyData.world_position
 - 玩家加入离屏战斗时是否允许手动选择战斗侧（当前按阵营关系自动确定）。
 - 战斗交互面板是否扩展“观察/离开并继续移动”等选项。
 - 遭遇对话是否继续扩展谈判/缴赎等选项（当前为战斗 + 按原因动态生成的离开选项；ENEMY_PURSUIT 不允许离开）。
-- 地点点击是否扩展“先移动到地点再打开面板”（当前点击即打开）。
+- 地点到达是否需要在移动中途显示目标高亮或路径指示（当前只显示普通移动）。
 - 路径规划、地形阻挡与道路加成的具体规则。
 
 ## 11. 圆形部队标记、村庄标记与统一速度（阶段 6 新增）
@@ -491,4 +540,5 @@ WorldSimulation 更新 PartyData.world_position
 - `BattleSummaryContent` 为 `HBoxContainer`；每个 `side_index` 生成一列 `VBoxContainer`。
 - 列头为“战斗侧 N”；同侧部队在列内纵向排列，伤亡实时刷新。
 - 第三侧起自动增加列，面板宽度按列数扩展；战斗结束移除所有列并清空文本。
+- 汇总面板一次只展示一场战斗：优先玩家 `current_battle`，否则取战斗 ID 最小的一场；切换目标时整列重建，禁止混用两场战斗的数据。
 - 提供 `get_battle_summary_column_count()` 与 `get_battle_summary_side_indices()` 供自动化验证。

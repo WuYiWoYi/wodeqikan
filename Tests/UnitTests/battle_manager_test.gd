@@ -93,7 +93,13 @@ func _run() -> void:
 	_check(is_zero_approx(TimeManager.get_effective_world_scale()), "战斗期间世界暂停")
 	_check(
 		battle_manager.start_battle(attacks_a, attacks_b, Vector2.ZERO) == null,
-		"已有战斗时拒绝重复开始"
+		"参战部队已在其他战斗中时拒绝重复开始"
+	)
+	_check(
+		battle_manager.get_battle(session.battle_id) == session
+		and battle_manager.has_any_active_battles()
+		and battle_manager.get_battle_for_party(party_a.party_id) == session,
+		"战斗写入 active_battles 与 party_battle_lookup"
 	)
 
 	# 玩家战败结算：进攻方全灭，防守方保留剩余 HP。
@@ -110,7 +116,16 @@ func _run() -> void:
 		),
 		"战败结算成功"
 	)
-	_check(battle_manager.current_battle == null, "结算后清理会话")
+	_check(battle_manager.current_battle == null, "结算后清理玩家屏幕战斗")
+	_check(
+		battle_manager.get_battle(session.battle_id) == null
+		and not battle_manager.has_any_active_battles(),
+		"结算后清理战斗注册表"
+	)
+	_check(
+		battle_manager.get_battle_for_party(party_b.party_id) == null,
+		"结算后清理部队战斗索引"
+	)
 	_check(party_a.member_unit_ids.is_empty(), "战败方成员全部移除")
 	_check(units.get_unit(unit_a1.unit_id) == null, "战败方单位数据删除 1")
 	_check(units.get_unit(unit_a2.unit_id) == null, "战败方单位数据删除 2")
@@ -130,8 +145,118 @@ func _run() -> void:
 		"不能重复结算"
 	)
 
+	_test_parallel_battles(units, parties, battle_manager, militia)
+
 	TimeManager.stop_session()
 	TimeManager.clear_pauses()
+
+
+## 世界不同位置的两场独立战斗可以同时存在、独立结算。
+func _test_parallel_battles(
+	units: UnitManager,
+	parties: PartyManager,
+	battle_manager: BattleManager,
+	militia: UnitConfig
+) -> void:
+	var c := _make_party(parties, units, militia, FACTION_A, Vector2(100.0, 100.0), "C 队")
+	var d := _make_party(parties, units, militia, FACTION_B, Vector2(120.0, 100.0), "D 队")
+	var e := _make_party(parties, units, militia, FACTION_A, Vector2(900.0, 900.0), "E 队")
+	var f := _make_party(parties, units, militia, FACTION_B, Vector2(920.0, 900.0), "F 队")
+
+	var first := battle_manager.start_battle(
+		[c.party_id], [d.party_id], Vector2(110.0, 100.0), true
+	)
+	var second := battle_manager.start_battle(
+		[e.party_id], [f.party_id], Vector2(910.0, 900.0), true
+	)
+	_check(first != null and second != null, "不同位置可同时创建两场离屏战斗")
+	if first == null or second == null:
+		return
+	_check(
+		battle_manager.get_active_battles().size() == 2
+		and battle_manager.get_battle(first.battle_id) == first
+		and battle_manager.get_battle(second.battle_id) == second,
+		"active_battles 中存在两个独立会话"
+	)
+	_check(
+		battle_manager.current_battle == null,
+		"AI 离屏战斗不占用玩家屏幕战斗槽位"
+	)
+	_check(
+		c.battle_state == PartyData.BattleState.IN_BATTLE
+		and d.battle_state == PartyData.BattleState.IN_BATTLE
+		and e.battle_state == PartyData.BattleState.IN_BATTLE
+		and f.battle_state == PartyData.BattleState.IN_BATTLE,
+		"两场战斗的参战部队分别被锁定"
+	)
+	_check(
+		battle_manager.get_battle_for_party(c.party_id) == first
+		and battle_manager.get_battle_for_party(e.party_id) == second,
+		"部队战斗索引指向正确会话"
+	)
+	_check(
+		is_equal_approx(TimeManager.get_effective_world_scale(), TimeManager.SPEED_NORMAL),
+		"AI 离屏战斗不暂停世界"
+	)
+
+	# 已在战斗中的部队不能加入另一场战斗。
+	var extra := _make_party(
+		parties, units, militia, FACTION_B, Vector2(1000.0, 1000.0), "额外队"
+	)
+	_check(
+		battle_manager.start_battle(
+			[c.party_id], [extra.party_id], Vector2(1000.0, 1000.0), true
+		) == null,
+		"同一部队不能同时加入两场战斗"
+	)
+	_check(
+		not battle_manager.try_join_battle(c.party_id, second.battle_id),
+		"已参战部队不能加入另一场战斗"
+	)
+
+	battle_manager.finish_battle(first.battle_id, BattleSession.BattleResult.DRAW)
+	_check(
+		battle_manager.get_battle(first.battle_id) == null
+		and battle_manager.get_battle(second.battle_id) == second,
+		"结束一场战斗不影响另一场"
+	)
+	_check(
+		e.battle_state == PartyData.BattleState.IN_BATTLE
+		and f.battle_state == PartyData.BattleState.IN_BATTLE,
+		"另一场战斗的部队仍保持锁定"
+	)
+	_check(
+		battle_manager.get_battle_for_party(c.party_id) == null
+		and battle_manager.get_battle_for_party(e.party_id) == second,
+		"只清理本场战斗的部队索引"
+	)
+
+	battle_manager.finish_battle(second.battle_id, BattleSession.BattleResult.DRAW)
+	_check(
+		not battle_manager.has_any_active_battles()
+		and battle_manager.get_active_battles().is_empty(),
+		"两场战斗结束后全部清空"
+	)
+	_check(
+		battle_manager.get_battle_for_party(e.party_id) == null
+		and battle_manager.get_battle_for_party(f.party_id) == null,
+		"不存在失效的部队战斗索引"
+	)
+
+
+func _make_party(
+	parties: PartyManager,
+	units: UnitManager,
+	militia: UnitConfig,
+	faction_id: String,
+	position: Vector2,
+	party_name: String
+) -> PartyData:
+	var party := parties.create_party(faction_id, position, party_name)
+	for i: int in range(2):
+		var unit := units.create_unit(militia, faction_id)
+		parties.add_member(party.party_id, unit.unit_id)
+	return party
 
 
 func _check(condition: bool, message: String) -> void:

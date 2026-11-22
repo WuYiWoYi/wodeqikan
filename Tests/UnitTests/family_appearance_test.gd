@@ -49,7 +49,7 @@ func _run() -> void:
 
 
 func _test_family_configs() -> void:
-	_check(_context.family_registry.get_all_configs().size() == 2, "注册两个家族")
+	_check(_context.family_registry.get_all_configs().size() == 3, "注册三个家族")
 	var bari := _context.family_registry.get_config(WorldInitializer.FAMILY_BARI_ID)
 	var moxixi := _context.family_registry.get_config(
 		WorldInitializer.FAMILY_MOXIXI_ID

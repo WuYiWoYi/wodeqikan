@@ -2,7 +2,7 @@
 
 **场景：** `Scenes/Village/village.tscn`
 **控制器：** `Scripts/UI/Village/village_scene.gd`
-**状态：** 进入/离开、玩家表现、村庄头人、数据驱动对话、越界倒计时已实现；商店、招募、任务、城镇/城堡小场景未实现
+**状态：** 进入/离开、玩家表现、村庄头人、数据驱动对话、越界倒计时、冒险者候选人、采邑对话入口与共享日志面板已实现；商店、任务、城镇/城堡小场景未实现
 
 ---
 
@@ -103,6 +103,16 @@
 - 对话期间玩家移动被禁用，防止误操作。
 - 本阶段没有巡逻、日程、任务、好感度或交易。
 
+### 5.1 冒险者候选人 NPC（阶段 7 新增）
+
+- 每个 `AdventurerCandidateData` 在村庄生成一个运行时 NPC 表现，位置来自 `candidate.world_position`，外观来自持久化 `appearance`。
+- 候选 NPC 与头人共用 `UnitVisual` 和距离规则：点击半径 46 像素、玩家距离 <= 130 像素。
+- 点击后打开底部对话，选项 action 为 `recruit_adventurer`；显示候选人姓名与 1 金币费用。
+- 招募成功后关闭对话、刷新“已招募”标签；已招募候选人在玩家离开村庄前仍保留。
+- 已招募候选人再次对话不再提供招募选项；离开村庄时清理候选人记录，真实单位保留。
+- 候选 NPC 只是表现，不是 `UnitData`，不进入 UnitManager / PartyManager。
+- 详细数据与刷新规则见 [Adventurer_Recruitment_System.md](Adventurer_Recruitment_System.md)。
+
 ## 6. 对话
 
 - 对话配置：`Data/Dialogues/village_elder.tres`（`DialogueData`）。
@@ -110,7 +120,8 @@
   - NPC 名称；
   - 对话文本；
   - 数据驱动选项列表。
-- 当前只有一个选项“谢谢你，我要走了”，选择后关闭对话并恢复移动。
+- 基础选项“谢谢你，我要走了”始终存在，选择后关闭对话并恢复移动。
+- 玩家自有且有采邑储备时追加“征召一组采邑”，action 为 `recruit_fief`，调用 `FiefRecruitmentManager.recruit_group()`。
 - 文本支持 `{village_name}` 占位符，由村庄场景替换为当前地点名称。
 - 对话期间压入 `world_dialogue` 暂停原因；关闭时成对移除。村庄本身仍由 `small_scene` 暂停世界。
 - 详细数据模型见 [Dialogue_System.md](Dialogue_System.md)。
@@ -156,6 +167,11 @@
 | `advance_exit_countdown(delta)` | 手动推进倒计时 |
 | `is_returning_to_world()` | 是否已触发返回 |
 | `get_player_visual()` | 检查武器显隐与权威数据引用 |
+| `get_candidate_count()` | 当前候选 NPC 表现数量 |
+| `get_candidate_visual(candidate_id)` | 查询候选人表现节点 |
+| `get_candidate_position(candidate_id)` | 查询候选人生成位置 |
+| `try_interact_with_candidate(candidate_id)` | 按距离规则尝试与候选人对话 |
+| `get_world_log_panel()` | 查询村庄共享日志面板 |
 | `get_camera_rig()` / `is_camera_free_mode()` | 检查摄像机跟随/自由状态 |
 | `set_camera_free_mode(active)` | 切换跟随/自由视角 |
 | `set_test_free_camera_input(direction, active)` | 模拟自由视角移动 |
@@ -174,7 +190,10 @@
 | 屏幕下方数据驱动对话 | 已实现（单选项） |
 | 越界 5 秒倒计时/取消/返回 | 已实现 |
 | 摄像机跟随 / 自由视角 / 边界 | 已实现（与战斗共用 `SceneCameraRig`） |
-| 村庄商店、招募、任务、好感度 | 未实现 |
+| 冒险者候选人 NPC 与 1 金币招募 | 已实现（阶段 7） |
+| 玩家自有封地采邑征召对话 | 已实现（与大地图共用 `FiefRecruitmentManager`） |
+| 村庄右上角共享世界日志面板 | 已实现 |
+| 村庄商店、普通兵员招募、任务、好感度 | 未实现 |
 | 城镇/城堡独立小场景 | 未实现 |
 | 村庄碰撞、城门、出口通道 | 未实现 |
 
@@ -183,3 +202,21 @@
 - 村庄小场景不读取 `SettlementData.family_id`，也不显示家族旗帜；家族旗帜只用于大地图固定屏幕名称标签。
 - 村庄名称、对话与场景加载仍以 `SettlementData.settlement_id` / `display_name` 为数据来源。
 - 巴里、墨西西只改变地点显示名与家族归属，不改变村庄场景路径、进入/返回流程或村庄头人。
+
+## 12. 候选人生命周期与日志（阶段 7 新增）
+
+```text
+进入村庄
+  → 读取 SettlementData.adventurer_candidates 生成 NPC
+  → 点击候选人 → 对话（recruit_adventurer）
+  → AdventurerRecruitmentManager.recruit_candidate()
+  → 创建真实 UnitData + PartyManager.add_member + 扣 1 金币
+  → 候选人状态 RECRUITED_PENDING_DEPARTURE（仍在场景中标记“已招募”）
+  → 离开村庄 _request_exit()
+  → cleanup_departed_candidates() 移除候选人记录
+  → 真实单位保留在玩家部队
+```
+
+- 再次进入村庄只显示仍为 `AVAILABLE` 的候选人，不会重复显示或重复招募。
+- 村庄右上角 `WorldLogPanel` 与大地图共享 `WorldLogManager`，可立即看到采邑/冒险者招募日志。
+- 日志面板只读，不改变候选人状态或世界数据。

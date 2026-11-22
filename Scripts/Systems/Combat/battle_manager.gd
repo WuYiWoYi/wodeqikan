@@ -23,12 +23,21 @@ const VICTORY_GOLD_BASE: int = 50
 const GOLD_PER_ENEMY_CASUALTY: int = 5
 const MAX_LOOT_ITEMS: int = 3
 
+## 玩家当前正在参与的屏幕战斗。AI 离屏战斗不写入此字段。
+## 它不再代表世界上唯一的战斗；世界可同时存在多场战斗。
 var current_battle: BattleSession = null
+## 所有进行中的战斗：{ battle_id: BattleSession }。
+var active_battles: Dictionary = {}
+## 部队参战索引：{ party_id: battle_id }。每支部队同一时间只能参与一场战斗。
+var party_battle_lookup: Dictionary = {}
 var player_party_id: String = ""
 var player_profile: PlayerProfile = null
 ## 离屏战斗小时结算参数；可由测试或后续配置替换。
 var offscreen_config: OffscreenBattleConfig = null
+## 离屏结算模板；每场离屏战斗实际使用独立的 Resolver 与随机序列。
 var offscreen_resolver: OffscreenBattleResolver = null
+## { battle_id: OffscreenBattleResolver }
+var _offscreen_resolvers: Dictionary = {}
 
 var _unit_manager: UnitManager = null
 var _party_manager: PartyManager = null
@@ -74,8 +83,50 @@ func _load_offscreen_config() -> OffscreenBattleConfig:
 	return OffscreenBattleConfig.new()
 
 
+## 玩家是否正处于屏幕战斗中。
 func is_in_battle() -> bool:
 	return current_battle != null
+
+
+## 世界中是否存在任意进行中的战斗（包括 AI 离屏战斗）。
+func has_any_active_battles() -> bool:
+	return not get_active_battles().is_empty()
+
+
+## 按 ID 查询进行中的战斗；已结束或不存在时返回 null。
+func get_battle(battle_id: String) -> BattleSession:
+	var session := active_battles.get(battle_id) as BattleSession
+	if session == null or session.status == BattleSession.Status.ENDED:
+		return null
+	return session
+
+
+## 查询某支部队正在参与的战斗；未参战或战斗已结束时返回 null。
+func get_battle_for_party(party_id: String) -> BattleSession:
+	if party_id.is_empty():
+		return null
+	var battle_id: String = str(party_battle_lookup.get(party_id, ""))
+	if battle_id.is_empty():
+		return null
+	var session := get_battle(battle_id)
+	if session == null or not session.is_party_involved(party_id):
+		party_battle_lookup.erase(party_id)
+		return null
+	return session
+
+
+## 当前全部进行中的战斗（快照，已过滤结束会话）。
+func get_active_battles() -> Array[BattleSession]:
+	var sessions: Array[BattleSession] = []
+	for value: Variant in active_battles.values():
+		var session := value as BattleSession
+		if session == null or session.status == BattleSession.Status.ENDED:
+			continue
+		sessions.append(session)
+	sessions.sort_custom(func(a: BattleSession, b: BattleSession) -> bool:
+		return a.battle_id < b.battle_id
+	)
+	return sessions
 
 
 ## 兼容旧双方调用。offscreen 为 true 时不停世界，用于 NPC 对 NPC 战斗。
@@ -96,9 +147,6 @@ func start_battle(
 func start_battle_by_sides(
 	sides: Array, world_position: Vector2, offscreen: bool = false
 ) -> BattleSession:
-	if current_battle != null:
-		push_warning("已有进行中的战斗，拒绝重复开始")
-		return null
 	if _unit_manager == null or _party_manager == null or _id_generator == null:
 		push_error("BattleManager 尚未装配")
 		return null
@@ -124,6 +172,9 @@ func start_battle_by_sides(
 				push_warning("同一部队不能重复参战: %s" % party.party_id)
 				return null
 			seen[party.party_id] = true
+			if _is_party_in_battle(party.party_id):
+				push_warning("部队已处于其他战斗中: %s" % party.party_id)
+				return null
 			if not party.is_available_for_world():
 				push_warning("部队不可参战: %s" % party.party_id)
 				return null
@@ -141,6 +192,10 @@ func start_battle_by_sides(
 
 	var player_involved: bool = _contains_player(all_parties)
 	if player_involved:
+		# 玩家同一时间只能参与一场屏幕战斗。
+		if current_battle != null:
+			push_warning("玩家已处于屏幕战斗中，拒绝开始新的玩家战斗")
+			return null
 		offscreen = false
 
 	var session := BattleSession.new()
@@ -161,16 +216,20 @@ func start_battle_by_sides(
 			push_warning("战斗侧没有有效士兵")
 			return null
 
-	current_battle = session
+	active_battles[session.battle_id] = session
 	for party: PartyData in all_parties:
+		party_battle_lookup[party.party_id] = session.battle_id
 		_lock_party(party)
+
+	if player_involved:
+		current_battle = session
 
 	if not offscreen:
 		TimeManager.push_pause(GameManager.PAUSE_REASON_BATTLE)
 		session.paused_world = true
-	elif offscreen_resolver != null:
-		# 每场离屏战斗重置随机源；配置固定 seed 时便于自动化复现。
-		offscreen_resolver.reset_random()
+	else:
+		# 每场离屏战斗使用独立 Resolver 与随机序列；固定 seed 时仍可复现。
+		_create_offscreen_resolver(session.battle_id)
 
 	EventBus.battle_started.emit(session.battle_id)
 	return session
@@ -179,19 +238,25 @@ func start_battle_by_sides(
 ## 离屏战斗按世界时间推进；由 WorldSimulation 每个 world_tick 调用。
 ## 每满 1 个游戏小时结算一次伤亡；屏幕战斗（offscreen = false）完全跳过。
 func tick(world_delta: float) -> void:
-	var session := current_battle
+	if world_delta <= 0.0:
+		return
+	# 先取快照：结算过程中战斗可能结束并从 active_battles 删除，
+	# 不得因此跳过其他战斗的本次推进。
+	for session: BattleSession in get_active_battles():
+		if session.offscreen:
+			_tick_offscreen_battle(session, world_delta)
+
+
+func _tick_offscreen_battle(session: BattleSession, world_delta: float) -> void:
 	if session == null or session.status == BattleSession.Status.ENDED:
 		return
-	if not session.offscreen or world_delta <= 0.0:
-		return
-
 	session.elapsed_world_seconds += world_delta
 	session.offscreen_settlement_accumulator += world_delta
 	var interval: float = _get_offscreen_interval()
 	var settled_this_tick: bool = false
 
 	while session.offscreen_settlement_accumulator + 0.0001 >= interval:
-		if current_battle != session or not session.offscreen:
+		if not _is_battle_active(session) or not session.offscreen:
 			return
 		session.offscreen_settlement_accumulator -= interval
 		_settle_offscreen_hour(session)
@@ -211,27 +276,45 @@ func tick(world_delta: float) -> void:
 		_try_finish_offscreen_battle(session, true)
 
 
-## 测试/调试入口：连续推进小时结算，直到战斗结束或达到安全上限。
+## 测试/调试入口：推进全部离屏战斗直到结束或达到安全上限。
+## 多场战斗时逐场独立结算，互不影响。
 func resolve_current_battle_now() -> bool:
-	var session := current_battle
+	var resolved_any: bool = false
+	for session: BattleSession in get_active_battles():
+		if not session.offscreen:
+			continue
+		resolved_any = true
+		_resolve_offscreen_battle_now(session)
+	return resolved_any
+
+
+## 测试/调试入口：推进指定战斗直到结束或达到安全上限。
+func resolve_battle_now(battle_id: String) -> bool:
+	var session := get_battle(battle_id)
 	if session == null or not session.offscreen:
 		return false
+	_resolve_offscreen_battle_now(session)
+	return true
+
+
+func _resolve_offscreen_battle_now(session: BattleSession) -> void:
 	var guard: int = 0
-	while current_battle == session and session.offscreen:
+	while _is_battle_active(session) and session.offscreen:
 		_settle_offscreen_hour(session)
 		if _try_finish_offscreen_battle(session, false):
-			return true
+			return
 		guard += 1
 		if guard >= _get_max_offscreen_hours():
-			return _try_finish_offscreen_battle(session, true)
-	return false
+			_try_finish_offscreen_battle(session, true)
+			return
 
 
 func _settle_offscreen_hour(session: BattleSession) -> void:
-	if offscreen_resolver == null:
+	var resolver: OffscreenBattleResolver = _get_offscreen_resolver(session.battle_id)
+	if resolver == null:
 		return
 	session.offscreen_settlements_done += 1
-	offscreen_resolver.settle_hour(session, _unit_manager)
+	resolver.settle_hour(session, _unit_manager)
 	# 每小时伤亡立即从部队成员列表移除，使世界数据中的兵力随战斗变化；
 	# UnitData 保留到最终结算，避免提前丢失战利品与阵亡事件。
 	_remove_offscreen_dead_from_parties(session)
@@ -267,8 +350,9 @@ func _get_max_offscreen_hours() -> int:
 func _try_finish_offscreen_battle(
 	session: BattleSession, force: bool
 ) -> bool:
-	var living_count: int = offscreen_resolver.count_living_sides(session) \
-		if offscreen_resolver != null else 0
+	var resolver: OffscreenBattleResolver = _get_offscreen_resolver(session.battle_id)
+	var living_count: int = resolver.count_living_sides(session) \
+		if resolver != null else 0
 	var winner: int = -1
 	var should_finish: bool = false
 
@@ -287,9 +371,9 @@ func _try_finish_offscreen_battle(
 					break
 	elif force:
 		should_finish = true
-		winner = offscreen_resolver.get_strongest_living_side(
+		winner = resolver.get_strongest_living_side(
 			session, _unit_manager
-		) if offscreen_resolver != null else -1
+		) if resolver != null else -1
 
 	if not should_finish:
 		return false
@@ -313,12 +397,9 @@ func _result_for_winning_side(
 ## 结算战斗：写回 HP、移除阵亡单位、解锁部队、清理会话和时间状态。
 ## 重复调用或 battle_id 不匹配时返回 false，不重复结算。
 func finish_battle(battle_id: String, result: int) -> bool:
-	var session := current_battle
+	var session := get_battle(battle_id)
 	if session == null:
-		push_warning("没有进行中的战斗可结算")
-		return false
-	if session.battle_id != battle_id:
-		push_warning("战斗 ID 不匹配: %s" % battle_id)
+		push_warning("没有可结算的战斗: %s" % battle_id)
 		return false
 	if session.status == BattleSession.Status.ENDED:
 		return false
@@ -342,7 +423,9 @@ func finish_battle(battle_id: String, result: int) -> bool:
 
 	_settle_session(session)
 	_unlock_session_parties(session)
-	current_battle = null
+	_remove_battle_registry(session)
+	if current_battle == session:
+		current_battle = null
 
 	if session.paused_world:
 		TimeManager.pop_pause(GameManager.PAUSE_REASON_BATTLE)
@@ -505,18 +588,22 @@ func abort_battle(battle_id: String) -> bool:
 
 
 func add_reinforcement(party_id: String, battle_id: String) -> bool:
-	if current_battle == null or current_battle.battle_id != battle_id:
+	if get_battle(battle_id) == null:
 		return false
-	return try_join_battle(party_id)
+	return try_join_battle(party_id, battle_id)
 
 
-## 仅根据阵营关系决定新部队应加入哪个战斗侧。
+## 仅根据阵营关系决定新部队应加入哪一场指定战斗的哪个战斗侧。
+## battle_id 必须显式指定，禁止在多场战斗环境下猜测目标战斗。
 ## 返回 -1 表示不应加入；返回当前不存在的 side 索引表示建立新的第三方战斗侧。
-func get_join_side(party_id: String) -> int:
-	var session := current_battle
-	if session == null or session.status == BattleSession.Status.ENDED:
+func get_join_side(party_id: String, battle_id: String) -> int:
+	var session := get_battle(battle_id)
+	if session == null:
 		return -1
 	if session.is_party_involved(party_id):
+		return -1
+	# 已经在其他战斗中的部队不能加入本场战斗。
+	if _is_party_in_battle(party_id):
 		return -1
 	var party := _party_manager.get_party(party_id) if _party_manager != null else null
 	if party == null or not party.is_available_for_world():
@@ -564,8 +651,8 @@ func get_join_side(party_id: String) -> int:
 	return best_side
 
 
-func can_party_join(party_id: String) -> bool:
-	var session := current_battle
+func can_party_join(party_id: String, battle_id: String) -> bool:
+	var session := get_battle(battle_id)
 	if session == null:
 		return false
 	var party := _party_manager.get_party(party_id) if _party_manager != null else null
@@ -573,13 +660,13 @@ func can_party_join(party_id: String) -> bool:
 		return false
 	if party.world_position.distance_to(session.world_position) > JOIN_RADIUS:
 		return false
-	return get_join_side(party_id) >= 0
+	return get_join_side(party_id, battle_id) >= 0
 
 
-## 尝试把部队加入当前战斗。成功会把部队切换为 IN_BATTLE。
-func try_join_battle(party_id: String) -> bool:
-	var session := current_battle
-	if session == null or session.status == BattleSession.Status.ENDED:
+## 尝试把部队加入指定战斗。成功会把部队切换为 IN_BATTLE。
+func try_join_battle(party_id: String, battle_id: String) -> bool:
+	var session := get_battle(battle_id)
+	if session == null:
 		return false
 	var party := _party_manager.get_party(party_id) if _party_manager != null else null
 	if party == null or not party.is_available_for_world():
@@ -587,7 +674,7 @@ func try_join_battle(party_id: String) -> bool:
 	if party.world_position.distance_to(session.world_position) > JOIN_RADIUS:
 		return false
 
-	var side_index: int = get_join_side(party_id)
+	var side_index: int = get_join_side(party_id, battle_id)
 	if side_index < 0:
 		return false
 	if _count_living_units(party) == 0:
@@ -599,10 +686,12 @@ func try_join_battle(party_id: String) -> bool:
 	if participant == null:
 		return false
 	_add_party_units(session, party)
+	party_battle_lookup[party_id] = session.battle_id
 	_lock_party(party)
 
 	if party_id == player_party_id:
 		session.player_involved = true
+		current_battle = session
 		_ensure_screen_battle(session)
 
 	EventBus.battle_participant_joined.emit(
@@ -614,6 +703,39 @@ func try_join_battle(party_id: String) -> bool:
 # ---------------------------------------------------------------------------
 # 内部实现
 # ---------------------------------------------------------------------------
+
+
+func _is_party_in_battle(party_id: String) -> bool:
+	return get_battle_for_party(party_id) != null
+
+
+func _is_battle_active(session: BattleSession) -> bool:
+	if session == null or session.status == BattleSession.Status.ENDED:
+		return false
+	return active_battles.get(session.battle_id) == session
+
+
+## 每场离屏战斗独立 Resolver：独立随机序列，互不干扰。
+func _create_offscreen_resolver(battle_id: String) -> OffscreenBattleResolver:
+	var resolver := OffscreenBattleResolver.new()
+	resolver.setup(offscreen_config)
+	_offscreen_resolvers[battle_id] = resolver
+	return resolver
+
+
+func _get_offscreen_resolver(battle_id: String) -> OffscreenBattleResolver:
+	var resolver := _offscreen_resolvers.get(battle_id) as OffscreenBattleResolver
+	if resolver == null:
+		resolver = _create_offscreen_resolver(battle_id)
+	return resolver
+
+
+func _remove_battle_registry(session: BattleSession) -> void:
+	active_battles.erase(session.battle_id)
+	_offscreen_resolvers.erase(session.battle_id)
+	for party_id: String in session.get_all_party_ids():
+		if str(party_battle_lookup.get(party_id, "")) == session.battle_id:
+			party_battle_lookup.erase(party_id)
 
 
 func _collect_parties_from_values(party_ids: Array) -> Array[PartyData]:

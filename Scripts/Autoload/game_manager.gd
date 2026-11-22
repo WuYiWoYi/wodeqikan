@@ -123,7 +123,8 @@ func continue_game() -> bool:
 func save_game(slot_name: String) -> Error:
 	if world_context == null:
 		return ERR_UNCONFIGURED
-	if world_context.battle_manager.current_battle != null:
+	# 任意进行中的战斗（包括 AI 离屏战斗）都不进入存档，避免静默丢失战斗。
+	if world_context.battle_manager.has_any_active_battles():
 		push_error("战斗期间不能存档")
 		return ERR_BUSY
 	if not world_context.is_valid_world():

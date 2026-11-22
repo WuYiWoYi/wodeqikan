@@ -1,7 +1,7 @@
 # 存档系统
 
 **核心脚本：** `Scripts/Autoload/save_manager.gd`、`Scripts/Core/Save/save_data.gd`
-**状态：** 保存/读取闭环、成员关系校验、士兵成长/装备/骑乘/工资恢复、玩家档案与物品数量、地点场景路径、AI/跟随字段兼容已实现；Schema 仍为 v2
+**状态：** 保存/读取闭环、成员关系校验、士兵成长/装备/骑乘/工资恢复、玩家档案与物品数量、地点场景路径、AI/跟随字段兼容、领主/封地/采邑/冒险者持久化已实现；Schema v4
 
 ---
 
@@ -21,11 +21,11 @@ user://saves/<slot>.json
 
 Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录内。
 
-## 3. Schema v2
+## 3. Schema v4
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 4,
   "project_version": "0.2.0",
   "saved_at": "2026-11-20T22:30:00",
   "world": {
@@ -37,18 +37,24 @@ Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录
     "world_elapsed_seconds": 1234.5,
     "world_base_speed": 1.0
   },
-  "id_counters": { "WORLD": 1, "UNIT": 5, "PARTY": 4, "SETTLEMENT": 4 },
+  "id_counters": {
+    "WORLD": 1, "UNIT": 5, "PARTY": 4, "SETTLEMENT": 5,
+    "LORD": 3, "CANDIDATE": 2
+  },
   "player": {
     "party_id": "PARTY_000001",
+    "player_lord_id": "LORD_000001",
+    "player_unit_id": "UNIT_000005",
     "gold": 120,
     "inventory": ["weapon_sword_01", "mount_horse_01"],
     "inventory_counts": { "weapon_sword_01": 1, "mount_horse_01": 1 }
   },
   "world_state": {},
   "scene_state": {},
+  "world_log": { "entries": [] },
   "units": { "UNIT_000001": { } },
   "parties": { "PARTY_000001": { } },
-  "lords": {},
+  "lords": { "LORD_000001": { } },
   "settlements": { "SETTLEMENT_000001": { } },
   "factions": {},
   "quests": {}
@@ -63,9 +69,11 @@ Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录
 | `world` | 世界 ID、创建时间、世界尺寸 |
 | `time` | 世界累计时间与基础倍率 |
 | `id_counters` | 各 ID 前缀的当前计数 |
-| `player` | 玩家部队 ID、金币与物品栏；`inventory` 为物品 ID 列表，`inventory_counts` 为数量字典；旧存档缺失 `inventory_counts` 时每个条目按 1 件处理 |
+| `player` | 玩家部队 ID、玩家领主 ID、玩家角色单位 ID、金币与物品栏；`inventory` 为物品 ID 列表，`inventory_counts` 为数量字典；旧存档缺失 `inventory_counts` 时每个条目按 1 件处理 |
 | `world_state` | 世界级标记（预留） |
 | `scene_state` | 局部状态（初期不使用） |
+| `world_log` | 最近 100 条世界日志；缺失时为空历史 |
+| `lords` | 领主表 `{ lord_id: LordData }`；Schema v4 新增 |
 | 各实体表 | `{ 实体 ID: 实体数据 }` |
 
 `units` 与 `parties` 以实体 ID 为键；`PartyData.member_unit_ids` 保存成员 ID 列表。
@@ -188,17 +196,19 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 
 ## 8. 存档限制
 
-- 战斗中禁止保存：`GameManager.save_game()` 在 `world_context.battle_manager.current_battle != null` 时返回 `ERR_BUSY`；该规则同样覆盖 NPC 对 NPC 的离屏战斗。
+- 战斗中禁止保存：`GameManager.save_game()` 在 `world_context.battle_manager.has_any_active_battles()` 为真时返回 `ERR_BUSY`；该规则覆盖玩家屏幕战斗和所有 NPC 对 NPC 的离屏战斗，避免静默丢失进行中的战斗。
 - `BattleSession` / `BattleUnitState` / `BattleParticipant` 不进入存档；战斗期间不序列化实时 HP、位置、战斗侧与索敌目标。
 - 离屏战斗是临时世界状态，读档后不会恢复；读档统一回到大地图。
 - 暂停原因不存档；读档后由新的进入状态建立。
-- 世界日志历史不进入存档；`WorldLogManager` 已提供序列化接口，但本阶段读档后日志从空开始。
+- 世界日志历史自 Schema v3 起进入存档，只保存最近 100 条；UI 滚动位置不保存。
 - 读档统一回到大地图，不恢复小场景或战斗。
 - 当前不支持 Schema v1 的完整恢复（旧存档缺少 `world_id`，会被判定为无效）。
 
 ## 9. 版本与迁移
 
 - `schema_version` 每次结构不兼容变更时加 1。
+- 当前版本 4；`SaveData.from_dict()` 接受 1..4。
+- v3 → v4 新增 `lords` 与 `player.player_lord_id` / `player.player_unit_id`；旧存档缺失时由 `WorldContext` 补玩家领主身份，不伪造封地归属。
 - 读取旧版本时执行迁移；`SaveData.from_dict()` 已保留 v1 → v2 入口，但完整字段迁移尚未完成。
 - 读取高于当前版本的存档直接拒绝。
 - 迁移逻辑集中在 `SaveData.from_dict()`，禁止散落。
@@ -218,6 +228,13 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
   - `current_party_id` 与成员列表双向一致；
   - 同一部队成员列表内无重复项。
 - 士兵装备引用：读档重算时检查装备 ID 存在且槽位匹配；无效引用报告并清理（不降级为错误属性）。
+- 领主数据（`LordManager.validate()`）：
+  - `party_id` 非空时必须指向存在的部队；
+  - 同一部队最多一个领主；
+  - 玩家领主最多一个且 `is_player_lord == true`。
+- 封地所有权（`WorldContext.validate_world_ownership()`）：
+  - 每个非空 `owner_lord_id` 必须指向存在的领主；
+  - `player_lord_id` 非空时必须存在且为玩家领主。
 
 校验失败处理：逐条 `push_error`，`load_from_save_data()` 返回 `false`，不自动修复或改写存档（D025）。
 
@@ -231,7 +248,7 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 
 | 项 | 状态 |
 |---|---|
-| `SaveData` Schema v2 | 已实现 |
+| `SaveData` Schema v4 | 已实现 |
 | JSON 写入/读取 | 已实现 |
 | 临时文件 + 备份替换 | 已实现 |
 | 槽位列表/删除 | 已实现 |
@@ -240,7 +257,7 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 | 恢复 `SaveData → WorldContext` | 已实现 |
 | 版本检查 | 已实现 |
 | 士兵-部队成员关系校验 | 已实现（D025） |
-| 士兵等级/经验/装备往返 | 已实现（沿用 Schema v2） |
+| 士兵等级/经验/装备往返 | 已实现（沿用现有字段） |
 | 马匹装备 / 骑乘状态往返 | 已实现：MOUNT 随装备保存，`is_mounted` 读档重算派生；旧存档按步兵兼容 |
 | 玩家物品数量 `inventory_counts` | 已实现：增量字段，旧存档每个条目按 1 件恢复，无 Schema 升级 |
 | 士兵工资 `wage` | 已实现：增量字段，旧存档缺失时按当前兵种配置补全 |
@@ -253,6 +270,10 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 | 玩家角色身份 `is_player_character` | 已实现（旧存档默认 false） |
 | 玩家金币 / 物品栏 | 已实现（`player` 字典，旧存档默认空） |
 | 战斗结果 / 控制权 / 待领取奖励 | 不持久化；结算后直接写回单位与玩家档案 |
+| 领主表 `lords` / 玩家领主 ID | 已实现（Schema v4，旧存档补玩家领主） |
+| 封地归属 `owner_lord_id` | 已实现（读档校验领主存在） |
+| 采邑储备/补充计时/人口/繁荣度/税收缓存 | 已实现（随地点保存） |
+| 冒险者候选人与刷新计时 | 已实现（随地点保存，含外观） |
 | 战斗中禁止保存 | 已实现（`ERR_BUSY`，含离屏战斗） |
 | v1 → v2 完整迁移 | 未完成 |
 | 自动存档 | 未实现 |
@@ -323,7 +344,7 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 
 ### 16.2 仍不持久化
 
-- 活动 `BattleSession`（`current_battle`）；有战斗时 `GameManager.save_game()` 直接拒绝。
+- 活动 `BattleSession`（`active_battles` 中任意一场，含 AI 离屏战斗）；有战斗时 `GameManager.save_game()` 直接拒绝。
 - 战斗中的临时 `BattleUnitState`、站位、追逐焦点与遭遇拒绝锁。
 - 静态家族/外观/遭遇对白配置。
 
@@ -335,3 +356,37 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 - 飞行中的 `ArrowProjectile`、`ProjectileManager` 与攻击冷却均为战斗场景瞬时状态，不进入存档；战斗中禁止保存。
 - 新游戏只在 `party.member_unit_ids` 为空时创建 3 名弓箭手；读档不会补兵、不会重复生成，也不向已有存档额外发放弓箭手。
 - 阵亡弓箭手与其他阵亡成员一样由战斗结算移出部队，读档不会恢复。
+
+## 18. Schema v4：领主、封地与冒险者（阶段 7）
+
+### 18.1 新增/扩展字段
+
+| 位置 | 字段 | 说明 |
+|---|---|---|
+| 顶层 | `lords` | `{ lord_id: LordData }` |
+| `player` | `player_lord_id` | 玩家领主 ID；与玩家角色分离 |
+| `player` | `player_unit_id` | 玩家角色单位 ID |
+| `SettlementData` | `owner_lord_id` | 封地归属领主 |
+| `SettlementData` | `population` / `prosperity` | 采邑成本与补充周期因子 |
+| `SettlementData` | `tax_base` / `tax_income_per_day` | 税收基数与缓存 |
+| `SettlementData` | `fief_recruitment_stock/capacity/elapsed` | 采邑储备与补充计时 |
+| `SettlementData` | `adventurer_candidates` | 候选人数组（含外观、状态、关联单位） |
+| `SettlementData` | `adventurer_refresh_elapsed` | 候选人刷新计时 |
+| `LordData` | `is_player_lord` / `current_target_settlement_id` | 玩家身份与战略目标 |
+
+### 18.2 读档顺序与兼容
+
+1. 单位 → 部队 → `apply_runtime_defaults()` → 运行时状态清理。
+2. `lord_manager.load_from_dict(save.lords)`。
+3. `settlement_manager.load_from_dict(save.settlements)`。
+4. 旧存档缺少玩家领主时补建；不伪造地点归属。
+5. 对每个地点调用采邑/候选人 `initialize_settlement()`：修正容量/边界，保留存档中的储备与计时。
+6. 重算单位属性与税收缓存。
+7. 成员关系校验 → 领主校验 → 封地所有权校验；任一失败拒绝读档。
+
+### 18.3 不持久化
+
+- AI 的 `RECRUITING` 状态与移动目标是运行时战略状态，读档后由 `AIManager` 重新决策。
+- 候选人被招募但尚未离开村庄的状态可以持久化（`RECRUITED_PENDING_DEPARTURE`）；如果存档发生在离开村庄前，读档后仍会显示“已招募”记录，离开时再清理。
+- 征集过程中的临时创建单位若事务失败会被立即回滚，不会进入存档。
+- 静态经济配置 `Data/Settlements/settlement_economy_config.tres` 不进入存档。

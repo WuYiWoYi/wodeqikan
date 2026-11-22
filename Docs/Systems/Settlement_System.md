@@ -2,7 +2,7 @@
 
 **核心数据：** `Scripts/Entities/Settlement/settlement_data.gd`
 **核心逻辑：** `Scripts/Core/World/settlement_manager.gd`
-**状态：** 数据仓储、地图图标、基础交互面板与村庄小场景入口已实现
+**状态：** 数据仓储、地图图标、基础交互面板、村庄小场景入口、封地归属、采邑储备与冒险者候选人已实现
 
 ---
 
@@ -15,10 +15,18 @@
 | `settlement_type` | VILLAGE / TOWN / CASTLE |
 | `world_position` | 大地图坐标（像素） |
 | `faction_id` | 所属阵营 |
-| `owner_lord_id` | 归属领主 |
+| `family_id` | 所属家族；只影响名称旁旗帜与单位外观 |
+| `owner_lord_id` | 归属领主；空字符串表示无主 |
 | `scene_path` | 该地点小场景路径；旧存档/城镇/城堡为空 |
-| `population` | 人口 |
-| `prosperity` | 繁荣度 |
+| `population` | 人口；采邑征召成本与补充周期因子 |
+| `prosperity` | 繁荣度；采邑征召成本与补充周期因子 |
+| `tax_base` | 税收基数，默认来自经济配置 |
+| `tax_income_per_day` | `TaxCalculator` 计算后的每日税收缓存 |
+| `fief_recruitment_stock` | 当前可征召采邑组数 |
+| `fief_recruitment_capacity` | 采邑储备上限；城镇/城堡为 0 |
+| `fief_recruitment_elapsed` | 距离下一组储备补充的累计世界秒 |
+| `adventurer_candidates` | 村庄冒险者候选人列表 |
+| `adventurer_refresh_elapsed` | 距离下一名候选人的累计世界秒 |
 | `garrison_unit_ids` | 驻军单位 ID |
 | `is_under_siege` | 是否被围城 |
 
@@ -35,21 +43,32 @@
 
 Milestone 1 初始地点（名称与坐标按需求，ID 使用项目统一生成格式）：
 
-| ID | 名称 | 类型 | 坐标 |
-|---|---|---|---|
-| `SETTLEMENT_000001` | 巴里 | 村庄 | (500, 500) |
-| `SETTLEMENT_000002` | 墨西西 | 村庄 | (1200, 900) |
-| `SETTLEMENT_000003` | 北境村 | 村庄 | (2200, 500) |
-| `SETTLEMENT_000004` | 灰石城堡 | 城堡 | (1800, 1300) |
+| ID | 名称 | 类型 | 坐标 | 家族 | 初始领主 |
+|---|---|---|---|---|---|
+| `SETTLEMENT_000001` | 巴里 | 村庄 | (500, 500) | 巴里家族 | 巴里家族领主 |
+| `SETTLEMENT_000002` | 墨西西 | 村庄 | (1200, 900) | 墨西西家族 | 墨西西家族领主 |
+| `SETTLEMENT_000003` | 北境村 | 村庄 | (2200, 500) | — | 无主 |
+| `SETTLEMENT_000004` | 灰石城堡 | 城堡 | (1800, 1300) | — | 无主 |
+| `SETTLEMENT_000005` | 青禾村 | 村庄 | (650, 1500) | 玩家家族 | 玩家领主 |
 
 ## 2. 地点交互
 
 ```text
-玩家部队移动到地点 40 像素范围内
-  → WorldMapManager.stop_party(玩家)
-  → TimeManager.set_base_world_speed(0)
-  → TimeManager.push_pause(&"ui_panel")
-  → 打开左侧交互面板
+玩家左键点击地点（点击判定半径 45）
+  ├── 玩家与地点距离 <= 40（交互半径）
+  │     → WorldMapManager.stop_party(玩家)
+  │     → TimeManager.set_base_world_speed(0)
+  │     → TimeManager.push_pause(&"ui_panel")
+  │     → 立即打开左侧交互面板
+  └── 否则：
+        → 记录待交互地点 ID
+        → WorldMapManager.set_party_target(玩家, 地点坐标)
+        → 基础倍率切回 1x，世界继续运行
+        → 玩家部队自动移动
+        → 到达交互半径且移动停止后：
+              → 清空待交互 ID
+              → stop_party + 基础倍率 0 + push_pause(ui_panel)
+              → 打开左侧交互面板
   → 显示名称、类型
   → 村庄：显示“进入村庄” + “离开地点”
   → 城镇/城堡：只显示“离开地点”
@@ -57,13 +76,17 @@ Milestone 1 初始地点（名称与坐标按需求，ID 使用项目统一生�
 
 触发检测位于大地图场景控制器：
 
-- 只有玩家用鼠标左键点击地点（判定半径 45 像素）才打开面板；移动到附近或路过不会自动触发。
+- 点击地点只代表“前往该地点”；远距离点击不会立即打开面板、停止部队或暂停世界。
+- 只有玩家主动点击地点才创建待交互状态；普通移动、追击、跟随或路过不会创建，也不会自动触发。
+- 已在地点 40 像素交互半径内时允许直接打开面板，不执行无意义移动。
+- 点击普通地图位置、点击部队、点击另一个地点或外部停止时，旧待交互状态会被清除或替换；不会在未来误弹面板。
 - 面板打开期间时间为 0。
 - 关闭面板时移除 `ui_panel`，但基础倍率保持 0。
 - 玩家必须主动选择 1x / 2x 才会继续世界推进。
-- 点击其他地点会切换当前地点面板；玩家离开后不会自动重开。
+- 点击另一个地点会替换待交互目标；到达后只打开最终目标的面板。
+- 待交互地点 ID 是大地图运行时状态，不进入存档。
 
-Milestone 1 只做基础面板；阶段 6 起村庄面板增加进入小场景入口，城镇/城堡仍只做基础面板。
+Milestone 1 只做基础面板；阶段 6 起村庄面板增加进入小场景入口；阶段 7 起所有地点统一采用“点击设置目标、到达后打开”的规则。
 
 ## 3. 后续交互
 
@@ -109,17 +132,20 @@ Milestone 1 只做基础面板；阶段 6 起村庄面板增加进入小场景�
 
 ## 6. 地点模拟
 
-初期不做经济与人口模拟。
+当前只实现与征召直接相关的时序：
 
-后续由 `WorldSimulation` 按较低频率推进：
+- `FiefRecruitmentManager.tick()`：按人口/繁荣度调整的周期补充采邑储备。
+- `AdventurerRecruitmentManager.tick()`：按固定周期向村庄候选人池补充冒险者。
+- 两者都只由 `WorldSimulation` 调用，暂停时不推进。
 
-- 人口增长/减少。
-- 繁荣度变化。
-- 驻军补充。
-- 被围城状态。
-- 归属变更。
+仍不模拟：
 
-频率必须低于世界 tick（例如每游戏日一次），不得每 0.1 秒计算。
+- 人口自然增长/减少。
+- 繁荣度自然变化。
+- 每日税收实际扣除。
+- 驻军补充、被围城、归属变更。
+
+后续由 `WorldSimulation` 按较低频率推进时，频率必须低于世界 tick（例如每游戏日一次），不得每 0.1 秒计算。
 
 ## 7. 实现状态
 
@@ -132,8 +158,11 @@ Milestone 1 只做基础面板；阶段 6 起村庄面板增加进入小场景�
 | 触发停止与暂停 | 已实现 |
 | 村庄小场景进入/返回 | 已实现（scene_path + small_scene 暂停 + 返回锁） |
 | 城镇/城堡小场景 | 未实现 |
-| 驻军与归属 | TODO(阶段5/7) |
-| 地点模拟 | TODO(阶段7) |
+| 封地归属 `owner_lord_id` | 已实现（阶段 7；读档校验领主存在） |
+| 采邑储备/补充/税收缓存 | 已实现（`FiefRecruitmentManager`） |
+| 冒险者候选人 | 已实现（`AdventurerRecruitmentManager`） |
+| 驻军 | 未实现 |
+| 人口/繁荣度自然变化与每日税收扣除 | 未实现 |
 
 ## 8. 待确认
 
@@ -154,3 +183,20 @@ Milestone 1 只做基础面板；阶段 6 起村庄面板增加进入小场景�
   - 名称左侧绘制圆形家族旗帜，旗帜等比缩放；
   - 整个标签 `MOUSE_FILTER_IGNORE`，不参与地点点击、选择或悬浮判定。
 - 地点点击判定仍使用 `SettlementData.world_position` 与固定世界像素半径，不依赖名称标签。
+
+## 10. 封地归属、税收与征召入口（阶段 7 新增）
+
+- `owner_lord_id` 是封地归属的唯一权威；`faction_id`、`family_id` 不参与权限判断。
+- 地点面板读取并显示：
+  - 名称、类型；
+  - 归属领主显示名（无主时显示“无主”）；
+  - 家族显示名；
+  - 人口、繁荣度；
+  - `TaxCalculator` 计算后的每日税收缓存；
+  - 采邑储备与补充状态。
+- 只有玩家自有村庄显示“征召采邑”按钮；按钮在储备为 0 时禁用。
+- 村庄头人对话只在玩家自有村庄且有储备时追加同一征召动作。
+- 两个入口都调用 `FiefRecruitmentManager.recruit_group()`，UI 不计算编制、成本或周期。
+- 税收公式、人口/繁荣度成本和储备补充参数集中在 `SettlementEconomyConfig`；UI 与 `SettlementData` 不重复实现。
+- 读档时每个非空 `owner_lord_id` 必须指向存在的领主，否则拒绝加载。
+- 详细流程见 [Fief_Recruitment_System.md](Fief_Recruitment_System.md)，候选人见 [Adventurer_Recruitment_System.md](Adventurer_Recruitment_System.md)。

@@ -13,6 +13,7 @@ const SETTLEMENT: String = "SETTLEMENT"
 const FACTION: String = "FACTION"
 const QUEST: String = "QUEST"
 const BATTLE: String = "BATTLE"
+const CANDIDATE: String = "CANDIDATE"
 
 var _counters: Dictionary = {}
 

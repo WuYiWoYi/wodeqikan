@@ -282,6 +282,7 @@ func _copy_save(source: SaveData) -> SaveData:
 	copy.units = source.units.duplicate(true)
 	copy.parties = source.parties.duplicate(true)
 	copy.settlements = source.settlements.duplicate(true)
+	copy.lords = source.lords.duplicate(true)
 	return copy
 
 

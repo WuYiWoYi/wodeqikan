@@ -2,7 +2,7 @@
 
 **核心数据：** `Scripts/Entities/Party/party_data.gd`
 **核心逻辑：** `Scripts/Core/World/party_manager.gd`
-**状态：** 数据、统一控制类型/部队类型标识、成员管理（含转队与读档校验）、四方阵营初始部队、大地图移动/跟随、底部 NPC 遭遇对话、战斗锁定、AI 行为、部队管理面板（查看/上马/下马/晋升）、金币与工资统计、士兵美术预览已实现
+**状态：** 数据、统一控制类型/部队类型标识、成员管理（含转队与读档校验）、四方阵营初始部队、大地图移动/跟随、底部 NPC 遭遇对话、战斗锁定、AI 行为、部队管理面板（查看/上马/下马/晋升）、金币与工资统计、士兵美术预览、采邑/冒险者征召成员接入已实现
 
 ---
 
@@ -388,3 +388,20 @@ Milestone 1 使用简单固定值：
   - `leader_unit_id` 非空时必须出现在本部队 `member_unit_ids`；
   - 领袖单位必须存在于 `UnitManager`。
 - 校验失败仍保留现场并拒绝读档，不静默修正。
+
+## 14. 征召成员接入（阶段 7 新增）
+
+采邑与冒险者招募不新增部队类型或成员表，仍统一经过现有成员关系：
+
+```text
+FiefRecruitmentManager / AdventurerRecruitmentManager
+  → UnitManager.create_unit()
+  → UnitAppearance.ensure_random() / 复制候选人外观
+  → PartyManager.add_member(party_id, unit_id)
+```
+
+- 玩家部队成员由 `player_party_id` 决定；采邑进入领主 `party_id` 对应的部队（AI 领主同样）。
+- 加入失败时招募管理器回滚已创建单位，保持 `UnitData` 与 `member_unit_ids` 双向一致。
+- 招募单位写入 `recruit_source`、`recruit_settlement_id`、`origin_faction_id`、`joined_at_game_time`，不改变部队 `control_type`、`ai_type` 或路线。
+- 部队人数上限目前不限制；工资仍只统计不扣除。
+- 候选人本身不是部队成员，只有招募成功后才进入 `PartyManager`。

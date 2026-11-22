@@ -20,6 +20,9 @@ var _flag_texture: Texture2D = null
 var _flag_sprite: Sprite2D = null
 var _count_label: Label = null
 var _last_count: int = -1
+var _floating_label: Label = null
+var _floating_tween: Tween = null
+var _last_floating_text: String = ""
 
 
 func setup(
@@ -120,6 +123,52 @@ func get_flag_texture_path() -> String:
 	if _flag_texture == null:
 		return ""
 	return _flag_texture.resource_path
+
+
+## 部队上方的一次性浮动提示（例如“招募了1组采邑”）。
+## 纯表现，不进入存档；重复触发会替换上一条提示。
+func show_floating_text(text: String, duration: float = 2.2) -> void:
+	if text.strip_edges().is_empty():
+		return
+	if _floating_tween != null and _floating_tween.is_valid():
+		_floating_tween.kill()
+	if _floating_label != null and is_instance_valid(_floating_label):
+		_floating_label.queue_free()
+	_last_floating_text = text
+	var radius: float = _style.marker_radius if _style != null else 20.0
+	_floating_label = Label.new()
+	_floating_label.name = "FloatingText"
+	_floating_label.text = text
+	_floating_label.position = Vector2(-110.0, -radius - 54.0)
+	_floating_label.size = Vector2(220.0, 26.0)
+	_floating_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_floating_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_floating_label.z_index = 5
+	_floating_label.theme = UiTheme.create()
+	_floating_label.add_theme_font_size_override("font_size", 15)
+	_floating_label.add_theme_color_override("font_color", Color("#ffe6a8"))
+	_floating_label.add_theme_color_override(
+		"font_shadow_color", Color(0.0, 0.0, 0.0, 0.9)
+	)
+	_floating_label.add_theme_constant_override("shadow_offset_x", 1)
+	_floating_label.add_theme_constant_override("shadow_offset_y", 1)
+	add_child(_floating_label)
+	_floating_tween = create_tween()
+	_floating_tween.set_parallel(true)
+	_floating_tween.tween_property(
+		_floating_label,
+		"position:y",
+		_floating_label.position.y - 34.0,
+		duration
+	)
+	_floating_tween.tween_property(
+		_floating_label, "modulate:a", 0.0, duration
+	).set_delay(duration * 0.35)
+	_floating_tween.chain().tween_callback(_floating_label.queue_free)
+
+
+func get_last_floating_text() -> String:
+	return _last_floating_text
 
 
 func _create_flag_sprite() -> void:

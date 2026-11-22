@@ -43,6 +43,10 @@ func dispose() -> void:
 		EventBus.settlement_entered.disconnect(_on_settlement_entered)
 	if EventBus.settlement_exited.is_connected(_on_settlement_exited):
 		EventBus.settlement_exited.disconnect(_on_settlement_exited)
+	if EventBus.fief_recruited.is_connected(_on_fief_recruited):
+		EventBus.fief_recruited.disconnect(_on_fief_recruited)
+	if EventBus.adventurer_recruited.is_connected(_on_adventurer_recruited):
+		EventBus.adventurer_recruited.disconnect(_on_adventurer_recruited)
 	_connected = false
 	_battle_sessions.clear()
 
@@ -81,7 +85,7 @@ func add_event(
 	return entry
 
 
-## 预留持久化接口；本阶段不写入 SaveData。
+## 持久化接口；由 WorldContext 写入 SaveData。
 func to_dict() -> Dictionary:
 	var entries: Array[Dictionary] = []
 	for entry: WorldLogEntry in _entries:
@@ -118,14 +122,19 @@ func _connect_events() -> void:
 		EventBus.settlement_entered.connect(_on_settlement_entered)
 	if not EventBus.settlement_exited.is_connected(_on_settlement_exited):
 		EventBus.settlement_exited.connect(_on_settlement_exited)
+	if not EventBus.fief_recruited.is_connected(_on_fief_recruited):
+		EventBus.fief_recruited.connect(_on_fief_recruited)
+	if not EventBus.adventurer_recruited.is_connected(_on_adventurer_recruited):
+		EventBus.adventurer_recruited.connect(_on_adventurer_recruited)
 	_connected = true
 
 
 func _on_battle_started(battle_id: String) -> void:
-	if _battle_manager == null or _battle_manager.current_battle == null:
+	if _battle_manager == null:
 		return
-	var session := _battle_manager.current_battle
-	if session.battle_id != battle_id:
+	# 逐场查询：世界可同时存在多场战斗，不能读取全局唯一战斗。
+	var session: BattleSession = _battle_manager.get_battle(battle_id)
+	if session == null:
 		return
 	_battle_sessions[battle_id] = session
 	add_event(
@@ -191,6 +200,43 @@ func _on_settlement_exited(settlement_id: String, _party_id: String) -> void:
 		WorldLogEntry.EventType.SETTLEMENT_EXITED,
 		"玩家离开了%s。" % _settlement_name(settlement_id),
 		{"settlement_id": settlement_id}
+	)
+
+
+func _on_fief_recruited(
+	recruiter_party_id: String,
+	settlement_id: String,
+	groups: int,
+	is_player_recruiter: bool
+) -> void:
+	var village_name: String = _settlement_name(settlement_id)
+	var recruiter: String = "你" if is_player_recruiter \
+		else _party_name(recruiter_party_id)
+	add_event(
+		WorldLogEntry.EventType.FIEF_RECRUITED,
+		"%s 在%s征召了 %d 组采邑。" % [recruiter, village_name, maxi(1, groups)],
+		{
+			"party_id": recruiter_party_id,
+			"settlement_id": settlement_id,
+			"groups": groups,
+			"is_player_recruiter": is_player_recruiter,
+		}
+	)
+
+
+func _on_adventurer_recruited(
+	settlement_id: String, unit_id: String, unit_name: String
+) -> void:
+	var village_name: String = _settlement_name(settlement_id)
+	var recruit_name: String = unit_name if not unit_name.is_empty() else unit_id
+	add_event(
+		WorldLogEntry.EventType.ADVENTURER_RECRUITED,
+		"你在%s招募了冒险者%s。" % [village_name, recruit_name],
+		{
+			"settlement_id": settlement_id,
+			"unit_id": unit_id,
+			"unit_name": unit_name,
+		}
 	)
 
 

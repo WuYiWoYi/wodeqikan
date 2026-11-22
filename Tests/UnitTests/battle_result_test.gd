@@ -133,7 +133,10 @@ func _test_mid_join_result() -> void:
 	_check(session != null and session.offscreen, "创建可加入的离屏战斗")
 	if session == null:
 		return
-	_check(_battle.try_join_battle(player.party_id), "玩家中途加入已有战斗")
+	_check(
+		_battle.try_join_battle(player.party_id, session.battle_id),
+		"玩家中途加入已有战斗"
+	)
 	_check(not session.offscreen, "玩家加入后转为屏幕战斗")
 	_check(session.player_involved, "战斗标记玩家参与")
 	_check(
@@ -249,7 +252,7 @@ func _test_offscreen_result() -> void:
 	if session == null:
 		return
 	_check(_battle.resolve_current_battle_now(), "离屏战斗按小时推进并自动结算")
-	_check(_battle.current_battle == null, "离屏战斗自动结算")
+	_check(_battle.get_battle(session.battle_id) == null, "离屏战斗自动结算")
 	var result := session.final_result
 	_check(result != null and result.finalized, "离屏战斗生成 finalized 结果")
 	_check(session.status == BattleSession.Status.ENDED, "离屏战斗状态结束")

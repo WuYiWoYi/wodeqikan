@@ -2,7 +2,7 @@
 
 **核心数据：** `Scripts/Core/World/player_profile.gd`、`Scripts/Entities/Unit/unit_data.gd`、`Scripts/Config/unit_config.gd`
 **核心逻辑：** `Scripts/Core/World/unit_manager.gd`、`Scripts/Core/World/party_manager.gd`、`Scripts/Core/World/item_manager.gd`
-**状态：** 基础背包、马匹上/下马、金币增减、工资统计、三级兵种与晋升已实现；工资扣除、商店、招募、物品栏完整 UI 未实现
+**状态：** 基础背包、马匹上/下马、金币增减、工资统计、三级兵种与晋升、封地税收缓存、冒险者/采邑招募费用已实现；工资扣除、商店、物品栏完整 UI 未实现
 
 ---
 
@@ -119,6 +119,15 @@
 - 晋升凭证 `promotion_rank_token` 使用 `ItemConfig`；没有装备外观。
 - 新游戏暂时给予 2 个晋升凭证用于验收；正式获取途径后续实现。
 
+## 4.1 封地税收与招募费用（阶段 7 新增）
+
+- 每日税收统一由 `TaxCalculator.compute_daily_tax(population, prosperity, tax_base)` 计算；UI 不实现第二套公式。
+- `SettlementData.tax_income_per_day` 是缓存值，读档与征召后重算。
+- 当前只展示税收，不按日把金币加入 `PlayerProfile`，也不从封地扣除。
+- 冒险者招募：固定 `adventurer_recruit_cost`（默认 1）金币，从玩家金币扣除；失败不扣款。
+- 采邑征召：不消耗金币，消耗村庄 `fief_recruitment_stock` 1 组、人口、繁荣度；马匹由配置直接装备，不消耗玩家背包。
+- 工资仍只统计，不因征召或税收自动扣除。
+
 ## 5. 存档兼容
 
 | 字段 | 旧存档处理 |
@@ -145,5 +154,8 @@
 | 消耗物品晋升 | 已实现（数据层 + 部队面板按钮） |
 | 士兵工资与部队总额 | 已实现（统计/显示，不扣除） |
 | 工资定期扣除 | 未实现 |
-| 商店、交易、招募、负重 | 未实现 |
+| 封地税收缓存 | 已实现（统一 `TaxCalculator`，只展示不扣除） |
+| 冒险者金币招募 | 已实现（1 金币，失败回滚） |
+| 采邑征召资源成本 | 已实现（储备/人口/繁荣度） |
+| 商店、交易、普通兵员招募、负重 | 未实现 |
 | 物品栏完整 UI | 未实现（部队面板只展示可选马匹与晋升物品数量） |

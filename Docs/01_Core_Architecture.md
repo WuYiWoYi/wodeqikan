@@ -1,7 +1,7 @@
 # 核心架构
 
-**文档版本：** V0.4
-**状态：** Milestone 1 已实现并通过端到端测试
+**文档版本：** V0.5
+**状态：** 阶段 7 第一步已实现并通过全量自动化测试
 
 本文定义全局结构、依赖方向与写权限。各系统的细节见 `Systems/`。
 
@@ -46,8 +46,12 @@ GameManager (Autoload)
     ├── ItemManager（消耗品静态配置）             │
     ├── PartyManager                              │
     ├── SettlementManager                         │
+    ├── LordManager（领主/封地归属）               │
+    ├── FiefRecruitmentManager（采邑征召）         │
+    ├── AdventurerRecruitmentManager（候选人）     │
     ├── FactionManager（阵营关系）                 │
     ├── FamilyRegistry（家族视觉配置，只读）        │
+    ├── SettlementEconomyConfig（经济参数，只读）   │
     ├── VisionManager（视野查询）                  │
     ├── WorldMapManager（移动/跟随）               │
     ├── EncounterManager（统一遭遇/中途参战）      │
@@ -66,7 +70,7 @@ GameManager (Autoload)
 - `WorldContext`：数据与管理器的生命周期容器，不写玩法逻辑；
 - `WorldSimulation`：只消费 `world_tick`，按固定顺序推进世界数据。
 
-这样大地图场景未加载时，只要世界时间未被暂停，`WorldSimulation` 仍可运行。屏幕内战斗会压入 `battle` 暂停原因冻结世界；NPC 对 NPC 的离屏战斗保持世界正常运行，由 `BattleManager.tick()` 每游戏小时结算一次伤亡，期间允许第三方加入。
+这样大地图场景未加载时，只要世界时间未被暂停，`WorldSimulation` 仍可运行。屏幕内战斗会压入 `battle` 暂停原因冻结世界；NPC 对 NPC 的离屏战斗保持世界正常运行，由 `BattleManager.tick()` 每游戏小时结算一次伤亡，期间允许第三方加入。世界可同时存在多场 AI 离屏战斗，`BattleManager` 用 `active_battles` / `party_battle_lookup` 独立管理；`current_battle` 仅表示玩家当前屏幕战斗。
 
 ### 3.2 全局单例约束
 
@@ -97,6 +101,10 @@ GameManager (Autoload)
 | `ItemManager` | `ItemConfig` 静态注册与查询（消耗品/杂物） | 持有数量、玩家背包写操作 |
 | `PartyManager` | `PartyData` 增删查、成员关系维护、工资汇总 | 部队 AI |
 | `SettlementManager` | `SettlementData` 增删查、场景路径与序列化 | 地点图标、交互面板 |
+| `LordManager` | `LordData` 增删查、玩家领主查询、部队引用校验、序列化 | AI 决策、封地分配、UI |
+| `FiefRecruitmentManager` | 封地归属校验、采邑储备/补充、成组征召、资源成本、税收缓存 | UI、场景节点、世界日志 |
+| `AdventurerRecruitmentManager` | 村庄候选人池、刷新、1 金币招募、离开清理 | UI、场景节点、AI |
+| `SettlementEconomyConfig` | 采邑/税收/候选人参数（只读） | 单个地点运行时状态 |
 | `FamilyRegistry` | `FamilyConfig` 只读注册与查询（旗帜/罩袍/缨饰） | 外交、成员关系、战斗；家族不进入存档 |
 | `AppearanceConfig` | 士兵外观随机池（等级头盔、罩袍概率） | 运行时单位状态；选择结果写入 `UnitData.appearance` |
 | `DialogueManager` | `DialogueData` 会话与节点跳转 | UI 排版、条件/效果 |
@@ -105,7 +113,7 @@ GameManager (Autoload)
 | `EncounterManager` | 统一遭遇判定、玩家追击/被动拦截、战斗创建/加入委托 | 场景表现、UI 排版 |
 | `WorldLogManager` | 监听事件、生成受限日志历史、序列化预留 | 修改战斗/部队、操作 UI |
 | `AIManager` | 三层决策调度 | 直接改场景、UI |
-| `BattleManager` | `BattleSession`、部队锁定、结算 | 直接修改大地图节点 |
+| `BattleManager` | 多场 `BattleSession` 注册表、部队唯一参战归属、锁定、独立推进与结算 | 直接修改大地图节点；把 `current_battle` 当作世界唯一战斗 |
 | `DialogueManager` | 对话会话与节点跳转 | UI 排版 |
 | `FormationManager` | 阵型定义与站位计算 | 单位攻击行为 |
 
@@ -141,6 +149,8 @@ Manager → EventBus（只发事实）
 │       └── WorldSimulation.on_world_tick
 │           ├── WorldMapManager.update_party_movement
 │           ├── WorldMapManager.update_visibility（视野由 VisionManager 提供）
+│           ├── FiefRecruitmentManager.tick（采邑储备补充）
+│           ├── AdventurerRecruitmentManager.tick（候选人刷新）
 │           ├── EncounterManager 遭遇检测 / 中途参战
 │           └── AIManager.tick（按内部分频；待处理遭遇/交互时跳过）
 │
@@ -182,7 +192,11 @@ Manager → EventBus（只发事实）
 | `PartyData.ai_route_index` | `AIManager` | 到达路线点后推进下一步索引 |
 | 遭遇原因与待处理遭遇 | `EncounterManager` | UI 只读 `get_pending_encounter_reason()`，离场规则由 `can_leave_encounter()` 统一判定 |
 | `LordData` 目标与状态 | `AIManager` / 领主 AI | 通过明确方法 |
-| `SettlementData` 归属、驻军 | `SettlementManager` / 未来的战斗系统 | 地点交互只读 |
+| `SettlementData.owner_lord_id` | `WorldInitializer` / 存档恢复 / 未来的领地系统 | UI 与征召只读 |
+| `SettlementData` 采邑储备/计时、人口/繁荣度、税收缓存 | `FiefRecruitmentManager` | 征召与 `WorldSimulation` 调用；UI 只读 |
+| `SettlementData.adventurer_candidates` / 刷新计时 | `AdventurerRecruitmentManager` | 村庄表现只读；离开时清理 |
+| 封地征召/候选人招募权限 | `FiefRecruitmentManager` / `AdventurerRecruitmentManager` | 场景与 UI 只调用接口 |
+| `SettlementData` 驻军 | `SettlementManager` / 未来的战斗系统 | 地点交互只读 |
 | 世界时间、倍率 | `TimeManager` | 其他系统只能请求 |
 | 战斗临时状态 | `BattleSession` | 结算后写回 `UnitData` |
 
@@ -200,7 +214,8 @@ MainMenu → GameManager.start_new_game()
   ├── WorldInitializer.create_new_world()
   │     ├── 生成 WORLD ID、世界尺寸
   │     ├── 玩家部队 + 两支 NPC 部队
-  │     └── 四个初始地点
+  │     ├── 玩家领主 / NPC 领主 / 家族归属
+  │     └── 五个初始地点（含玩家村庄“青禾村”）
   └── SceneManager.change_scene(WorldMap)
 ```
 
@@ -212,8 +227,10 @@ Continue / Load Game
   → GameManager 创建新的 WorldContext
   → WorldContext.load_from_save_data(save)
       ├── 恢复 IdGenerator 计数
-      ├── 恢复 Unit / Party / Settlement
-      └── 恢复世界 ID、尺寸、玩家部队
+      ├── 恢复 Unit / Party / Lord / Settlement / WorldLog
+      ├── 恢复世界 ID、尺寸、玩家部队、玩家领主与玩家角色 ID
+      ├── 修正采邑/候选人边界并重算属性与税收
+      └── 校验成员关系、领主引用与封地所有权
   → TimeManager.restore_world_time(时间, 基础倍率)
   → SceneManager.change_scene(WorldMap)
 ```
@@ -241,23 +258,25 @@ Continue / Load Game
   → 部队对话面板（push_pause ui_panel）
   → 玩家选择“发起战斗”
       → BattleManager.start_battle()
-          ├── 创建 BattleSession
-          ├── 校验双方部队与存活士兵
+          ├── 创建 BattleSession（battle_id）
+          ├── 校验双方部队与存活士兵；每支部队不得已在其他战斗中
+          ├── 写入 active_battles 与 party_battle_lookup
           ├── 参战部队 battle_state = IN_BATTLE
           ├── 生成 BattleUnitState（battle_hp = current_hp）
-          └── push_pause(battle)
+          └── 玩家参与时 current_battle = session 且 push_pause(battle)
       → 场景控制器 SceneManager.change_scene(BattleScene)
   → 战斗结束
-      → 场景控制器调用 BattleManager.finish_battle()
-          ├── 写回存活 HP
-          ├── 移除阵亡单位的部队归属并删除 UnitData
-          ├── 解锁参战部队
-          ├── 清理 BattleSession
-          └── pop_pause(battle)
+      → 场景控制器调用 BattleManager.finish_battle(battle_id, result)
+          ├── 写回本场存活 HP
+          ├── 移除本场阵亡单位的部队归属并删除 UnitData
+          ├── 解锁本场参战部队
+          ├── 只从 active_battles / party_battle_lookup 移除本场
+          ├── 若为玩家屏幕战斗则清理 current_battle
+          └── 玩家屏幕战斗时 pop_pause(battle)
       → 场景控制器 SceneManager.change_scene(WorldMap)
 ```
 
-`WorldContext` 和 `WorldSimulation` 在战斗期间保持存在；屏幕内战斗通过 `battle` 暂停原因冻结世界模拟，战斗场景使用自身物理帧推进。场景切换由场景控制器负责，`BattleManager` 只处理数据与结算。
+`WorldContext` 和 `WorldSimulation` 在战斗期间保持存在；屏幕内战斗通过 `battle` 暂停原因冻结世界模拟，战斗场景使用自身物理帧推进。AI 离屏战斗不暂停世界，也不写入 `current_battle`；它们与玩家屏幕战斗可同时存在，结束一场只清理自身。场景切换由场景控制器负责，`BattleManager` 只处理数据、推进与结算。
 
 ### 8.4 返回主菜单
 

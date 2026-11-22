@@ -85,7 +85,8 @@ func _run() -> void:
 	_check(not session.player_involved, "选择前不会自动加入")
 	_check(session.offscreen, "选择前战斗仍为离屏状态")
 	_check(
-		context.battle_manager.current_battle == session,
+		context.battle_manager.get_battle(session.battle_id) == session
+		and context.battle_manager.get_active_battles().size() == 1,
 		"交互不创建新战斗"
 	)
 
@@ -122,7 +123,8 @@ func _run() -> void:
 		"离开后清理交互请求"
 	)
 	_check(
-		context.battle_manager.current_battle == session and session.offscreen,
+		context.battle_manager.get_battle(session.battle_id) == session
+		and session.offscreen,
 		"离开后 NPC 战斗继续"
 	)
 	_check(not session.player_involved, "离开后玩家未参战")
@@ -162,7 +164,8 @@ func _run() -> void:
 		"异常关闭清理交互请求"
 	)
 	_check(
-		context.battle_manager.current_battle == session and session.offscreen,
+		context.battle_manager.get_battle(session.battle_id) == session
+		and session.offscreen,
 		"异常关闭不影响 NPC 战斗"
 	)
 

@@ -1,0 +1,29 @@
+[gd_resource type="Resource" script_class="SettlementEconomyConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/settlement_economy_config.gd" id="1_economyconfig"]
+
+[resource]
+script = ExtResource("1_economyconfig")
+fief_group_size = 6
+fief_max_stock = 4
+fief_initial_stock = 4
+fief_mount_equipment_id = "mount_horse_01"
+fief_population_cost = 4
+fief_prosperity_cost = 2
+population_min = 0
+prosperity_min = 0
+prosperity_max = 100
+refill_base_interval = 144.0
+refill_population_reference = 100.0
+refill_prosperity_reference = 40.0
+refill_population_factor_min = 0.5
+refill_population_factor_max = 4.0
+refill_prosperity_factor_min = 0.6
+refill_prosperity_factor_max = 3.0
+adventurer_max_candidates = 5
+adventurer_refresh_interval = 144.0
+adventurer_recruit_cost = 1
+adventurer_initial_count = 2
+adventurer_unit_config_id = "infantry_militia"
+default_tax_base = 20
+ai_lord_recruit_threshold = 12

@@ -11,6 +11,8 @@ const EQUIPMENT_CONFIG_DIR: String = "res://Data/Equipment"
 const ITEM_CONFIG_DIR: String = "res://Data/Items"
 const FAMILY_CONFIG_DIR: String = "res://Data/Families"
 const APPEARANCE_CONFIG_PATH: String = "res://Data/Appearance/appearance_config.tres"
+const SETTLEMENT_ECONOMY_CONFIG_PATH: String = \
+	"res://Data/Settlements/settlement_economy_config.tres"
 
 var id_generator: IdGenerator = IdGenerator.new()
 var unit_manager: UnitManager = UnitManager.new()
@@ -22,6 +24,12 @@ var faction_manager: FactionManager = FactionManager.new()
 var family_registry: FamilyRegistry = FamilyRegistry.new()
 ## 士兵外观随机池；只读静态资源，不进入存档。
 var appearance_config: AppearanceConfig = null
+## 封地经济/征召/冒险者刷新参数；只读静态资源，不进入存档。
+var economy_config: SettlementEconomyConfig = null
+var lord_manager: LordManager = LordManager.new()
+var fief_recruitment_manager: FiefRecruitmentManager = FiefRecruitmentManager.new()
+var adventurer_recruitment_manager: AdventurerRecruitmentManager = \
+	AdventurerRecruitmentManager.new()
 var vision_manager: VisionManager = VisionManager.new()
 var world_map_manager: WorldMapManager = WorldMapManager.new()
 var encounter_manager: EncounterManager = EncounterManager.new()
@@ -35,6 +43,9 @@ var world_id: String = ""
 var world_created_at: String = ""
 var world_size: Vector2 = DEFAULT_WORLD_SIZE
 var player_party_id: String = ""
+## 玩家领主身份（封地所有权）与玩家角色 UnitData 是两个独立 ID。
+var player_lord_id: String = ""
+var player_unit_id: String = ""
 var player_profile: PlayerProfile = PlayerProfile.new()
 
 var _static_configs_registered: bool = false
@@ -57,6 +68,27 @@ func get_player_party() -> PartyData:
 	return party_manager.get_party(player_party_id)
 
 
+func get_player_lord() -> LordData:
+	var lord: LordData = lord_manager.get_lord(player_lord_id)
+	if lord != null:
+		return lord
+	return lord_manager.get_player_lord()
+
+
+func get_player_unit() -> UnitData:
+	var unit := unit_manager.get_unit(player_unit_id)
+	if unit != null:
+		return unit
+	var party := get_player_party()
+	if party == null:
+		return null
+	for unit_id: String in party.member_unit_ids:
+		var member := unit_manager.get_unit(unit_id)
+		if member != null and member.is_player_character:
+			return member
+	return null
+
+
 func is_valid_world() -> bool:
 	if world_id.is_empty():
 		return false
@@ -65,6 +97,24 @@ func is_valid_world() -> bool:
 	if settlement_manager.get_all_settlements().is_empty():
 		return false
 	return true
+
+
+## 封地所有权与玩家身份的一致性校验；读档失败时不改写存档数据。
+func validate_world_ownership() -> Array[String]:
+	var errors: Array[String] = []
+	for settlement: SettlementData in settlement_manager.get_all_settlements():
+		if settlement == null or settlement.owner_lord_id.is_empty():
+			continue
+		if lord_manager.get_lord(settlement.owner_lord_id) == null:
+			errors.append(
+				"地点 %s 引用了不存在的领主 %s"
+				% [settlement.settlement_id, settlement.owner_lord_id]
+			)
+	if not player_lord_id.is_empty():
+		var player_lord: LordData = lord_manager.get_lord(player_lord_id)
+		if player_lord == null or not player_lord.is_player_lord:
+			errors.append("玩家领主 ID %s 无效" % player_lord_id)
+	return errors
 
 
 ## 聚合当前世界的权威数据。表现节点和 UI 状态不进入存档。
@@ -79,6 +129,8 @@ func to_save_data() -> SaveData:
 	save.player_party_id = player_party_id
 	save.player = {
 		"party_id": player_party_id,
+		"player_lord_id": player_lord_id,
+		"player_unit_id": player_unit_id,
 		"gold": player_profile.gold,
 		"inventory": player_profile.inventory.duplicate(),
 		"inventory_counts": player_profile.item_counts.duplicate(),
@@ -89,7 +141,7 @@ func to_save_data() -> SaveData:
 	save.units = unit_manager.to_dict()
 	save.parties = party_manager.to_dict()
 	save.settlements = settlement_manager.to_dict()
-	save.lords = {}
+	save.lords = lord_manager.to_dict()
 	save.factions = {}
 	save.quests = {}
 	return save
@@ -106,6 +158,8 @@ func load_from_save_data(save: SaveData) -> bool:
 	player_party_id = save.player_party_id
 	if player_party_id.is_empty():
 		player_party_id = str(save.player.get("party_id", ""))
+	player_lord_id = str(save.player.get("player_lord_id", ""))
+	player_unit_id = str(save.player.get("player_unit_id", ""))
 	# 原地更新，保持 BattleManager 持有的 profile 引用一致。
 	var loaded_profile: PlayerProfile = PlayerProfile.from_dict(save.player)
 	player_profile.gold = loaded_profile.gold
@@ -124,9 +178,31 @@ func load_from_save_data(save: SaveData) -> bool:
 	var sanitize_notes: Array[String] = party_manager.sanitize_loaded_runtime_state()
 	for message: String in sanitize_notes:
 		print("[WorldContext] %s" % message)
+	lord_manager.load_from_dict(save.lords)
 	settlement_manager.load_from_dict(save.settlements)
 	world_log_manager.load_from_dict(save.world_log)
 	world_map_manager.world_bounds = Rect2(Vector2.ZERO, world_size)
+
+	# 旧存档没有领主数据时，至少恢复玩家领主身份；不伪造封地归属。
+	var player_lord: LordData = lord_manager.get_lord(player_lord_id)
+	if player_lord == null:
+		player_lord = lord_manager.get_player_lord()
+	if player_lord == null and party_manager.get_party(player_party_id) != null:
+		player_lord = lord_manager.create_lord(
+			"玩家领主", party_manager.get_party(player_party_id).faction_id,
+			player_party_id, true
+		)
+	player_lord_id = player_lord.lord_id if player_lord != null else ""
+	if player_unit_id.is_empty():
+		var player_unit: UnitData = get_player_unit()
+		player_unit_id = player_unit.unit_id if player_unit != null else ""
+	adventurer_recruitment_manager.player_party_id = player_party_id
+
+	# 采邑容量/税收与候选人生成都来自同一经济配置；读档只修正边界，
+	# 不覆盖存档中的储备与刷新计时。
+	for settlement: SettlementData in settlement_manager.get_all_settlements():
+		fief_recruitment_manager.initialize_settlement(settlement)
+		adventurer_recruitment_manager.initialize_settlement(settlement, false)
 
 	# 读档以当前静态配置、持久化等级与装备为准重算最终属性；
 	# 无效装备引用会在 UnitManager 中报告并清理，不会静默生成错误属性。
@@ -140,6 +216,18 @@ func load_from_save_data(save: SaveData) -> bool:
 	if not membership_errors.is_empty():
 		for message: String in membership_errors:
 			push_error("[WorldContext] 士兵-部队成员关系校验失败: %s" % message)
+		return false
+
+	# 领主与部队、封地与领主的双向引用必须一致；坏档不自动改写。
+	var lord_errors: Array[String] = lord_manager.validate(party_manager)
+	if not lord_errors.is_empty():
+		for message: String in lord_errors:
+			push_error("[WorldContext] 领主数据校验失败: %s" % message)
+		return false
+	var ownership_errors: Array[String] = validate_world_ownership()
+	if not ownership_errors.is_empty():
+		for message: String in ownership_errors:
+			push_error("[WorldContext] 封地所有权校验失败: %s" % message)
 		return false
 
 	return is_valid_world()
@@ -196,6 +284,8 @@ func register_static_configs() -> bool:
 	if appearance_config == null:
 		push_error("无法加载外观配置: %s" % APPEARANCE_CONFIG_PATH)
 		success = false
+	fief_recruitment_manager.set_appearance_config(appearance_config)
+	adventurer_recruitment_manager.set_appearance_config(appearance_config)
 
 	_static_configs_registered = success
 	return success
@@ -220,9 +310,20 @@ static func _list_resource_paths(directory: String) -> Array[String]:
 
 
 func _wire_managers() -> void:
+	if economy_config == null:
+		economy_config = load(SETTLEMENT_ECONOMY_CONFIG_PATH) as SettlementEconomyConfig
+		if economy_config == null:
+			push_warning(
+				"无法加载封地经济配置，使用脚本默认值: %s"
+				% SETTLEMENT_ECONOMY_CONFIG_PATH
+			)
+			economy_config = SettlementEconomyConfig.new()
+	economy_config.sanitize()
+
 	unit_manager.setup(id_generator)
 	party_manager.setup(unit_manager, id_generator)
 	settlement_manager.setup(id_generator)
+	lord_manager.setup(id_generator, party_manager)
 	faction_manager.setup_defaults()
 	vision_manager.setup(party_manager, faction_manager, unit_manager)
 	world_map_manager.setup(party_manager, vision_manager)
@@ -233,6 +334,22 @@ func _wire_managers() -> void:
 		party_manager, faction_manager, battle_manager, world_map_manager
 	)
 	world_log_manager.setup(battle_manager, party_manager, settlement_manager)
+	fief_recruitment_manager.setup(
+		unit_manager,
+		party_manager,
+		settlement_manager,
+		lord_manager,
+		family_registry,
+		economy_config
+	)
+	adventurer_recruitment_manager.setup(
+		unit_manager,
+		party_manager,
+		settlement_manager,
+		id_generator,
+		family_registry,
+		economy_config
+	)
 	ai_manager.setup(
 		unit_manager,
 		party_manager,
@@ -240,7 +357,10 @@ func _wire_managers() -> void:
 		settlement_manager,
 		faction_manager,
 		vision_manager,
-		battle_manager
+		battle_manager,
+		lord_manager,
+		fief_recruitment_manager,
+		economy_config
 	)
 	world_simulation.bind(
 		unit_manager,
@@ -248,5 +368,7 @@ func _wire_managers() -> void:
 		world_map_manager,
 		ai_manager,
 		battle_manager,
-		encounter_manager
+		encounter_manager,
+		fief_recruitment_manager,
+		adventurer_recruitment_manager
 	)

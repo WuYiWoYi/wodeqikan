@@ -124,10 +124,24 @@ DialogueData (Resource)
 | 村庄对话 UI（屏幕下方） | 已实现：NPC 名称、文本、数据驱动选项 |
 | 村庄头人触发与距离校验 | 已实现 |
 | 条件/效果命令表 | 未实现 |
-| 复杂对话树、多选项分支 | 数据结构可扩展，当前只有单选项 |
+| 复杂对话树、多选项分支 | 数据结构可扩展；村庄头人可追加采邑选项，候选人提供招募选项 |
 | 大地图通用对话 UI | 未实现（大地图部队遭遇仍使用专用面板） |
 
-## 9. 待确认
+## 9. 村庄业务动作（阶段 7 新增）
+
+村庄场景在渲染选项后，由 `VillageScene._execute_dialogue_action()` 把 action 转交给管理器；`DialogueManager` 仍只负责会话与跳转：
+
+| action | 入口 | 管理器 |
+|---|---|---|
+| `recruit_adventurer` | 冒险者候选人对话 | `AdventurerRecruitmentManager.recruit_candidate()` |
+| `recruit_fief` | 村庄头人对话（玩家自有且有储备） | `FiefRecruitmentManager.recruit_group()` |
+
+- 选项只携带最小参数（候选人 ID / 村庄 ID）；权限、金币、储备与回滚由管理器校验。
+- 招募成功后对话关闭；失败显示管理器 `last_error`，不修改世界数据。
+- 已招募冒险者再次对话不再生成 `recruit_adventurer` 选项。
+- 这些动作不进入条件/效果白名单，仍属于村庄 UI 的受控业务入口。
+
+## 10. 待确认
 
 - 对话图的编辑器工作流（手写 `.tres` 还是外部工具导出）。
 - 是否支持本地化 key。

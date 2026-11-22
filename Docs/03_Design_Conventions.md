@@ -1,6 +1,6 @@
 # 设计与代码规范
 
-**文档版本：** V0.4
+**文档版本：** V0.5
 **适用范围：** 所有 GDScript、场景、数据资源与 Markdown 文档
 
 ---
@@ -18,7 +18,7 @@
 | 信号 | snake_case，过去式/事实式 | `party_position_changed` |
 | 节点名 | PascalCase | `UnitVisual`、`RightHandWeapon` |
 | 场景文件 | snake_case | `world_map.tscn` |
-| 实体 ID | `<PREFIX>_<6 位序号>` | `UNIT_000001` |
+| 实体 ID | `<PREFIX>_<6 位序号>` | `UNIT_000001`、`LORD_000001`、`CANDIDATE_000001` |
 | 配置 ID | UPPER_SNAKE 或 `<类型>_<名称>` | `INFANTRY_RECRUIT` |
 | JSON 字段 | snake_case | `world_position` |
 

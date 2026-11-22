@@ -3,7 +3,7 @@
 **核心数据：** `Scripts/Entities/Unit/unit_data.gd`、`Scripts/Config/unit_config.gd`
 **核心逻辑：** `Scripts/Core/World/unit_manager.gd`、`Scripts/Core/Gameplay/stat_calculator.gd`
 **战斗表现：** `Scripts/Systems/Combat/unit_actor.gd`、`unit_controller.gd`
-**状态：** 数据层、三级兵种与工资、等级成长、消耗物品晋升、武器攻击距离、马匹骑乘状态、部队查看 UI 待机动画、克制步兵步态、跃马式马腿动画、自由攻击、360°攻击、长矛前后摇与攻击后保持、实体碰撞、左右手武器独立层级、人物头部/头盔分离、满血隐藏生命条与临时部件美术完成；招募、装备获取、正式头盔/盾牌美术与复杂状态机未实现
+**状态：** 数据层、三级兵种与工资、等级成长、消耗物品晋升、武器攻击距离、马匹骑乘状态、部队查看 UI 待机动画、克制步兵步态、跃马式马腿动画、自由攻击、360°攻击、长矛前后摇与攻击后保持、实体碰撞、左右手武器独立层级、人物头部/头盔分离、满血隐藏生命条、临时部件美术、玩家家族外观与三级玩家角色完成；装备获取、正式头盔/盾牌美术与复杂状态机未实现
 
 ---
 
@@ -83,6 +83,10 @@
 - 新游戏玩家部队：5 民兵 + 6 职业步兵（其中 4 名装备马匹）+ 3 弓箭手 + 1 玩家角色，共 15 人；玩家角色最后加入。人数由 `WorldInitializer` 的玩家编制常量集中配置。
 - 骑乘职业步兵仍然使用 `infantry_trained` 配置，不新增骑兵 `config_id`；其 `is_mounted` 只表示 MOUNT 装备状态。
 - `UnitController` 同时支持 AI 与玩家控制模式；玩家控制不影响 UnitData 本身。
+- 阶段 7 起玩家角色配置为三级：`base_max_hp = 180`、`base_attack = 25`、`daily_wage = 0`；不装备默认武器，最终属性保持 180/25。
+- 玩家角色使用玩家家族 `FAMILY_PLAYER` 的旗帜/罩袍/缨饰/长矛美术；家族只影响外观，不改变阵营或控制权。
+- 玩家角色与玩家领主是两个独立 ID：`UnitData.unit_id` vs `LordData.lord_id`，不可互相替代。
+- 招募得到的采邑单位与冒险者同样走 `UnitManager.create_unit()`；骑乘采邑通过真实 `MOUNT` 装备表示。
 
 ### 3.2 最终属性计算（阶段 3 Step 3）
 

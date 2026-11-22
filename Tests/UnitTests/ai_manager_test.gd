@@ -68,6 +68,8 @@ func _run() -> void:
 	_test_bandit_encounter_offscreen()
 	_test_guard_priority()
 	_test_guard_battle_join()
+	_test_ai_responds_to_multiple_battles()
+	_test_parallel_encounters_create_two_battles()
 	_cleanup_battle()
 
 
@@ -521,12 +523,12 @@ func _test_ai_encounter_detection() -> void:
 	)
 
 	_encounters.update_encounters()
-	_check(_battle.current_battle == null, "双方没有攻击意图时不触发遭遇")
+	_check(not _battle.has_any_active_battles(), "双方没有攻击意图时不触发遭遇")
 
 	bandit.attack_intent = true
 	bandit.current_target_id = merchant.party_id
 	_encounters.update_encounters()
-	var session := _battle.current_battle
+	var session := _battle.get_battle_for_party(bandit.party_id)
 	_check(session != null, "单方具有攻击意图即可触发遭遇")
 	if session != null:
 		_check(session.offscreen, "NPC 遭遇使用离屏战斗")
@@ -537,7 +539,11 @@ func _test_ai_encounter_detection() -> void:
 		)
 		var same_session := session
 		_encounters.update_encounters()
-		_check(_battle.current_battle == same_session, "不会重复创建同一场战斗")
+		_check(
+			_battle.get_battle_for_party(bandit.party_id) == same_session
+			and _battle.get_active_battles().size() == 1,
+			"不会重复创建同一场战斗"
+		)
 		_battle.abort_battle(session.battle_id)
 	_destroy_party(merchant)
 	_destroy_party(bandit)
@@ -555,9 +561,10 @@ func _test_ai_encounter_detection() -> void:
 	merchant.current_target_id = bandit.party_id
 	bandit.current_target_id = merchant.party_id
 	_encounters.update_encounters()
-	_check(_battle.current_battle != null, "双方互相具有攻击意图时触发遭遇")
-	if _battle.current_battle != null:
-		_battle.abort_battle(_battle.current_battle.battle_id)
+	var mutual_session := _battle.get_battle_for_party(merchant.party_id)
+	_check(mutual_session != null, "双方互相具有攻击意图时触发遭遇")
+	if mutual_session != null:
+		_battle.abort_battle(mutual_session.battle_id)
 	_destroy_party(merchant)
 	_destroy_party(bandit)
 	_reset_main_parties()
@@ -574,7 +581,7 @@ func _test_ai_encounter_detection() -> void:
 	merchant_one.current_target_id = merchant_two.party_id
 	merchant_two.current_target_id = merchant_one.party_id
 	_encounters.update_encounters()
-	_check(_battle.current_battle == null, "友方部队接近不会触发战斗")
+	_check(not _battle.has_any_active_battles(), "友方部队接近不会触发战斗")
 	_destroy_party(merchant_one)
 	_destroy_party(merchant_two)
 	_reset_main_parties()
@@ -595,7 +602,7 @@ func _test_bandit_encounter_offscreen() -> void:
 
 	_ai.tick(1.0)
 	_encounters.update_encounters()
-	var session := _battle.current_battle
+	var session := _battle.get_battle_for_party(temp_bandit.party_id)
 	_check(session != null, "强盗追上目标后创建战斗")
 	if session == null:
 		_destroy_party(temp_merchant)
@@ -620,10 +627,13 @@ func _test_bandit_encounter_offscreen() -> void:
 		and temp_merchant.world_position == merchant_position,
 		"战斗期间双方停止大地图移动"
 	)
-	_check(_battle.current_battle == session, "不会重复创建战斗")
+	_check(
+		_battle.get_battle_for_party(temp_bandit.party_id) == session,
+		"不会重复创建战斗"
+	)
 
 	_check(_battle.resolve_current_battle_now(), "离屏战斗按小时推进并结算")
-	_check(_battle.current_battle == null, "离屏战斗结束后自动结算")
+	_check(_battle.get_battle(session.battle_id) == null, "离屏战斗结束后自动结算")
 	_check(
 		temp_bandit.battle_state != PartyData.BattleState.IN_BATTLE
 		and temp_merchant.battle_state != PartyData.BattleState.IN_BATTLE,
@@ -707,7 +717,10 @@ func _test_guard_battle_join() -> void:
 
 	_ai.tick(1.0)
 	_encounters.update_encounters()
-	_check(_battle.current_battle == session, "治安队加入不会重复创建战斗")
+	_check(
+		_battle.get_battle_for_party(temp_guard.party_id) == session,
+		"治安队加入不会重复创建战斗"
+	)
 	_check(
 		session.get_side_of_party(temp_guard.party_id)
 		== session.get_side_of_party(temp_merchant.party_id),
@@ -724,11 +737,179 @@ func _test_guard_battle_join() -> void:
 	)
 
 	_battle.finish_battle(session.battle_id, BattleSession.BattleResult.ABORTED)
-	_check(_battle.current_battle == null, "测试战斗已中止")
+	_check(_battle.get_battle(session.battle_id) == null, "测试战斗已中止")
 	_destroy_party(temp_guard)
 	_destroy_party(temp_merchant)
 	_destroy_party(temp_bandit)
 	_reset_main_parties()
+
+
+## 两场不同位置的离屏战斗：两名治安队分别响应各自距离最近的战场。
+func _test_ai_responds_to_multiple_battles() -> void:
+	_reset_main_parties()
+	_guard.world_position = Vector2(100.0, 100.0)
+	_bandit.world_position = Vector2(100.0, 300.0)
+	var merchant_one := _make_temp_party(
+		FactionManager.MERCHANT_FACTION_ID, Vector2(2000.0, 1000.0), "战场一商队"
+	)
+	var bandit_one := _make_temp_party(
+		FactionManager.BANDIT_FACTION_ID, Vector2(2030.0, 1000.0), "战场一强盗"
+	)
+	var merchant_two := _make_temp_party(
+		FactionManager.MERCHANT_FACTION_ID, Vector2(2600.0, 1000.0), "战场二商队"
+	)
+	var bandit_two := _make_temp_party(
+		FactionManager.BANDIT_FACTION_ID, Vector2(2630.0, 1000.0), "战场二强盗"
+	)
+	var first := _battle.start_battle(
+		[merchant_one.party_id], [bandit_one.party_id], Vector2(2015.0, 1000.0), true
+	)
+	var second := _battle.start_battle(
+		[merchant_two.party_id], [bandit_two.party_id], Vector2(2615.0, 1000.0), true
+	)
+	_check(first != null and second != null, "创建两处独立战场")
+	if first == null or second == null:
+		_destroy_party(merchant_one)
+		_destroy_party(bandit_one)
+		_destroy_party(merchant_two)
+		_destroy_party(bandit_two)
+		return
+
+	var guard_one := _make_temp_party(
+		FactionManager.GUARD_FACTION_ID, Vector2(1980.0, 1000.0), "响应治安队一"
+	)
+	var guard_two := _make_temp_party(
+		FactionManager.GUARD_FACTION_ID, Vector2(2580.0, 1000.0), "响应治安队二"
+	)
+	guard_one.ai_type = PartyData.PartyAIType.GUARD
+	guard_two.ai_type = PartyData.PartyAIType.GUARD
+	guard_one.sight_range = 800.0
+	guard_two.sight_range = 800.0
+
+	_ai.tick(1.0)
+	_check(
+		guard_one.target_position.distance_to(first.world_position) < 0.5,
+		"第一名治安队前往较近的第一处战场"
+	)
+	_check(
+		guard_two.target_position.distance_to(second.world_position) < 0.5,
+		"第二名治安队前往较近的第二处战场"
+	)
+	_check(
+		_battle.get_active_battles().size() == 2,
+		"AI 响应不会合并两场战斗"
+	)
+
+	_battle.finish_battle(first.battle_id, BattleSession.BattleResult.ABORTED)
+	_check(
+		_battle.get_battle(second.battle_id) == second,
+		"结束第一处战场不影响第二处"
+	)
+	_battle.finish_battle(second.battle_id, BattleSession.BattleResult.ABORTED)
+	_destroy_party(guard_one)
+	_destroy_party(guard_two)
+	_destroy_party(merchant_one)
+	_destroy_party(bandit_one)
+	_destroy_party(merchant_two)
+	_destroy_party(bandit_two)
+	_reset_main_parties()
+
+
+## 两组互不相关的敌对部队可以各自触发一场离屏战斗。
+func _test_parallel_encounters_create_two_battles() -> void:
+	_reset_main_parties()
+	_guard.world_position = Vector2(100.0, 100.0)
+	_bandit.world_position = Vector2(120.0, 100.0)
+	var merchant_one := _make_temp_party(
+		FactionManager.MERCHANT_FACTION_ID, Vector2(2000.0, 1000.0), "遭遇商队一"
+	)
+	var bandit_one := _make_temp_party(
+		FactionManager.BANDIT_FACTION_ID, Vector2(2040.0, 1000.0), "遭遇强盗一"
+	)
+	var merchant_two := _make_temp_party(
+		FactionManager.MERCHANT_FACTION_ID, Vector2(2200.0, 1200.0), "遭遇商队二"
+	)
+	var bandit_two := _make_temp_party(
+		FactionManager.BANDIT_FACTION_ID, Vector2(2240.0, 1200.0), "遭遇强盗二"
+	)
+	for pair: Array in [[bandit_one, merchant_one], [bandit_two, merchant_two]]:
+		var attacker := pair[0] as PartyData
+		var target := pair[1] as PartyData
+		attacker.attack_intent = true
+		attacker.current_target_id = target.party_id
+
+	_encounters.update_encounters()
+	_encounters.update_encounters()
+	var first := _battle.get_battle_for_party(bandit_one.party_id)
+	var second := _battle.get_battle_for_party(bandit_two.party_id)
+	_check(
+		first != null and second != null and first != second,
+		"两组部队各自创建独立战斗"
+	)
+	_check(
+		_battle.get_active_battles().size() == 2,
+		"世界同时存在两场遭遇战斗"
+	)
+	if first == null or second == null:
+		_destroy_party(merchant_one)
+		_destroy_party(bandit_one)
+		_destroy_party(merchant_two)
+		_destroy_party(bandit_two)
+		return
+	_check(
+		merchant_one.battle_state == PartyData.BattleState.IN_BATTLE
+		and bandit_two.battle_state == PartyData.BattleState.IN_BATTLE,
+		"各战斗只锁定自己的参战部队"
+	)
+	_check(
+		_battle.get_battle_for_party(merchant_one.party_id) == first
+		and _battle.get_battle_for_party(merchant_two.party_id) == second,
+		"没有部队被错误分配到另一场战斗"
+	)
+
+	_battle.tick(6.0)
+	_check(
+		first.offscreen_settlements_done >= 1
+		and second.offscreen_settlements_done >= 1,
+		"两场遭遇战斗分别推进小时结算"
+	)
+	var second_states := _snapshot_session_states(second)
+	_battle.finish_battle(first.battle_id, BattleSession.BattleResult.ABORTED)
+	_check(
+		_battle.get_battle(second.battle_id) == second
+		and _session_states_equal(second, second_states),
+		"结束一场遭遇战斗不影响另一场"
+	)
+	_check(
+		merchant_two.battle_state == PartyData.BattleState.IN_BATTLE,
+		"另一场战斗部队保持锁定"
+	)
+	_battle.finish_battle(second.battle_id, BattleSession.BattleResult.ABORTED)
+	_destroy_party(merchant_one)
+	_destroy_party(bandit_one)
+	_destroy_party(merchant_two)
+	_destroy_party(bandit_two)
+	_reset_main_parties()
+
+
+func _snapshot_session_states(session: BattleSession) -> Dictionary:
+	var result: Dictionary = {}
+	for unit_id: String in session.get_all_unit_ids():
+		var state := session.get_unit_state(unit_id)
+		if state != null:
+			result[unit_id] = [state.alive, state.battle_hp]
+	return result
+
+
+func _session_states_equal(session: BattleSession, snapshot: Dictionary) -> bool:
+	for unit_id_value: Variant in snapshot.keys():
+		var unit_id: String = str(unit_id_value)
+		var state := session.get_unit_state(unit_id)
+		var before: Array = snapshot[unit_id_value]
+		if state == null or state.alive != bool(before[0]) \
+				or state.battle_hp != int(before[1]):
+			return false
+	return true
 
 
 func _reset_main_parties() -> void:
@@ -753,10 +934,11 @@ func _reset_main_parties() -> void:
 
 
 func _cleanup_battle() -> void:
-	if _battle != null and _battle.current_battle != null:
-		_battle.finish_battle(
-			_battle.current_battle.battle_id, BattleSession.BattleResult.ABORTED
-		)
+	if _battle != null:
+		for session: BattleSession in _battle.get_active_battles():
+			_battle.finish_battle(
+				session.battle_id, BattleSession.BattleResult.ABORTED
+			)
 
 
 func _make_temp_party(faction_id: String, position: Vector2, party_name: String) -> PartyData:

@@ -1,6 +1,7 @@
 class_name StatCalculator
 extends RefCounted
-## 单位最终属性计算：兵种基础属性 + 等级成长 + 装备加成。
+## 单位最终属性计算：兵种基础属性 + 等级成长 + 装备加成 +
+## 由武器派生的攻击方式/弹道参数与骑乘身高。
 ##
 ## 不把最终属性写回兵种配置；UnitData 只缓存计算结果。
 ## 本类是运行时属性的唯一计算入口：UnitManager 创建单位与重算时必须调用 apply_to_unit()。
@@ -12,6 +13,11 @@ const STAT_KEYS: Array[String] = [
 	"attack_interval",
 	"move_speed",
 	"attack_range",
+	"attack_type",
+	"body_height",
+	"projectile_texture_path",
+	"projectile_speed",
+	"projectile_arc_height",
 ]
 
 ## 骑乘移动攻击加成集中配置。
