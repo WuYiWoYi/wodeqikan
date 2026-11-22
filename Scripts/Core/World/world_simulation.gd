@@ -12,6 +12,8 @@ var _battle_manager: BattleManager = null
 var _encounter_manager: EncounterManager = null
 var _fief_recruitment_manager: FiefRecruitmentManager = null
 var _adventurer_recruitment_manager: AdventurerRecruitmentManager = null
+## 阶段 12：每日补给消耗必须由统一的 SupplyManager 在 WorldTime 日边界结算。
+var _supply_manager: SupplyManager = null
 
 
 func bind(
@@ -22,7 +24,8 @@ func bind(
 	battle_manager: BattleManager = null,
 	encounter_manager: EncounterManager = null,
 	fief_recruitment_manager: FiefRecruitmentManager = null,
-	adventurer_recruitment_manager: AdventurerRecruitmentManager = null
+	adventurer_recruitment_manager: AdventurerRecruitmentManager = null,
+	supply_manager: SupplyManager = null
 ) -> void:
 	_unit_manager = unit_manager
 	_party_manager = party_manager
@@ -32,6 +35,7 @@ func bind(
 	_encounter_manager = encounter_manager
 	_fief_recruitment_manager = fief_recruitment_manager
 	_adventurer_recruitment_manager = adventurer_recruitment_manager
+	_supply_manager = supply_manager
 
 
 func on_world_tick(fixed_delta: float) -> void:
@@ -51,6 +55,11 @@ func on_world_tick(fixed_delta: float) -> void:
 		_fief_recruitment_manager.tick(fixed_delta)
 	if _adventurer_recruitment_manager != null:
 		_adventurer_recruitment_manager.tick(fixed_delta)
+
+	# 补给只在 WorldTime 跨日时结算；暂停不调用 tick，2 倍速也只会按日推进。
+	# 放在 AI 之前，保证 NPC 决策看到的是当天结算后的补给状态。
+	if _supply_manager != null:
+		_supply_manager.update_daily()
 
 	if _encounter_manager != null:
 		_encounter_manager.update_encounters()

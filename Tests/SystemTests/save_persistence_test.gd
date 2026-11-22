@@ -35,7 +35,7 @@ func _run() -> void:
 	_check(WorldInitializer.create_new_world(context), "初始化世界")
 	if not context.is_valid_world():
 		return
-	_check(SaveData.CURRENT_SCHEMA_VERSION == 5, "存档 Schema 版本为 5")
+	_check(SaveData.CURRENT_SCHEMA_VERSION == 6, "存档 Schema 版本为 6")
 
 	var player := context.get_player_party()
 	var bandit := _find_party_by_ai(context, PartyData.PartyAIType.BANDIT)
@@ -124,6 +124,30 @@ func _run() -> void:
 		"战斗事实写入世界日志"
 	)
 
+	# 玩家在城镇市场完成一次购买，验证市场库存与背包共同进入存档。
+	var town: SettlementData = _find_settlement(
+		context, WorldInitializer.BURKNANIA_TOWN_NAME
+	)
+	_check(town != null, "找到伯克纳尼亚城镇")
+	var saved_market_stock: int = 0
+	if town != null:
+		_check(
+			context.market_manager.get_stock(town.settlement_id, "mount_horse_01") == 3,
+			"新世界城镇市场初始库存为 3"
+		)
+		var trade_result: Dictionary = context.market_manager.execute_player_trade(
+			town.settlement_id,
+			{"mount_horse_01": 1},
+			{},
+			context.player_profile,
+			"save-test-buy-1"
+		)
+		_check(bool(trade_result.get("success", false)), "存档前完成一次市场购买")
+		saved_market_stock = context.market_manager.get_stock(
+			town.settlement_id, "mount_horse_01"
+		)
+		_check(saved_market_stock == 2, "购买后市场库存变为 2")
+
 	var log_count_before_save: int = context.world_log_manager.get_entry_count()
 	var player_members_after_battle: int = player.member_unit_ids.size()
 	var saved_gold: int = context.player_profile.gold
@@ -147,7 +171,7 @@ func _run() -> void:
 	_check(loaded != null, "读取成功")
 	if loaded == null:
 		return
-	_check(loaded.schema_version == 5, "读回的 Schema 为 5")
+	_check(loaded.schema_version == 6, "读回的 Schema 为 6")
 
 	var restored := WorldContext.new()
 	restored.name = "SavePersistenceRestoredContext"
@@ -201,6 +225,13 @@ func _run() -> void:
 	_check(restored.player_profile.gold == saved_gold, "恢复金币")
 	_check(restored.player_profile.inventory == saved_inventory, "恢复物品列表")
 	_check(restored.player_profile.item_counts == saved_counts, "恢复物品数量")
+	if town != null:
+		_check(not save.markets.is_empty(), "存档包含城镇市场库存")
+		_check(
+			restored.market_manager.get_stock(town.settlement_id, "mount_horse_01")
+				== saved_market_stock,
+			"恢复城镇市场库存"
+		)
 
 	var restored_survivor := restored.unit_manager.get_unit(survivor_id)
 	_check(restored_survivor != null, "恢复战后存活单位")
@@ -381,6 +412,7 @@ func _copy_save(source: SaveData) -> SaveData:
 	copy.parties = source.parties.duplicate(true)
 	copy.lords = source.lords.duplicate(true)
 	copy.settlements = source.settlements.duplicate(true)
+	copy.markets = source.markets.duplicate(true)
 	copy.factions = source.factions.duplicate(true)
 	copy.quests = source.quests.duplicate(true)
 	return copy
@@ -403,6 +435,13 @@ func _find_party_by_kind(context: WorldContext, kind: PartyData.PartyKind) -> Pa
 func _find_family_settlement(context: WorldContext) -> SettlementData:
 	for settlement: SettlementData in context.settlement_manager.get_all_settlements():
 		if not settlement.family_id.is_empty():
+			return settlement
+	return null
+
+
+func _find_settlement(context: WorldContext, display_name: String) -> SettlementData:
+	for settlement: SettlementData in context.settlement_manager.get_all_settlements():
+		if settlement != null and settlement.display_name == display_name:
 			return settlement
 	return null
 

@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="MarketGoodsConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/market_goods_config.gd" id="1_marketgoodsconfig"]
+
+[resource]
+script = ExtResource("1_marketgoodsconfig")
+item_id = "fodder"
+buy_price = 3
+sell_price = 1
+initial_stock = 50
+is_tradeable = true
+scope = 1
+is_stackable = true
+batch_purchase_amounts = Array[int]([10, 50])

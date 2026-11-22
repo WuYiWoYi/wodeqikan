@@ -396,37 +396,42 @@ func _refresh_mount_controls(unit: UnitData) -> void:
 	if _mount_option == null:
 		return
 	_mount_option.clear()
-	var mount_ids: Array[String] = []
-	for item_id: String in _context.player_profile.inventory:
-		var equipment := _context.unit_manager.get_equipment_config(item_id)
-		if equipment == null or equipment.slot != EquipmentConfig.Slot.MOUNT:
-			continue
-		if _context.player_profile.get_item_count(item_id) <= 0:
-			continue
-		mount_ids.append(item_id)
-	mount_ids.sort()
+	# 每匹马都是独立实例：按具体个体列出外观，而不是按装备 ID 合并。
+	var instances: Array[MountInstanceData] = \
+		_context.player_profile.get_all_mount_instances()
+	instances.sort_custom(func(a: MountInstanceData, b: MountInstanceData) -> bool:
+		if a.equipment_id == b.equipment_id:
+			return a.instance_id < b.instance_id
+		return a.equipment_id < b.equipment_id
+	)
 
-	if mount_ids.is_empty():
+	if instances.is_empty():
 		_mount_option.add_item("背包中没有马匹")
 		_mount_option.set_item_disabled(0, true)
 		_mount_option.select(0)
 	else:
-		for mount_id: String in mount_ids:
-			var equipment := _context.unit_manager.get_equipment_config(mount_id)
-			var display_name: String = (
-				equipment.display_name if equipment != null else mount_id
+		for instance: MountInstanceData in instances:
+			if instance == null:
+				continue
+			var equipment := _context.unit_manager.get_equipment_config(
+				instance.equipment_id
 			)
-			var count: int = _context.player_profile.get_item_count(mount_id)
+			var display_name: String = (
+				equipment.display_name if equipment != null else instance.equipment_id
+			)
 			var index: int = _mount_option.item_count
-			_mount_option.add_item("%s ×%d" % [display_name, count])
-			_mount_option.set_item_metadata(index, mount_id)
-		_mount_option.select(0)
+			_mount_option.add_item(
+				"%s · %s" % [display_name, instance.appearance_text()]
+			)
+			_mount_option.set_item_metadata(index, instance.instance_id)
+		if _mount_option.item_count > 0:
+			_mount_option.select(0)
 
-	_equip_mount_button.disabled = mount_ids.is_empty() or unit.is_mounted
+	_equip_mount_button.disabled = instances.is_empty() or unit.is_mounted
 	_unequip_mount_button.disabled = not unit.is_mounted
 
 
-func _get_selected_mount_id() -> String:
+func _get_selected_mount_instance_id() -> String:
 	if _mount_option == null or _mount_option.selected < 0:
 		return ""
 	var metadata: Variant = _mount_option.get_item_metadata(_mount_option.selected)
@@ -436,12 +441,12 @@ func _get_selected_mount_id() -> String:
 func _on_equip_mount_pressed() -> void:
 	if _selected_unit_id.is_empty():
 		return
-	var mount_id: String = _get_selected_mount_id()
-	if mount_id.is_empty():
+	var instance_id: String = _get_selected_mount_instance_id()
+	if instance_id.is_empty():
 		_mount_status_label.text = "背包中没有可装备的马匹"
 		return
-	if _context.unit_manager.equip_mount(
-		_selected_unit_id, mount_id, _context.player_profile
+	if _context.unit_manager.equip_mount_instance(
+		_selected_unit_id, instance_id, _context.player_profile
 	):
 		unit_changed.emit()
 		_mount_status_label.text = "已装备坐骑"

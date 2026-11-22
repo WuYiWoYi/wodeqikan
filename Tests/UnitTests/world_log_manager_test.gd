@@ -128,6 +128,42 @@ func _run() -> void:
 			== "上限事件 %d" % (WorldLogManager.MAX_ENTRIES + 19),
 		"最新日志仍在末尾"
 	)
+	_check(WorldLogManager.MAX_ENTRIES == 20, "世界日志上限固定为 20 条")
+	var serialized_cap: Dictionary = _log.to_dict()
+	_check(
+		(serialized_cap.get("entries", []) as Array).size() <= 20,
+		"保存时最多只写入 20 条日志"
+	)
+
+	# 历史存档可能包含超过 20 条：读档时必须立刻清理旧记录。
+	var oversized: Dictionary = {"entries": []}
+	for i: int in range(100):
+		var entry := WorldLogEntry.new()
+		entry.text = "历史日志 %d" % i
+		entry.world_time_seconds = float(i)
+		(oversized["entries"] as Array).append(entry.to_dict())
+	_log.load_from_dict(oversized)
+	_check(_log.get_entry_count() == 20, "读档后只保留最新 20 条")
+	_check(_log.get_entries()[0].text == "历史日志 80", "读档清理最早的历史日志")
+	_check(_log.get_entries().back().text == "历史日志 99", "读档保留最新历史日志")
+
+	var trade_entry := _log.add_event(
+		WorldLogEntry.EventType.PLAYER_TRADE, "玩家交易日志"
+	)
+	_check(trade_entry != null, "PLAYER_TRADE 事件可以写入")
+	_check(_log.get_entry_count() == 20, "新增交易日志后仍保持 20 条上限")
+	var trade_serialized := _log.to_dict()
+	var trade_restored := WorldLogManager.new()
+	trade_restored.load_from_dict(trade_serialized)
+	_check(
+		trade_restored.get_entries().back().event_type
+			== WorldLogEntry.EventType.PLAYER_TRADE,
+		"PLAYER_TRADE 事件类型可以序列化恢复"
+	)
+	_check(
+		trade_restored.get_entries().back().text == "玩家交易日志",
+		"交易日志文本可以序列化恢复"
+	)
 
 
 func _setup_fixture() -> void:

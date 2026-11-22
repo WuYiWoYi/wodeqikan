@@ -44,6 +44,8 @@ GameManager (Autoload)
     ├── IdGenerator                               │
     ├── UnitManager                               │
     ├── ItemManager（消耗品静态配置）             │
+    ├── MarketManager（村庄/城镇市场与交易）       │
+    ├── SupplyManager（每日补给结算）              │
     ├── PartyManager                              │
     ├── SettlementManager                         │
     ├── NobleManager（贵族，继承 LordManager）     │
@@ -102,6 +104,8 @@ GameManager (Autoload)
 | `WorldSimulation` | 固定顺序推进世界 | 渲染、UI |
 | `UnitManager` | `UnitData` 增删查、按配置生成单位、等级/装备/坐骑/晋升/属性重算 | 单位 AI、场景表现 |
 | `ItemManager` | `ItemConfig` 静态注册与查询（消耗品/杂物） | 持有数量、玩家背包写操作 |
+| `MarketManager` | 村庄/城镇商品注册、独立库存、马匹实例交易、交易校验与原子结算、市场库存序列化 | 持有玩家背包/金币、操作 UI、决定是否采购（AI 决策） |
+| `SupplyManager` | 按 `TimeManager` 日边界统一结算玩家/NPC 面包与草料、剩余天数与采购需求查询 | 市场交易、价格计算、路线决策、UI |
 | `PartyManager` | `PartyData` 增删查、成员关系维护、工资汇总 | 部队 AI |
 | `SettlementManager` | `SettlementData` 增删查、场景路径与序列化 | 地点图标、交互面板 |
 | `LordManager` | `LordData` 增删查、玩家领主查询、部队引用校验、序列化 | AI 决策、封地分配、UI |
@@ -316,6 +320,8 @@ Continue / Load Game
 | `player_encounter_requested` | `encounter_id`, `attacker_party_id`, `target_party_id` | `EncounterManager` | WorldMap 强制遭遇对话 |
 | `player_battle_interaction_requested` | `interaction_id`, `battle_id` | `EncounterManager` | WorldMap 加入/离开面板 |
 | `unit_died` | `unit_id`, `party_id` | `BattleManager` / `UnitManager` | UI、统计 |
+| `party_supply_changed` | `party_id`, `is_food_low`, `is_fodder_low` | `SupplyManager` | 大地图 UI、提示 |
+| `npc_supply_purchased` | `party_id`, `bread_count`, `fodder_count` | `AIManager`（经 `MarketManager` 成功后） | 大地图部队图标浮字 |
 
 规则：
 
@@ -329,6 +335,7 @@ Continue / Load Game
 - 所有持久化实体必须有唯一 ID：`UNIT_000001`、`PARTY_000001`、`LORD_000001`、`SETTLEMENT_000001`、`FACTION_000001`。
 - 政治实体使用固定语义 ID：`HOUSE_*`、`KINGDOM_*`；视觉家族配置使用 `FAMILY_*`，两者通过 `HouseData.banner_id` 映射。
 - ID 只能由 `IdGenerator` 生成；计数器随存档保存，永不复用。固定 ID 由初始化器显式注册，重复注册必须拒绝。
+- 马匹是独立实例：`MountInstanceData.instance_id` 全局唯一；旧存档迁移使用确定性 seed，保证重复读档不增殖、外观不漂移。
 - ID 不得依赖节点名、节点路径或数组下标。
 - 数据类必须提供 `to_dict()` / `from_dict()`；字段名使用 snake_case。
 - 存档只保存数据，不保存节点。详见 [Systems/Save_System.md](Systems/Save_System.md)。

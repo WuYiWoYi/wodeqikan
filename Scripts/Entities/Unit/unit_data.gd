@@ -36,6 +36,9 @@ var faction_id: String = ""
 var family_id: String = ""
 var current_party_id: String = ""
 var equipment: Dictionary = {}
+## 单位当前坐骑的独立实例外观（阶段 12）。
+## 与 equipment["MOUNT"] 的基础装备 ID 分离；卸下时原样返还背包。
+var mount_instance: Dictionary = {}
 var is_mounted: bool = false
 ## 玩家角色身份（持久化）；当前由谁控制由 BattleScene 运行时决定。
 var is_player_character: bool = false
@@ -65,6 +68,17 @@ func clamp_hp() -> void:
 	current_hp = clampi(current_hp, 0, maxi(max_hp, 0))
 
 
+## 当前坐骑的实例数据；没有 MOUNT 装备或数据缺失时返回 null。
+func get_mount_instance_data() -> MountInstanceData:
+	if mount_instance.is_empty():
+		return null
+	return MountInstanceData.from_dict(mount_instance)
+
+
+func set_mount_instance_data(instance: MountInstanceData) -> void:
+	mount_instance = instance.to_dict() if instance != null else {}
+
+
 func to_dict() -> Dictionary:
 	return {
 		"unit_id": unit_id,
@@ -88,6 +102,7 @@ func to_dict() -> Dictionary:
 		"family_id": family_id,
 		"current_party_id": current_party_id,
 		"equipment": equipment.duplicate(true),
+		"mount_instance": mount_instance.duplicate(true),
 		"is_mounted": is_mounted,
 		"is_player_character": is_player_character,
 		"appearance": appearance.duplicate(true),
@@ -141,9 +156,24 @@ static func from_dict(data: Dictionary) -> UnitData:
 
 	# 骑乘状态由 MOUNT 装备槽推导，不信任旧存档中的 is_mounted 标记。
 	# 旧存档既没有 MOUNT 装备也没有马匹字段时，单位按步兵处理。
-	unit.is_mounted = unit.equipment.has(
-		EquipmentConfig.SLOT_NAMES[EquipmentConfig.Slot.MOUNT]
-	)
+	var mount_slot: String = EquipmentConfig.SLOT_NAMES[EquipmentConfig.Slot.MOUNT]
+	unit.is_mounted = unit.equipment.has(mount_slot)
+
+	# 阶段 12：为已装备坐骑补齐独立外观实例。旧存档没有实例时使用
+	# 单位 ID 生成确定性外观，反复读档不会刷新为新的随机马匹。
+	var instance_value: Variant = data.get("mount_instance", {})
+	if instance_value is Dictionary and not (instance_value as Dictionary).is_empty():
+		unit.mount_instance = (instance_value as Dictionary).duplicate(true)
+	if unit.is_mounted:
+		var mount_id: String = str(unit.equipment.get(mount_slot, ""))
+		var instance := MountInstanceData.from_dict(unit.mount_instance)
+		if instance.equipment_id != mount_id:
+			instance = MountInstanceData.create_deterministic(
+				mount_id, "unit|%s|%s" % [unit.unit_id, mount_id]
+			)
+		unit.mount_instance = instance.to_dict()
+	else:
+		unit.mount_instance = {}
 
 	unit.clamp_hp()
 	return unit

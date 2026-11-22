@@ -26,6 +26,8 @@ const BATTLE_APPROACH_RADIUS: float = 700.0
 ## 已经看见战场并开始接近后，失去视野仍保持目标的时间（世界秒）。
 ## 防止部队在“发现/失去视野”之间每个决策周期来回抖动。
 const BATTLE_RESPONSE_HOLD_SECONDS: float = 15.0
+## 补给采购失败或暂时没有目标后的重试间隔，避免每 tick 扫描所有地点。
+const SUPPLY_RETRY_SECONDS: float = 20.0
 
 ## 强盗目标评分：最终评分 = 基础优先级分 - 距离 × 权重。
 const BANDIT_TARGET_SCORE_MERCHANT: float = 300.0
@@ -56,6 +58,9 @@ var _battle_manager: BattleManager = null
 var _lord_manager: LordManager = null
 var _fief_recruitment_manager: FiefRecruitmentManager = null
 var _economy_config: SettlementEconomyConfig = null
+## 阶段 12：补给需求查询与市场采购都走既有统一系统，AI 只负责决策与移动。
+var _supply_manager: SupplyManager = null
+var _market_manager: MarketManager = null
 var _party_timer: float = 0.0
 var _lord_timer: float = 0.0
 
@@ -70,7 +75,9 @@ func setup(
 	battle_manager: BattleManager = null,
 	lord_manager: LordManager = null,
 	fief_recruitment_manager: FiefRecruitmentManager = null,
-	economy_config: SettlementEconomyConfig = null
+	economy_config: SettlementEconomyConfig = null,
+	supply_manager: SupplyManager = null,
+	market_manager: MarketManager = null
 ) -> void:
 	_unit_manager = unit_manager
 	_party_manager = party_manager
@@ -84,6 +91,8 @@ func setup(
 	_economy_config = economy_config if economy_config != null \
 		else SettlementEconomyConfig.new()
 	_economy_config.sanitize()
+	_supply_manager = supply_manager
+	_market_manager = market_manager
 
 
 func tick(world_delta: float) -> void:
@@ -116,6 +125,9 @@ func _tick_party_tactical() -> void:
 			continue
 		# 领主正在执行封地征召时，普通巡逻/路线 AI 不得覆盖移动目标。
 		if _is_lord_recruiting(party.party_id):
+			continue
+		# 补给采购是普通行为：战斗中/追击中不触发，也不会覆盖封地征召。
+		if _try_handle_supply_purchase(party):
 			continue
 
 		match party.ai_type:
@@ -381,6 +393,202 @@ func _clear_battle_response(party: PartyData) -> void:
 		return
 	party.battle_response_id = ""
 	party.battle_response_until = 0.0
+
+
+# ---------------------------------------------------------------------------
+# 补给采购
+# ---------------------------------------------------------------------------
+
+
+## NPC 部队在补给不足时前往最近的村庄/城镇采购。
+## 返回 true 表示本 tick 的移动目标已由补给逻辑接管，应跳过普通路线 AI。
+## 战斗中、追击中与战后冷却期间不触发，避免打断战斗。
+func _try_handle_supply_purchase(party: PartyData) -> bool:
+	if _supply_manager == null or _market_manager == null \
+			or _world_map_manager == null or party == null:
+		return false
+	# 强盗没有稳定经济来源，不参与补给采购；其余 NPC 部队与玩家共用规则。
+	if party.party_kind == PartyData.PartyKind.BANDIT:
+		return false
+	if party.member_unit_ids.is_empty():
+		return false
+	if party.battle_state != PartyData.BattleState.AVAILABLE:
+		return false
+	if party.attack_intent or not party.battle_response_id.is_empty():
+		return false
+	if _battle_manager != null \
+			and _battle_manager.get_battle_for_party(party.party_id) != null:
+		return false
+	if _is_in_post_battle_cooldown(party):
+		return false
+	if party.supply_purchase_retry_after > TimeManager.world_elapsed_seconds:
+		return false
+
+	# 只有真正进入低补给（剩余天数 <= LOW_SUPPLY_DAYS）才跑一趟，
+	# 采购量再按 7 天储备计算；否则 5~6 天的部队会无谓往返。
+	if not _supply_manager.has_low_supply(party):
+		_clear_supply_purchase(party)
+		return false
+	var needs: Dictionary = _supply_manager.get_purchase_needs(party)
+	if needs.is_empty():
+		_clear_supply_purchase(party)
+		return false
+	if party.gold <= 0:
+		# 没钱时不再每 tick 扫描市场；保留低补给状态供 UI 显示。
+		_clear_supply_purchase(party)
+		party.supply_purchase_retry_after = TimeManager.world_elapsed_seconds \
+			+ SUPPLY_RETRY_SECONDS
+		return false
+
+	var target: SettlementData = _resolve_supply_target(party, needs)
+	if target == null:
+		_clear_supply_purchase(party)
+		party.supply_purchase_retry_after = TimeManager.world_elapsed_seconds \
+			+ SUPPLY_RETRY_SECONDS
+		return false
+
+	party.supply_purchase_active = true
+	party.supply_purchase_settlement_id = target.settlement_id
+	if party.world_position.distance_to(target.world_position) > AI_ARRIVAL_RADIUS:
+		_world_map_manager.set_party_target(party.party_id, target.world_position)
+		return true
+
+	# 到达市场：采购一次并结束本次任务；不足的部分留到下次判断。
+	_execute_supply_purchase(party, target, needs)
+	_clear_supply_purchase(party)
+	party.supply_purchase_retry_after = TimeManager.world_elapsed_seconds \
+		+ SUPPLY_RETRY_SECONDS
+	return true
+
+
+## 优先保持已选定的采购目标；目标失效或库存耗尽时再找最近的可用村庄/城镇。
+func _resolve_supply_target(
+	party: PartyData,
+	needs: Dictionary
+) -> SettlementData:
+	if party.supply_purchase_active \
+			and not party.supply_purchase_settlement_id.is_empty():
+		var kept := _settlement_manager.get_settlement(
+			party.supply_purchase_settlement_id
+		) if _settlement_manager != null else null
+		if kept != null and _can_buy_supply_at(kept, needs, party):
+			return kept
+	if _settlement_manager == null:
+		return null
+	var nearest: SettlementData = null
+	var nearest_distance: float = INF
+	for settlement: SettlementData in _settlement_manager.get_all_settlements():
+		if not _can_buy_supply_at(settlement, needs, party):
+			continue
+		var distance: float = party.world_position.distance_to(
+			settlement.world_position
+		)
+		if distance < nearest_distance:
+			nearest_distance = distance
+			nearest = settlement
+	return nearest
+
+
+## 村庄与城镇都可以补给；城堡永远不在候选列表里。
+func _can_buy_supply_at(
+	settlement: SettlementData,
+	needs: Dictionary,
+	party: PartyData
+) -> bool:
+	if settlement == null or _market_manager == null:
+		return false
+	if settlement.settlement_type != SettlementData.SettlementType.VILLAGE \
+			and settlement.settlement_type != SettlementData.SettlementType.TOWN:
+		return false
+	var market := _market_manager.get_market(settlement.settlement_id)
+	if market == null:
+		return false
+	for item_id_value: Variant in needs:
+		var item_id: String = str(item_id_value)
+		var config := _market_manager.get_goods_config(item_id)
+		if config == null or not config.can_buy():
+			continue
+		if not config.is_available_at(settlement.settlement_type):
+			continue
+		if market.get_stock(item_id) <= 0:
+			continue
+		if config.buy_price > party.gold:
+			continue
+		return true
+	return false
+
+
+## 按“剩余天数更少”的优先级购买，最多补到 SupplyManager 给出的目标储备。
+## 采购只通过 MarketManager.execute_npc_trade，不写玩家世界日志。
+func _execute_supply_purchase(
+	party: PartyData,
+	settlement: SettlementData,
+	needs: Dictionary
+) -> bool:
+	var market := _market_manager.get_market(settlement.settlement_id)
+	if market == null:
+		return false
+	var status: Dictionary = _supply_manager.get_status(party)
+	var item_ids: Array[String] = []
+	for key: Variant in needs:
+		item_ids.append(str(key))
+	item_ids.sort_custom(func(a: String, b: String) -> bool:
+		return _supply_days(status, a) < _supply_days(status, b)
+	)
+
+	var purchases: Dictionary = {}
+	var remaining_gold: int = party.gold
+	for item_id: String in item_ids:
+		var config := _market_manager.get_goods_config(item_id)
+		if config == null or not config.can_buy() \
+				or not config.is_available_at(settlement.settlement_type):
+			continue
+		if config.buy_price <= 0:
+			continue
+		var affordable: int = int(
+			floor(float(remaining_gold) / float(config.buy_price))
+		)
+		var quantity: int = mini(
+			int(needs[item_id]),
+			mini(market.get_stock(item_id), affordable)
+		)
+		if quantity <= 0:
+			continue
+		purchases[item_id] = quantity
+		remaining_gold -= quantity * config.buy_price
+	if purchases.is_empty():
+		return false
+
+	var result: Dictionary = _market_manager.execute_npc_trade(
+		settlement.settlement_id,
+		purchases,
+		{},
+		party,
+		"npc_supply_%s_%d" % [party.party_id, Time.get_ticks_usec()]
+	)
+	if not bool(result.get("success", false)):
+		return false
+	var bread_bought: int = int(purchases.get(SupplyManager.BREAD_ID, 0))
+	var fodder_bought: int = int(purchases.get(SupplyManager.FODDER_ID, 0))
+	EventBus.npc_supply_purchased.emit(
+		party.party_id, bread_bought, fodder_bought
+	)
+	return true
+
+
+func _supply_days(status: Dictionary, item_id: String) -> float:
+	if item_id == SupplyManager.BREAD_ID:
+		return float(status.get("food_days_remaining", SupplyManager.NO_CONSUMPTION_DAYS))
+	if item_id == SupplyManager.FODDER_ID:
+		return float(status.get("fodder_days_remaining", SupplyManager.NO_CONSUMPTION_DAYS))
+	return SupplyManager.NO_CONSUMPTION_DAYS
+
+
+func _clear_supply_purchase(party: PartyData) -> void:
+	if party == null:
+		return
+	party.supply_purchase_active = false
+	party.supply_purchase_settlement_id = ""
 
 
 # ---------------------------------------------------------------------------

@@ -6,9 +6,11 @@ extends RefCounted
 ## Schema v3 增加世界日志；v4 增加领主、封地所有权、村庄人口/繁荣度、
 ## 采邑储备、冒险者候选人与玩家领主/玩家角色 ID。
 ## v5 增加贵族、家族与王国数据；旧存档的 lords 会迁移为 nobles。
-## 读取时保留 v1 → v5 的浅迁移入口，缺失字段按安全默认值恢复。
+## 阶段 11 增加 markets 字段（可选，缺失时按商品配置初始化），不提升 Schema。
+## v6（阶段 12）增加独立马匹实例、村庄市场、NPC 背包/资金与每日补给结算日。
+## 读取时保留 v1 → v6 的浅迁移入口，缺失字段按安全默认值恢复。
 
-const CURRENT_SCHEMA_VERSION: int = 5
+const CURRENT_SCHEMA_VERSION: int = 6
 
 var schema_version: int = CURRENT_SCHEMA_VERSION
 var project_version: String = "0.2.0"
@@ -21,6 +23,9 @@ var world_size: Vector2 = Vector2.ZERO
 var world_elapsed_seconds: float = 0.0
 var world_base_speed: float = 1.0
 var id_counters: Dictionary = {}
+## 上一次完成补给结算的游戏日（TimeManager total_days）。
+## -1 表示旧存档尚未结算过，读档后以当前日作为起点。
+var supply_last_settled_day: int = -1
 
 var player_party_id: String = ""
 var player: Dictionary = {}
@@ -39,6 +44,9 @@ var lords: Dictionary = {}
 var houses: Dictionary = {}
 var kingdoms: Dictionary = {}
 var settlements: Dictionary = {}
+## 村庄/城镇市场库存：{ settlement_id: { stock, mount_instances, initialized_items } }。
+## 旧存档缺失时由 MarketManager 按当前商品配置初始化一次。
+var markets: Dictionary = {}
 var factions: Dictionary = {}
 var quests: Dictionary = {}
 
@@ -59,6 +67,7 @@ func to_dict() -> Dictionary:
 		"time": {
 			"world_elapsed_seconds": world_elapsed_seconds,
 			"world_base_speed": world_base_speed,
+			"supply_last_settled_day": supply_last_settled_day,
 		},
 		"id_counters": id_counters.duplicate(true),
 		"player": player_payload,
@@ -72,6 +81,7 @@ func to_dict() -> Dictionary:
 		"houses": houses.duplicate(true),
 		"kingdoms": kingdoms.duplicate(true),
 		"settlements": settlements.duplicate(true),
+		"markets": markets.duplicate(true),
 		"factions": factions.duplicate(true),
 		"quests": quests.duplicate(true),
 	}
@@ -100,6 +110,9 @@ static func from_dict(payload: Dictionary) -> SaveData:
 	var time_block: Dictionary = _as_dict(payload.get("time", {}))
 	save.world_elapsed_seconds = maxf(0.0, float(time_block.get("world_elapsed_seconds", 0.0)))
 	save.world_base_speed = float(time_block.get("world_base_speed", 1.0))
+	save.supply_last_settled_day = int(
+		time_block.get("supply_last_settled_day", -1)
+	)
 
 	save.id_counters = _as_dict(payload.get("id_counters", {}))
 	save.player = _as_dict(payload.get("player", {}))
@@ -114,6 +127,7 @@ static func from_dict(payload: Dictionary) -> SaveData:
 	save.houses = _as_dict(payload.get("houses", {}))
 	save.kingdoms = _as_dict(payload.get("kingdoms", {}))
 	save.settlements = _as_dict(payload.get("settlements", {}))
+	save.markets = _as_dict(payload.get("markets", {}))
 	save.factions = _as_dict(payload.get("factions", {}))
 	save.quests = _as_dict(payload.get("quests", {}))
 

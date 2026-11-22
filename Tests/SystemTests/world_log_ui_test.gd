@@ -91,6 +91,18 @@ func _run() -> void:
 	_check(_count_entry_labels() == 11, "多条日志全部进入滚动内容")
 	_check(str(_map.call("get_world_log_text")).contains("滚动事件 7"), "最新日志保持可见")
 
+	# 日志上限为 20：继续追加后底层与 UI 都只保留最新 20 条。
+	for i: int in range(25):
+		_context.world_log_manager.add_event(
+			WorldLogEntry.EventType.OTHER, "上限事件 %d" % i
+		)
+	await get_tree().process_frame
+	_check(_count_entry_labels() == 20, "日志面板最多显示 20 条")
+	_check(_map.call("get_world_log_entry_count") == 20, "管理器只保留 20 条")
+	text = str(_map.call("get_world_log_text"))
+	_check(text.contains("上限事件 24"), "最新日志保持可见")
+	_check(not text.contains("第一条世界事件"), "最旧日志被清理")
+
 	# 面板可见时仍保留地图移动入口。
 	var target := _player.world_position + Vector2(120.0, 0.0)
 	_check(_map.call("request_player_move", target), "日志面板不阻挡地图点击/移动")

@@ -130,6 +130,37 @@ var battle_response_id: String = ""
 ## 战场响应目标保持截止世界时间；到期后若仍看不见参战方则放弃。
 var battle_response_until: float = 0.0
 
+## ---------------------------------------------------------------------------
+## 阶段 12：部队物品、资金与补给
+## ---------------------------------------------------------------------------
+
+## NPC 部队使用与玩家完全相同的物品存储结构。
+## 玩家部队的权威物品仍是 PlayerProfile，不由本字段代替。
+var inventory_data: InventoryData = InventoryData.new()
+## NPC 部队自有资金；玩家资金始终以 PlayerProfile.gold 为准。
+var gold: int = 0
+## 正在执行的补给采购目标（持久化）；空字符串表示没有采购任务。
+var supply_purchase_active: bool = false
+var supply_purchase_settlement_id: String = ""
+## 上一次每日结算记录的实际缺口，供 UI / AI 查询。
+var supply_bread_shortage: int = 0
+var supply_fodder_shortage: int = 0
+## 采购失败后的重试截止时间（仅运行时，不进入存档）。
+var supply_purchase_retry_after: float = 0.0
+
+## 兼容访问入口：与 PlayerProfile 保持同名接口，便于市场与补给系统共用。
+var inventory: Array[String]:
+	get:
+		return inventory_data.inventory
+	set(value):
+		inventory_data.inventory = value
+
+var item_counts: Dictionary:
+	get:
+		return inventory_data.stackable_counts
+	set(value):
+		inventory_data.stackable_counts = value
+
 
 func has_member(unit_id: String) -> bool:
 	return member_unit_ids.has(unit_id)
@@ -141,6 +172,92 @@ func is_available_for_world() -> bool:
 
 func is_player_controlled() -> bool:
 	return control_type == ControlType.PLAYER
+
+
+# ---------------------------------------------------------------------------
+# 物品与资金（与 PlayerProfile 同名接口）
+# ---------------------------------------------------------------------------
+
+
+func get_item_count(item_id: String) -> int:
+	return inventory_data.get_item_count(item_id)
+
+
+func has_item(item_id: String) -> bool:
+	return get_item_count(item_id) > 0
+
+
+func add_item(item_id: String, count: int = 1) -> bool:
+	return inventory_data.add_item(item_id, count)
+
+
+func remove_item(item_id: String, count: int = 1) -> bool:
+	return inventory_data.remove_item(item_id, count)
+
+
+func add_mount_instance(instance: MountInstanceData) -> bool:
+	return inventory_data.add_mount_instance(instance)
+
+
+func remove_mount_instance(instance_id: String) -> MountInstanceData:
+	return inventory_data.remove_mount_instance(instance_id)
+
+
+func take_mount_instance(item_id: String) -> MountInstanceData:
+	return inventory_data.take_mount_instance(item_id)
+
+
+func get_mount_instance(instance_id: String) -> MountInstanceData:
+	return inventory_data.get_mount_instance(instance_id)
+
+
+func has_mount_instance(instance_id: String) -> bool:
+	return inventory_data.has_mount_instance(instance_id)
+
+
+func get_mount_instances(item_id: String = "") -> Array[MountInstanceData]:
+	return inventory_data.get_mount_instances(item_id)
+
+
+func get_all_mount_instances() -> Array[MountInstanceData]:
+	return inventory_data.get_all_mount_instances()
+
+
+func get_mount_count(item_id: String = "") -> int:
+	return inventory_data.get_mount_count(item_id)
+
+
+func restore_mount_instances(instances: Array[MountInstanceData]) -> void:
+	inventory_data.restore_mount_instances(instances)
+
+
+## 交易回滚专用：整体恢复背包，不生成新实例。
+func restore_inventory_state(
+	counts: Dictionary,
+	inventory_list: Array,
+	instances: Array
+) -> void:
+	inventory_data.restore_state(inventory_list, counts, instances)
+
+
+func migrate_legacy_mount_counts() -> void:
+	inventory_data.migrate_legacy_mount_counts()
+
+
+func can_afford(amount: int) -> bool:
+	return amount >= 0 and gold >= amount
+
+
+func spend_gold(amount: int) -> bool:
+	if amount <= 0 or gold < amount:
+		return false
+	gold -= amount
+	return true
+
+
+func add_gold(amount: int) -> void:
+	if amount > 0:
+		gold += amount
 
 
 ## 稳定的类型键，供遭遇文本配置与 UI 显示使用。
@@ -232,6 +349,12 @@ func to_dict() -> Dictionary:
 		"ai_route_index": ai_route_index,
 		"ai_route_settlement_ids": ai_route_settlement_ids.duplicate(),
 		"ai_patrol_points": _vector2_array_to_data(ai_patrol_points),
+		"inventory": inventory_data.to_dict(),
+		"gold": gold,
+		"supply_purchase_active": supply_purchase_active,
+		"supply_purchase_settlement_id": supply_purchase_settlement_id,
+		"supply_bread_shortage": supply_bread_shortage,
+		"supply_fodder_shortage": supply_fodder_shortage,
 	}
 
 
@@ -292,6 +415,22 @@ static func from_dict(data: Dictionary) -> PartyData:
 	if patrol_values is Array:
 		for value: Variant in patrol_values:
 			party.ai_patrol_points.append(_read_vector2(value))
+
+	# 阶段 12：旧存档没有部队背包/资金；默认空背包与 0 金币。
+	var inventory_value: Variant = data.get("inventory", {})
+	if inventory_value is Dictionary:
+		party.inventory_data = InventoryData.from_dict(inventory_value)
+	party.gold = maxi(0, int(data.get("gold", 0)))
+	party.supply_purchase_active = bool(data.get("supply_purchase_active", false))
+	party.supply_purchase_settlement_id = str(
+		data.get("supply_purchase_settlement_id", "")
+	)
+	party.supply_bread_shortage = maxi(
+		0, int(data.get("supply_bread_shortage", 0))
+	)
+	party.supply_fodder_shortage = maxi(
+		0, int(data.get("supply_fodder_shortage", 0))
+	)
 
 	return party
 

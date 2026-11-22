@@ -80,6 +80,7 @@ var _settlement_fief_label: Label = null
 var _settlement_recruit_button: Button = null
 var _settlement_recruit_status_label: Label = null
 var _settlement_enter_button: Button = null
+var _settlement_market_button: Button = null
 var _settlement_pause_active: bool = false
 var _settlement_entry_pending: bool = false
 
@@ -103,6 +104,11 @@ var _attack_confirm_in_progress: bool = false
 
 var _party_manage_panel: PartyPanel = null
 var _party_manage_pause_active: bool = false
+
+## 玩家背包（只读）与城镇交易市场；都由大地图统一管理暂停原因。
+var _inventory_panel: InventoryPanel = null
+var _inventory_pause_active: bool = false
+var _market_panel: MarketPanel = null
 
 var _encounter_panel: PanelContainer = null
 var _encounter_portrait: EncounterPortrait = null
@@ -224,6 +230,8 @@ func _ready() -> void:
 		EventBus.battle_participants_updated.connect(_on_battle_participants_updated)
 	if not EventBus.fief_recruited.is_connected(_on_fief_recruited):
 		EventBus.fief_recruited.connect(_on_fief_recruited)
+	if not EventBus.npc_supply_purchased.is_connected(_on_npc_supply_purchased):
+		EventBus.npc_supply_purchased.connect(_on_npc_supply_purchased)
 
 	camera.position = _player_party.world_position
 	_set_camera_zoom(CAMERA_DEFAULT_ZOOM)
@@ -262,6 +270,9 @@ func _exit_tree() -> void:
 	if _battle_interaction_pause_active:
 		TimeManager.pop_pause(GameManager.PAUSE_REASON_BATTLE_INTERACTION)
 		_battle_interaction_pause_active = false
+	if _inventory_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_inventory_pause_active = false
 	if _context != null:
 		_context.encounter_manager.clear_pending_player_encounter()
 		_context.encounter_manager.clear_pending_battle_interaction()
@@ -669,8 +680,11 @@ func _build_ui() -> void:
 	_build_party_hover_panel()
 	_build_battle_summary_panel()
 	_build_world_log_panel()
+	_build_inventory_panel()
 	_build_save_panel()
 	_build_encyclopedia_panel()
+	# 市场是覆盖层，最后加入以保证显示在地点/背包面板之上。
+	_build_market_panel()
 
 
 func _build_top_bar() -> void:
@@ -724,6 +738,11 @@ func _build_top_bar() -> void:
 	party_button.tooltip_text = "查看玩家部队与士兵详情"
 	party_button.pressed.connect(_on_party_manage_pressed)
 	row.add_child(party_button)
+
+	var inventory_button := _make_button("背包", "InventoryButton")
+	inventory_button.tooltip_text = "查看玩家金币与持有物品"
+	inventory_button.pressed.connect(_on_inventory_pressed)
+	row.add_child(inventory_button)
 
 	var encyclopedia_button := _make_button("百科", "EncyclopediaButton")
 	encyclopedia_button.tooltip_text = "查看王国、家族、贵族与封地"
@@ -833,6 +852,12 @@ func _build_settlement_panel() -> void:
 	_settlement_recruit_button.custom_minimum_size = Vector2(0.0, 36.0)
 	_settlement_recruit_button.pressed.connect(_on_settlement_recruit_pressed)
 	column.add_child(_settlement_recruit_button)
+
+	_settlement_market_button = _make_button("交易市场", "SettlementMarketButton")
+	_settlement_market_button.custom_minimum_size = Vector2(0.0, 36.0)
+	_settlement_market_button.visible = false
+	_settlement_market_button.pressed.connect(_on_settlement_market_pressed)
+	column.add_child(_settlement_market_button)
 
 	_settlement_enter_button = _make_button("进入村庄", "SettlementEnterButton")
 	_settlement_enter_button.custom_minimum_size = Vector2(0.0, 36.0)
@@ -1360,6 +1385,123 @@ func _on_party_manage_closed() -> void:
 		_party_manage_pause_active = false
 	_set_time_buttons_enabled(true)
 	_update_time_ui()
+
+
+# ---------------------------------------------------------------------------
+# 玩家背包
+# ---------------------------------------------------------------------------
+
+
+func _build_inventory_panel() -> void:
+	_inventory_panel = InventoryPanel.new()
+	_inventory_panel.name = "InventoryPanel"
+	_inventory_panel.visible = false
+	_inventory_panel.closed.connect(_on_inventory_closed)
+	_ui_root.add_child(_inventory_panel)
+	_inventory_panel.setup(_context)
+
+
+## 打开只读背包面板；失败返回 false 且不改变时间状态。
+func open_inventory() -> bool:
+	if _context == null or _inventory_panel == null:
+		return false
+	if _inventory_panel.visible or _battle_transition_started:
+		return false
+	if _is_input_blocked():
+		return false
+	TimeManager.push_pause(GameManager.PAUSE_REASON_UI_PANEL)
+	_inventory_pause_active = true
+	_inventory_panel.open()
+	_set_time_buttons_enabled(false)
+	_update_time_ui()
+	return true
+
+
+func close_inventory() -> void:
+	if _inventory_panel != null and _inventory_panel.visible:
+		_inventory_panel.close()
+
+
+func _on_inventory_pressed() -> void:
+	open_inventory()
+
+
+func _on_inventory_closed() -> void:
+	if _inventory_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_inventory_pause_active = false
+	_set_time_buttons_enabled(true)
+	_update_time_ui()
+
+
+# ---------------------------------------------------------------------------
+# 城镇交易市场
+# ---------------------------------------------------------------------------
+
+
+func _build_market_panel() -> void:
+	_market_panel = MarketPanel.new()
+	_market_panel.name = "MarketPanel"
+	_market_panel.visible = false
+	_market_panel.closed.connect(_on_market_closed)
+	_market_panel.traded.connect(_on_market_traded)
+	_ui_root.add_child(_market_panel)
+	_market_panel.setup(_context)
+
+
+func get_market_panel() -> MarketPanel:
+	return _market_panel
+
+
+func _on_settlement_market_pressed() -> void:
+	if _context == null or _market_panel == null:
+		return
+	var settlement := _context.settlement_manager.get_settlement(
+		_settlement_latch_id
+	)
+	if settlement == null \
+			or not _context.market_manager.is_market_settlement(settlement):
+		return
+	if _context.market_manager.get_market(settlement.settlement_id) == null:
+		_context.market_manager.ensure_markets()
+	if _context.market_manager.get_market(settlement.settlement_id) == null:
+		_settlement_recruit_status_label.text = "该地点暂无可用市场。"
+		return
+	if not _market_panel.open(settlement):
+		return
+	# 市场覆盖地点面板，但沿用同一个 ui_panel 暂停原因；关闭后恢复面板。
+	_settlement_panel.visible = false
+	if not _settlement_pause_active:
+		TimeManager.push_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_settlement_pause_active = true
+
+
+## 关闭市场：清空交易预览，恢复地点面板，并保持世界暂停。
+func _on_market_closed() -> void:
+	if _inventory_panel != null:
+		_inventory_panel.refresh()
+	if _context == null:
+		return
+	var settlement := _context.settlement_manager.get_settlement(
+		_settlement_latch_id
+	)
+	if settlement != null:
+		_settlement_panel.visible = true
+		_refresh_settlement_info(settlement)
+		return
+	# 地点已不存在时安全释放暂停原因，避免永久锁住时间。
+	_settlement_panel.visible = false
+	if _settlement_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_settlement_pause_active = false
+	_set_time_buttons_enabled(true)
+	_update_time_ui()
+
+
+## 交易成功后同步刷新只读背包面板（面板可能正被其他窗口覆盖）。
+func _on_market_traded(_result: Dictionary) -> void:
+	if _inventory_panel != null:
+		_inventory_panel.refresh()
 
 
 # ---------------------------------------------------------------------------
@@ -2754,8 +2896,16 @@ func _open_settlement(settlement: SettlementData) -> void:
 	var is_village: bool = (
 		settlement.settlement_type == SettlementData.SettlementType.VILLAGE
 	)
+	var is_town: bool = (
+		settlement.settlement_type == SettlementData.SettlementType.TOWN
+	)
 	_settlement_enter_button.visible = is_village
 	_settlement_enter_button.disabled = not is_village
+	# 村庄入口是“购买补给”，城镇入口是“交易市场”；城堡没有市场。
+	var has_market: bool = is_village or is_town
+	_settlement_market_button.visible = has_market
+	_settlement_market_button.disabled = not has_market
+	_settlement_market_button.text = "购买补给" if is_village else "交易市场"
 	_refresh_settlement_info(settlement)
 	_settlement_recruit_status_label.text = ""
 	_settlement_panel.visible = true
@@ -2802,6 +2952,14 @@ func _refresh_settlement_info(settlement: SettlementData) -> void:
 	var is_village: bool = (
 		settlement.settlement_type == SettlementData.SettlementType.VILLAGE
 	)
+	var is_town: bool = (
+		settlement.settlement_type == SettlementData.SettlementType.TOWN
+	)
+	# 市场只通过地点类型判断：村庄只卖补给，城镇另有马匹；城堡没有市场。
+	var has_market: bool = is_village or is_town
+	_settlement_market_button.visible = has_market
+	_settlement_market_button.disabled = not has_market
+	_settlement_market_button.text = "购买补给" if is_village else "交易市场"
 	if is_village:
 		_settlement_fief_label.text = "采邑储备：%d / %d 组" % [
 			settlement.fief_recruitment_stock,
@@ -2849,6 +3007,9 @@ func _on_settlement_recruit_pressed() -> void:
 
 
 func _on_settlement_leave_pressed() -> void:
+	# 市场打开时正常流程不可见地点面板；这里兜底，避免残留覆盖层。
+	if _market_panel != null and _market_panel.visible:
+		_market_panel.close()
 	_settlement_panel.visible = false
 	if _settlement_pause_active:
 		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
@@ -3185,6 +3346,23 @@ func _on_fief_recruited(
 	if icon == null or not is_instance_valid(icon):
 		return
 	icon.show_floating_text("招募了%d组采邑" % maxi(1, groups))
+
+
+## NPC 补给采购成功：在部队图标上方浮出一次简要提示，不写玩家世界日志。
+func _on_npc_supply_purchased(
+	party_id: String, bread_count: int, fodder_count: int
+) -> void:
+	var icon := _party_icons.get(party_id) as PartyIcon
+	if icon == null or not is_instance_valid(icon):
+		return
+	var parts: Array[String] = []
+	if bread_count > 0:
+		parts.append("面包+%d" % bread_count)
+	if fodder_count > 0:
+		parts.append("草料+%d" % fodder_count)
+	if parts.is_empty():
+		return
+	icon.show_floating_text("补给 %s" % " ".join(parts))
 
 
 func get_party_icon(party_id: String) -> PartyIcon:
@@ -3684,6 +3862,8 @@ func _is_input_blocked() -> bool:
 		or (_battle_interaction_panel != null and _battle_interaction_panel.visible)
 		or (_attack_confirm_panel != null and _attack_confirm_panel.visible)
 		or (_encyclopedia_panel != null and _encyclopedia_panel.visible)
+		or (_inventory_panel != null and _inventory_panel.visible)
+		or (_market_panel != null and _market_panel.visible)
 	)
 
 

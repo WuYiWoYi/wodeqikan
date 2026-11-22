@@ -1,8 +1,8 @@
 # 当前开发状态
 
 **更新日期：** 2026-11-22
-**当前阶段：** 阶段 10 · 战后追击、AI 助攻、增援部署与大地图交互完善
-**整体状态：** 阶段 9 已完成地点聚类与部队旗帜放大；阶段 10 修复战后追击/遭遇卡死、统一强盗与贵族敌对关系、启用基于视野的 AI 战场助攻、按初始战斗侧修正增援部署，并补充行动意图悬浮、战斗标记悬浮、WASD 自由镜头、主动攻击二次确认与进一步的旗帜放大；相关自动化测试全部通过
+**当前阶段：** 阶段 12 · 马匹个体、补给消耗与村庄/城镇交易
+**整体状态：** 阶段 11 已完成玩家背包 UI 与城镇交易；阶段 12 新增马匹独立实例与毛色/马鞍外观、面包/草料与批量购买、`SupplyManager` 每日消耗、NPC 领主补给采购、村庄购买补给入口、村庄/城镇市场范围、交易预览直接移动与重置、图标、存档 Schema v6 与旧档迁移；代码、数据与测试已写入，尚未在 Godot 运行时执行
 
 ---
 
@@ -36,6 +36,8 @@
 | 8 战场扩建 · 增援 · 贵族王国 · 地图扩建 · 百科 | 完成 | 1800×1024 战场参数化、增援加入既有战斗与后方展开、Noble/House/Kingdom 数据与管理器、5000×3000 地图与两王国、三级百科、Schema v5 |
 | 9 大地图布局 · 部队旗帜 | 完成 | 地点按王国/家族聚类、道路与巡逻点同步、部队内部旗帜放大且圆形底盘不变 |
 | 10 战后追击 · AI 助攻 · 增援部署 · 大地图交互 | 完成 | 战后追击/冷却恢复、强盗与贵族敌对、视野门槛助攻、按初始侧部署增援、行动意图悬浮、战斗标记悬浮、WASD 自由镜头、主动攻击二次确认、旗帜进一步放大 |
+| 11 玩家背包 · 城镇交易市场 | 完成 | 玩家背包 UI、城镇市场入口、双栏交易预览、原子化买卖、交易日志、20 条日志上限、市场库存存档、NPC 交易来源预留 |
+| 12 马匹个体 · 补给消耗 · 村庄/城镇交易 | 完成（待运行时验证） | 马匹实例与外观、面包/草料与批量购买、每日补给结算、NPC 补给采购、村庄市场入口、交易直接移动/重置/图标、Schema v6 |
 | 6（原路线图）援军与高级战斗 | 部分完成 | 增援加入既有战斗已完成；玩家手动选择加入方、士气与高级指挥未开始 |
 | 7 沙盒扩展 | 未开始 | — |
 
@@ -1494,6 +1496,71 @@
 - 玩家主动攻击新增二次确认；取消不产生任何战斗副作用；确认时重新校验玩家/目标可用性、战斗占用、友军变化等条件；加入友军既有战斗不弹确认；重复确认不会创建第二场战斗。
 - 部队内部旗帜 `flag_max_size` 由 38 提升到 44，圆形底盘、边框、点击半径、悬浮判定与人数显示保持不变。
 
+## 8.24 阶段 11 · 玩家背包 UI 与城镇交易市场系统
+
+### 新增
+
+- `MarketGoodsConfig`（`Data/Market/*.tres`）：商品 ID、买入价、卖出价、初始库存、可交易标记。
+- `MarketData`：每个城镇独立的 `{ item_id: count }` 库存。
+- `MarketManager`：商品注册、城镇库存初始化、交易校验、原子提交/回滚、交易 ID 去重、序列化；`WorldContext.market_manager` 持有。
+- `InventoryPanel`：大地图背包入口，显示金币、物品名称/类型/数量/描述；只读。
+- `MarketPanel`：仅城镇可打开的左市场/右背包双栏界面；物品移动只修改预览，确认后调用管理器结算。
+- `SaveData.markets`：城镇市场库存存档；旧存档缺失时按配置初始化一次。
+- `PLAYER_TRADE` 世界日志事件；只有玩家来源交易写入。
+
+### 变更
+
+- `WorldLogManager.MAX_ENTRIES`：100 → 20；读档与保存都裁剪为最新 20 条。
+- 新游戏玩家初始金币设为 500（`WorldInitializer.PLAYER_STARTING_GOLD`）；读档完全以存档为准。
+- 城镇地点面板新增“交易市场”按钮，只按 `SettlementType.TOWN` 显示；村庄/城堡不显示。
+- 市场打开时隐藏地点面板并沿用同一个 `ui_panel` 暂停原因；关闭后恢复地点面板，不恢复 1x/2x。
+- 当前商品：普通战马 `mount_horse_01`，买入 100 / 卖出 70 / 初始库存 3。
+- 市场不允许直接修改士兵装备；马匹上/下马仍统一经过 `UnitManager`。
+
+### 测试
+
+- 新增 `Tests/UnitTests/market_manager_test.tscn`：注册/初始化/买卖/混合交易/库存与金币失败/不可交易/重复提交/NPC 来源/序列化。
+- 新增 `Tests/SystemTests/town_market_ui_test.tscn`：入口可见性、背包 UI、双栏预览、实时金额、取消无副作用、确认结算与日志、金币不足、存档恢复。
+- 扩展并通过：`world_log_manager_test`（20 条上限、第 21 条淘汰、100 条读档裁剪、`PLAYER_TRADE`）、`world_log_ui_test`（UI 最多 20 条）、`save_persistence_test`（市场库存往返）。
+- 回归通过：`settlement_interaction_test`、`player_character_data_test`。
+
+## 8.25 阶段 12 · 马匹个体、补给消耗与村庄/城镇交易
+
+### 新增
+
+- `MountInstanceData`：马匹独立实例与唯一 `instance_id`；`coat_style_id` / `saddle_style_id` 创建时随机，之后随存档持久化。
+- `MountVisualConfig`：黑/白/棕毛色与 8 种马鞍贴图映射；`HorseVisual` / `UnitVisual` 沿用现有骨架，仅替换贴图。
+- `MountThumbnail`：交易列表马匹图标，按 48×96 画布等比缩放。
+- `bread` / `fodder` 的 `ItemConfig` 与市场商品配置；支持 10 / 50 批量购买。
+- `SupplyManager`：玩家/NPC 每日面包/草料消耗、缺口、剩余天数与补到 7 天的采购需求。
+- `AIManager` 领主补给采购：低补给 → 最近有库存村庄/城镇（不含城堡）→ 自有金币采购 → 部队图标浮字。
+- `EventBus.party_supply_changed` / `EventBus.npc_supply_purchased`。
+- 村庄大地图“购买补给”入口与村长对话入口。
+- `TradeSession`：左右直接移动、快照重置、总额计算与确认提交。
+- `SaveData` v6：`supply_last_settled_day`、马匹实例、NPC 背包与金币、市场马匹实例与 `initialized_items`。
+- 测试：`mount_instance_test`、`supply_manager_test`、`ai_supply_purchase_test`。
+
+### 变更
+
+- `InventoryData` 成为玩家与 NPC 共用背包：可堆叠物品与马匹实例分离；旧数量确定性迁移。
+- 交易 UI 改为左市场/右玩家直接移动；每行最左侧显示图标；马匹逐匹展示与买卖。
+- “重置交易”恢复打开市场时的快照；取消不修改权威数据；未确认预览不进入存档。
+- 市场范围由“仅城镇”扩展为“村庄（面包/草料）+ 城镇（面包/草料/马匹）”，城堡仍无市场。
+- `WorldSimulation` 每 tick 先结算补给，再执行 AI 决策，保证 NPC 看到最新补给状态。
+- 新世界初始补给：玩家 7 天份、NPC 2 天份并给予起始资金；强盗除外。
+- 存档 Schema 5 → 6；v5 及更早存档执行一次补给初始化与马匹迁移。
+- `UnitDetailPanel` 改为逐匹显示背包马匹并装备具体实例。
+
+### 测试
+
+- 新增 `mount_instance_test`：实例唯一性、不可堆叠、存档往返、旧档确定性迁移、市场逐匹买卖与售罄不补货、单位装备实例往返。
+- 新增 `supply_manager_test`：每日消耗、同日幂等、跨多日补算、缺口不为负、NPC 部队消耗、采购需求。
+- 新增 `ai_supply_purchase_test`：选择村庄而非更近城堡、按 7 天储备购买、库存减少、事件只发一次、不写玩家日志、战斗期间不采购、城镇回退。
+- 扩展 `market_manager_test`：村庄市场、面包/草料交易、马匹实例库存、旧档村庄市场、快照含实例 ID。
+- 扩展 `town_market_ui_test`：村庄按钮与批量购买、重置、取消、马匹逐匹行、读档恢复。
+- 扩展 `save_persistence_test` / `political_hierarchy_test`：Schema 6。
+- 当前环境未找到可执行的 Godot 二进制，以上测试尚未实际运行；需编辑器重新导入以刷新 `global_script_class_cache.cfg`。
+
 ## 9. 自动化验收
 
 ### 测试套件
@@ -1531,6 +1598,9 @@
 | `Tests/SystemTests/battle_scene_test.tscn` | 全部参战士兵生成（玩家 15 + 敌方 5）、唯一 unit_id、初始部署距离、边界、2 倍相机、1920×1080 设置、部件 z/贴图、骑乘保留人腿、实时伤害、死亡移除、胜利、结算与存档 |
 | `Tests/SystemTests/archer_battle_test.tscn` | 三级弓配置/属性、弓锚点与拉弓动画、抛物线/地面深度、静止命中、移动目标射失、头顶掠过、死亡目标、每箭单次伤害、远程 AI/冷却/接近/后撤、玩家固定终点、初始 3 名弓箭手与存档往返 |
 | `Tests/SystemTests/archer_scene_test.tscn` | 真实战斗场景 ProjectileManager 注入、接管弓箭手、鼠标世界坐标射击入口、3 秒冷却、箭矢伤害与冷却拒绝 |
+| `Tests/UnitTests/mount_instance_test.tscn` | 马匹实例唯一性、不堆叠、外观/实例存档往返、旧档确定性迁移、市场逐匹买卖与售罄、单位装备实例往返 |
+| `Tests/UnitTests/supply_manager_test.tscn` | 每日面包/草料消耗、同日幂等、跨多日补算、缺口不为负、NPC 部队消耗、补到 7 天的采购需求 |
+| `Tests/SystemTests/ai_supply_purchase_test.tscn` | 低补给采购目标选择、避开城堡、7 天储备购买、库存扣减、事件一次、不写玩家日志、战斗阻断、城镇回退 |
 | `Tests/SystemTests/fief_adventurer_system_test.tscn` | 封地归属、6 人编制与马匹、人口/繁荣度/税收、失败回滚、采邑/冒险者日志、候选人刷新上限、1 金币招募/重复拒绝/离开清理、AI 领主征召、封地/存档往返 |
 | `Tests/SystemTests/player_control_test.tscn` | 玩家角色控制、WASD/斜向、左键攻击/冷却、受伤、控制权转移、观战、战败结果 |
 | `Tests/SystemTests/battle_formation_test.tscn` | 队形槽位、同队间距、多友军 lane 分区、阵亡后重分配 |

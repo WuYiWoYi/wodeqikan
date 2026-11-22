@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="ItemConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/item_config.gd" id="1_itemconfig"]
+
+[resource]
+script = ExtResource("1_itemconfig")
+item_id = "fodder"
+display_name = "草料"
+description = "每匹马每天消耗 1 份，包括已装备与背包中的马匹。可在村庄或城镇市场购买。"
+item_type = 0
+icon_texture_path = "res://art/我的骑砍临时美术/正式美术_其他/道具物品贴图/道具贴图_草料.png"
+is_stackable = true
+batch_purchase_amounts = Array[int]([10, 50])

@@ -7,7 +7,8 @@ extends RefCounted
 
 signal entry_added(entry: WorldLogEntry)
 
-const MAX_ENTRIES: int = 100
+## 底层只保留最新 20 条；UI 显示数量与持久化都以该上限为准。
+const MAX_ENTRIES: int = 20
 
 var _entries: Array[WorldLogEntry] = []
 var _battle_sessions: Dictionary = {}
@@ -88,8 +89,10 @@ func add_event(
 ## 持久化接口；由 WorldContext 写入 SaveData。
 func to_dict() -> Dictionary:
 	var entries: Array[Dictionary] = []
-	for entry: WorldLogEntry in _entries:
-		entries.append(entry.to_dict())
+	# 内部已经限长；这里再次截取，兼容未来改动或手工构造的数据。
+	var start: int = maxi(0, _entries.size() - MAX_ENTRIES)
+	for index: int in range(start, _entries.size()):
+		entries.append(_entries[index].to_dict())
 	return {"entries": entries}
 
 

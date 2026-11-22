@@ -1,6 +1,6 @@
 # 我的骑砍 · 项目总索引
 
-**文档版本：** V0.31（阶段 10：战后追击、AI 助攻、增援部署与大地图交互完善）
+**文档版本：** V0.33（阶段 12：马匹个体、补给消耗与村庄/城镇交易）
 **更新日期：** 2026-11-22
 **引擎：** Godot 4.6.1 / GDScript
 **源规划：** [2D 中世纪沙盒战略游戏核心架构设计与开发规划 V0.2](../md/2D%20中世纪沙盒战略游戏核心架构设计与开发规划.md)
@@ -40,6 +40,8 @@ WorldContext（一局游戏，跨场景常驻）
 ├── IdGenerator
 ├── UnitManager
 ├── ItemManager      消耗品/杂物静态配置
+├── MarketManager    村庄/城镇市场库存与交易唯一业务入口
+├── SupplyManager    每日补给消耗与采购需求
 ├── PartyManager
 ├── SettlementManager
 ├── NobleManager     贵族（继承 LordManager）
@@ -94,7 +96,9 @@ WorldContext（一局游戏，跨场景常驻）
 | [Systems/Adventurer_Recruitment_System.md](Systems/Adventurer_Recruitment_System.md) | 村庄冒险者候选人、刷新、1 金币招募与清理 |
 | [Systems/Dialogue_System.md](Systems/Dialogue_System.md) | 对话数据、条件、效果与时间规则 |
 | [Systems/Village_System.md](Systems/Village_System.md) | 村庄场景、NPC、对话 UI、越界返回 |
-| [Systems/Inventory_Economy_System.md](Systems/Inventory_Economy_System.md) | 背包、马匹、金币、工资、三级兵种与晋升 |
+| [Systems/Inventory_Economy_System.md](Systems/Inventory_Economy_System.md) | 背包 UI、金币、工资、三级兵种、晋升与村庄/城镇交易 |
+| [Systems/Mount_System.md](Systems/Mount_System.md) | 马匹独立实例、毛色/马鞍、装备卸下、市场逐匹交易与旧档迁移 |
+| [Systems/Supply_System.md](Systems/Supply_System.md) | 每日面包/草料消耗、缺口、采购需求与 NPC 补给采购 |
 | [Systems/Save_System.md](Systems/Save_System.md) | 存档结构、版本、迁移与限制 |
 
 ### 开发状态文档
@@ -135,9 +139,9 @@ WorldContext（一局游戏，跨场景常驻）
 - 阶段 3：部分完成。士兵数据层、属性重算、装备/马匹、部队查看 UI、临时部件美术已实现；招募与正式美术未开始。
 - 阶段 4：部分完成。双方/多方实时战斗、按小时离屏结算、中途加入、玩家角色、控制权转移、基础队形、结果/经验/奖励已实现；高级指挥/士气/正式动画未开始。
 - 阶段 5（战斗结算与战后处理）：完成。统一 BattleResult、玩家角色、攻击判定/多人围攻、临时部件美术、骑乘系统、控制权转移、经验/奖励、撤退与返回大地图均已自动化验证。
-- 阶段 6（合并原阶段 6/7）：村庄小场景与交互、追逐焦点保护、背包/马匹、金币与工资、三级兵种/晋升、世界日历与大地图部队 UI 已实现；城镇/城堡小场景、商店、招募、工资扣除未实现。
+- 阶段 6（合并原阶段 6/7）：村庄小场景与交互、追逐焦点保护、背包/马匹、金币与工资、三级兵种/晋升、世界日历与大地图部队 UI 已实现；城镇/城堡小场景、普通招募、工资扣除未实现。
 - 阶段 5（原路线图 AI 领主）：部分完成。领主数据/仓储、玩家领主分离、封地归属与 AI 征召已实现；战略攻击/撤退与性格权重未开始。
-- 阶段 7：部分完成。封地所有权、采邑征召、村庄人口/税收缓存、冒险者候选人、共享日志与 Schema v4 已实现；任务、交易、训练、外交、城堡攻防、领地管理、军团与世界战争未开始。
+- 阶段 7：部分完成。封地所有权、采邑征召、村庄人口/税收缓存、冒险者候选人、共享日志与 Schema v4 已实现；任务、训练、外交、城堡攻防、领地管理、军团与世界战争未开始。
 - 阶段 8：完成。战场扩至 1800×1024 并参数化；新遭遇与增援分流，增援加入既有会话并在后方展开；贵族/家族/王国数据与管理器、领袖死亡选举、战争传播与统一关系查询；世界地图 5000×3000，新增伯克纳尼亚/奥林两王国与城镇/城堡/村庄；百科三级导航；Schema v5。
 - 阶段 9：完成。9 个地点按王国/家族重新聚类，缩短跨区域距离并同步道路与 AI 巡逻点；部队圆形标记内部旗帜由 30 放大到 38，圆形底盘、边框、点击区域与移动表现不变。
 - 阶段 10：完成。修复战后追击/遭遇卡死与冷却恢复；强盗统一对所有政治家族敌对；AI 通过视野发现并加入既有战斗（全敌对不建第三侧）；增援按初始战斗侧锚点部署；新增行动意图悬浮、战斗摘要悬浮、WASD 自由镜头、主动攻击二次确认，部队旗帜由 38 放大到 44。
@@ -161,6 +165,8 @@ WorldContext（一局游戏，跨场景常驻）
 - 2026-11-22 阶段 8：战场 1800×1024（初始距离 1580、边距 110）并参数化；新遭遇/增援分流，增援加入既有 `BattleSession`、后方 240 像素展开、逐单位 `is_reinforcement`/`reinforcement_battle_id`/`reinforcement_arrival_time`；仅 NPC 加入玩家侧时显示家族旗帜增援提示并排队；新增 `NobleData`/`NobleManager`、`HouseData`/`HouseManager`、`KingdomData`/`KingdomManager`，贵族独立部队、爵位/宗主/国王标记、领袖死亡选举；`FactionManager` 统一关系查询与战争传播；世界地图 5000×3000，新增伯克纳尼亚（城镇+村庄）与奥林（城堡+村庄）两王国，墨西西/巴里分别附庸，两王国交战、玩家中立；地点 1/2/3 级，仅村庄征召；百科三级屏幕面板；存档 Schema v5。
 - 2026-11-22 阶段 9：世界保持 5000×3000，9 个地点按王国/家族聚类——伯克纳尼亚在上部（墨西西 2500,700、伯克纳尼亚 2900,750、北境村 2250,1000、伯克纳 3200,1000），奥林在下部（奥林德斯堡 2950,1850、奥林 3250,2050、巴里 2600,2100、灰石城堡 2900,2350），青禾村中立位于 (1600,1500)；地点 ID/名称/类型/归属/交互与征召不变；`flag_max_size` 30 → 38，圆形半径 18/边框 2/点击区域/移动动画不变；新增 `world_map_layout_test`。
 - 2026-11-22 阶段 10：遭遇检测不再要求 MOVING，玩家追击焦点跨目标移动/战斗保留并在战后冷却结束后恢复；战后冷却继续由 `BattleManager` 统一写入；`FactionManager` 统一强盗对所有政治家族贵族敌对；AI 通过 `VisionManager`（含战斗参战方）发现并加入既有战斗，检查全部战斗侧且不自动创建第三侧；增援按初始侧锚点 + 3 列网格部署，排满时半场扫描；大地图新增行动意图悬浮、仅悬浮显示的战斗摘要、WASD 自由镜头与主动攻击二次确认；`flag_max_size` 38 → 44；新增 `faction_bandit_hostility_test`、`party_intent_hover_test`、`party_attack_confirmation_test`。
+- 2026-11-22 阶段 11：新增只读玩家背包 UI（金币/名称/类型/数量/描述）；城镇地点面板按 `SettlementType.TOWN` 显示交易市场入口；新增 `MarketGoodsConfig`/`MarketData`/`MarketManager` 与 `SaveData.markets`，市场库存按城镇独立初始化、存档与恢复；双栏交易界面只修改预览，确认时由 `MarketManager.execute_player_trade()` 原子结算背包/库存/金币并写入 `PLAYER_TRADE` 世界日志；世界日志上限 100 → 20，保存/读档同步裁剪；新游戏初始金币 500；NPC 交易来源接口已预留但不写世界日志；新增 `market_manager_test`、`town_market_ui_test`。
+- 2026-11-22 阶段 12：马匹改为 `MountInstanceData` 独立实例，创建时随机黑/白/棕毛色与 8 种马鞍之一并随存档持久化；背包/市场/装备统一按 `instance_id` 移动，旧数量确定性迁移；新增面包/草料与 10/50 批量购买；`SupplyManager` 按 `WorldTime` 日边界结算玩家与 NPC 每日消耗，缺口不为负；`AIManager` 低补给时前往最近有库存的村庄/城镇（不含城堡），用自有金币补至 7 天并浮字提示，不写玩家日志；市场范围扩展为村庄（面包/草料）与城镇（面包/草料/马匹），村庄新增大地图与村长对话入口；交易 UI 改为左右直接移动、每行图标、马匹逐匹显示，重置恢复打开时快照；存档 Schema v5 → v6，新增补给结算日、NPC 背包/金币、市场马匹实例与 `initialized_items`；新增 `mount_instance_test`、`supply_manager_test`、`ai_supply_purchase_test`。
 
 详见 [Development/Current_Status.md](Development/Current_Status.md)。
 
@@ -196,6 +202,12 @@ Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/unit_tie
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/time_calendar_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/offscreen_battle_hourly_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/world_log_manager_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/market_manager_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/mount_instance_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/supply_manager_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/town_market_ui_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/ai_supply_purchase_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/world_log_ui_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/family_appearance_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/party_architecture_test.tscn
 

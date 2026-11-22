@@ -2,7 +2,7 @@
 
 **核心数据：** `Scripts/Entities/Settlement/settlement_data.gd`
 **核心逻辑：** `Scripts/Core/World/settlement_manager.gd`
-**状态：** 数据仓储、地图图标、基础交互面板、村庄小场景入口、封地归属、采邑储备与冒险者候选人已实现
+**状态：** 数据仓储、地图图标、基础交互面板、村庄小场景入口、封地归属、采邑储备、冒险者候选人与村庄/城镇市场入口已实现
 
 ---
 
@@ -80,8 +80,9 @@ Milestone 1 初始地点（名称与坐标按需求，ID 使用项目统一生�
               → stop_party + 基础倍率 0 + push_pause(ui_panel)
               → 打开左侧交互面板
   → 显示名称、类型
-  → 村庄：显示“进入村庄” + “离开地点”
-  → 城镇/城堡：只显示“离开地点”
+  → 村庄：显示“进入村庄” + “购买补给” + “离开地点”
+  → 城镇：显示“交易市场” + “离开地点”
+  → 城堡：只显示“离开地点”
 ```
 
 触发检测位于大地图场景控制器：
@@ -101,7 +102,7 @@ Milestone 1 只做基础面板；阶段 6 起村庄面板增加进入小场景�
 ## 3. 后续交互
 
 - 招募士兵。
-- 交易。
+- 城堡驻军与围城。
 - 接取任务。
 - NPC 对话。
 - 进入实际小场景（Village/Town/Castle）。
@@ -164,9 +165,12 @@ Milestone 1 只做基础面板；阶段 6 起村庄面板增加进入小场景�
 | `SettlementData` 与序列化 | 已实现 |
 | `SettlementManager` | 已实现并接入 `WorldContext` |
 | 大地图标记 | 已实现（程序绘制村庄/城堡/城镇） |
-| 交互面板 | 已实现（名称/类型/离开；村庄额外提供进入） |
+| 交互面板 | 已实现（名称/类型/离开；村庄提供进入与购买补给，城镇提供交易市场） |
 | 触发停止与暂停 | 已实现 |
 | 村庄小场景进入/返回 | 已实现（scene_path + small_scene 暂停 + 返回锁） |
+| 村庄购买补给入口 | 已实现（大地图按钮 + 村长对话，面包/草料） |
+| 市场入口 | 已实现（村庄与城镇显示，城堡不显示；按地点类型判断，名称不参与） |
+| 村庄/城镇市场库存 | 已实现（`MarketManager`，按地点独立存档；城堡无市场） |
 | 城镇/城堡小场景 | 未实现 |
 | 封地归属 `owner_noble_id` / `owner_house_id` | 已实现（阶段 8；读档校验贵族与家族存在且一致） |
 | 地点层级 1/2/3 与仅村庄征召 | 已实现（阶段 8） |
@@ -211,3 +215,18 @@ Milestone 1 只做基础面板；阶段 6 起村庄面板增加进入小场景�
 - 税收公式、人口/繁荣度成本和储备补充参数集中在 `SettlementEconomyConfig`；UI 与 `SettlementData` 不重复实现。
 - 读档时每个非空 `owner_noble_id` 必须指向存在的贵族，`owner_house_id` 必须存在且与贵族的家族一致；否则拒绝加载。旧存档仅有 `owner_lord_id` 时同步迁移。
 - 详细流程见 [Fief_Recruitment_System.md](Fief_Recruitment_System.md)，候选人见 [Adventurer_Recruitment_System.md](Adventurer_Recruitment_System.md)。
+
+## 11. 村庄/城镇市场入口（阶段 11 新增，阶段 12 扩展）
+
+- 入口按钮：`SettlementMarketButton`，按 `MarketManager.is_market_settlement()` 判断，即村庄与城镇显示，城堡不显示；不通过地点名称判断。
+- 按钮文本：村庄为“购买补给”，城镇为“交易市场”。
+- 村庄另有村长对话入口“购买补给（面包、草料）”，与大地图按钮共用同一库存与结算入口。
+- 点击入口：
+  1. 重新读取 `_settlement_latch_id` 对应地点并校验地点类型；
+  2. 确认 `MarketManager` 已为该地点初始化库存，缺失时调用 `ensure_markets()`；
+  3. 打开独立 `MarketPanel`，隐藏地点面板；
+  4. 继续持有同一个 `PAUSE_REASON_UI_PANEL` 暂停原因，世界保持暂停。
+- 市场关闭/取消后恢复地点面板，不擅自恢复 1x/2x；只有玩家离开地点时才成对释放 `ui_panel`。
+- 市场面板是屏幕覆盖层，不切换 Town 场景；`Scenes/Town/town.tscn` 仍保持空场景占位。
+- 村庄市场出售面包/草料，城镇市场额外出售马匹；库存按地点独立持久化，卖光后读档不会补满。
+- 市场库存与交易规则见 [Inventory_Economy_System.md](Inventory_Economy_System.md) 第 4.3 节。

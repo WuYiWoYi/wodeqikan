@@ -1,7 +1,7 @@
 # AI 系统
 
 **核心调度：** `Scripts/Systems/AI/ai_manager.gd`
-**状态：** 商队/巡逻、强盗动态目标评分、治安队拦截、统一大地图遭遇、遭遇原因与选项规则、底部 NPC 遭遇对话、离屏多方战斗、领主前往自有封地征召已实现；复杂领主战略与战术未实现
+**状态：** 商队/巡逻、强盗动态目标评分、治安队拦截、统一大地图遭遇、遭遇原因与选项规则、底部 NPC 遭遇对话、离屏多方战斗、领主前往自有封地征召、领主低补给采购已实现；复杂领主战略与战术未实现
 
 ---
 
@@ -298,6 +298,25 @@ Idle
 
 详见 [Lord_System.md](Lord_System.md) 与 [Fief_Recruitment_System.md](Fief_Recruitment_System.md)。
 
+### 4.2 领主补给采购（阶段 12 实现）
+
+`AIManager._tick_party_tactical()` 在领主征召判断之后，对每支非玩家部队调用 `_try_handle_supply_purchase()`：
+
+1. 排除玩家、强盗、空部队与不可用部队；
+2. 排除攻击意图、战场响应、正在战斗与战后冷却中的部队；
+3. `SupplyManager.has_low_supply(party)` 为假时不做任何事；
+4. 已有采购目标时沿用；目标失效或补给已足时重新选择最近的、有对应商品库存的村庄或城镇（**绝不选择城堡**）；
+5. 设置 `supply_purchase_active` / `supply_purchase_settlement_id` 并移动；抵达后在市场库存与自有金币范围内购买；
+6. 结算统一调用 `MarketManager.execute_npc_trade()`，成功一次即广播 `EventBus.npc_supply_purchased`，大地图在部队图标上方显示浮字；
+7. 金币不足时设置 20 秒重试间隔，避免每 tick 反复计算。
+
+- 购买量由 `SupplyManager.get_purchase_needs()`（补到 7 天储备）与市场库存、余额共同取小。
+- 采购期间不写玩家世界日志；`AIManager` 不直接修改 `MarketData`、不自行扣除补给。
+- 部队进入战斗、追击或战后冷却时，采购状态立即清理，战斗优先。
+- 该行为属于部队战术层，不占用 30 秒领主战略分频。
+
+详见 [Supply_System.md](Supply_System.md) 与 [Inventory_Economy_System.md](Inventory_Economy_System.md)。
+
 ## 5. 调度与性能
 
 `AIManager` 使用时间累加器分频：
@@ -357,6 +376,7 @@ AI 参数应可配置：
 | `UnitAI` | AI/玩家双模式、360°定向矩形、单次单目标、搜索/接近/攻击状态、外围进攻点、降速、实体碰撞、队形槽位与局部避让已实现；复杂战术/寻路 TODO |
 | 远程单位 AI | 已实现：射程内站定射击、射程外接近、过近后撤、换目标、独立 3 秒冷却；无预判/齐射/弹药 |
 | `LordAI` | 部分实现：自有封地征召（低于人数阈值 → 前往村庄 → 招募一组）；战略攻击/撤退/性格权重 TODO |
+| NPC 补给采购 | 已实现：低补给 → 最近有库存村庄/城镇 → 自有金币补至 7 天 → 浮字提示 |
 | 空间查询 | TODO(阶段2) |
 | 统一随机源 | TODO(阶段3) |
 

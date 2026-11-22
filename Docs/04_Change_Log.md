@@ -4,6 +4,87 @@
 
 ---
 
+## 2026-11-22 · 阶段 12：马匹个体、补给消耗与村庄/城镇交易
+
+### 新增
+
+- `MountInstanceData`：马匹独立实例（`instance_id` / `equipment_id` / `coat_style_id` / `saddle_style_id` / `display_name`），创建时随机外观并随存档持久化。
+- `MountVisualConfig`：毛色（黑/白/棕）与 8 种马鞍贴图的唯一映射。
+- `MountThumbnail`：交易列表中的马匹缩略图，复用 48×96 马匹画布等比缩放。
+- `bread` / `fodder` 的 `ItemConfig` 与市场商品配置，支持 10 / 50 批量购买。
+- `SupplyManager`：按游戏日边界结算玩家与 NPC 的面包/草料消耗、缺口记录、剩余天数与采购需求查询。
+- `TradeSession`：市场打开期间的预览状态、左右直接移动、快照重置、总额计算与确认提交。
+- `AIManager` NPC 补给采购：低补给时前往有库存的村庄/城镇，用自有金币补至 7 天储备。
+- `EventBus.party_supply_changed`、`EventBus.npc_supply_purchased`。
+- 村庄大地图“购买补给”入口与村长对话入口。
+- `SaveData` v6：`supply_last_settled_day`、市场马匹实例与 NPC 背包/金币持久化。
+- 测试：`mount_instance_test`、`supply_manager_test`、`ai_supply_purchase_test`；扩展 `market_manager_test`、`town_market_ui_test`。
+
+### 变更
+
+- `InventoryData` 统一玩家与 NPC 背包：可堆叠物品存 `stackable_counts`，马匹存 `mount_instances`；旧数量确定性迁移为实例。
+- 马匹装备/卸下改为实例级接口；卸下返还同一实例与外观。
+- 交易 UI 改为“左市场/右玩家”直接移动，不再使用独立购物车；“重置交易”恢复打开时快照。
+- 市场地点范围由“仅城镇”扩展为“村庄（面包/草料）+ 城镇（面包/草料/马匹）”，城堡仍无市场。
+- 每行加入最左侧物品图标；马匹逐匹展示与买卖。
+- `WorldSimulation` 在每次世界 tick 调用 `SupplyManager.update_daily()`，位于 AI 决策之前。
+- 新世界自动补给：玩家 7 天份，NPC 2 天份并给予起始资金；强盗除外。
+- 存档 Schema 5 → 6；v5 及更早存档读取时执行一次补给初始化。
+
+### 决策
+
+- D146：普通消耗品堆叠，马匹一律独立实例。
+- D147：交易预览按快照差值计算，重置恢复快照而非反向重放。
+- D148：补给消耗只在 `SupplyManager`、按 `WorldTime` 日边界结算。
+- D149：村庄与城镇共用 `MarketManager`，城堡不设市场。
+- D150：NPC 补给采购由 `AIManager` 决策、`MarketManager` 结算，不写玩家世界日志。
+- D151：存档 Schema v6 与旧档补给/马匹迁移。
+
+### 验证
+
+- 新增与扩展测试已写入；本轮未找到可执行的 Godot 二进制，未实际运行，需编辑器重新导入后执行。
+- 测试范围按改动影响限定在交易、马匹、补给与存档相关套件。
+- 未改变战斗、外交与招募核心规则。
+
+---
+
+## 2026-11-22 · 阶段 11：玩家背包 UI 与城镇交易市场系统
+
+### 新增
+
+- `MarketGoodsConfig`（`Data/Market/mount_horse_01_goods.tres`）：普通战马买入 100 / 卖出 70 / 初始库存 3。
+- `MarketData`：每个城镇独立的库存字典。
+- `MarketManager`：商品注册、城镇市场初始化、交易校验、原子提交/回滚、交易 ID 去重、库存序列化；接入 `WorldContext`。
+- `InventoryPanel`：大地图只读背包 UI，显示金币、物品名称/类型/数量与描述。
+- `MarketPanel`：左市场/右背包双栏交易界面，含购买/出售预览、实时金额、确认/取消与错误提示。
+- `SaveData.markets`：城镇市场库存存档字段（向后兼容，未提升 Schema）。
+- `WorldLogEntry.EventType.PLAYER_TRADE`：玩家交易日志。
+- `Tests/UnitTests/market_manager_test.tscn`、`Tests/SystemTests/town_market_ui_test.tscn`。
+
+### 变更
+
+- `WorldLogManager.MAX_ENTRIES` 100 → 20；新增、读档、保存与 UI 显示统一按 20 条裁剪。
+- 地点面板新增 `SettlementMarketButton`；仅 `SettlementType.TOWN` 显示，村庄/城堡不显示。
+- 市场打开时隐藏地点面板并沿用同一 `ui_panel` 暂停原因；取消/关闭恢复地点面板，不恢复 1x/2x。
+- 大地图顶栏新增“背包”按钮；打开/关闭成对维护 `ui_panel` 暂停原因。
+- 新游戏玩家初始金币 500（读档以存档为准）。
+- 交易成功后同步刷新背包面板数据与世界日志。
+
+### 决策
+
+- D143：交易预览与权威数据分离。
+- D144：`MarketManager` 是交易唯一业务入口。
+- D145：玩家交易写世界日志，NPC 交易不写。
+
+### 验证
+
+- 新增 `market_manager_test`、`town_market_ui_test` 全部通过。
+- 扩展并通过：`world_log_manager_test`、`world_log_ui_test`、`save_persistence_test`。
+- 回归通过：`settlement_interaction_test`、`player_character_data_test`。
+- 未执行全项目战斗/AI/外交套件；未改变存档 Schema。
+
+---
+
 ## 2026-11-22 · 阶段 10：战后追击、AI 助攻、增援部署与大地图交互完善
 
 ### 新增

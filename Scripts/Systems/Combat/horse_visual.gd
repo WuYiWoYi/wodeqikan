@@ -7,15 +7,7 @@ extends "res://Scripts/Systems/Combat/part_visual.gd"
 
 const Layers = preload("res://Scripts/Systems/Combat/visual_layers.gd")
 
-const ART_DIR: String = "res://art/我的骑砍临时美术/"
-const SHADOW_MOUNTED_PATH: String = ART_DIR + "骑马的影子.png"
-const HORSE_BODY_PATH: String = ART_DIR + "马身体临时.png"
-const HORSE_HEAD_PATH: String = ART_DIR + "马头临时.png"
-const HORSE_SADDLE_PATH: String = ART_DIR + "马鞍临时.png"
-const HORSE_FRONT_LEG_PATH: String = ART_DIR + "马前腿1.png"
-const HORSE_FRONT_LEG_2_PATH: String = ART_DIR + "马前腿2.png"
-const HORSE_BACK_LEG_PATH: String = ART_DIR + "马后退1.png"
-const HORSE_BACK_LEG_2_PATH: String = ART_DIR + "马后退2.png"
+const SHADOW_MOUNTED_PATH: String = "res://art/我的骑砍临时美术/骑马的影子.png"
 
 ## 动画参数集中配置；人物与马匹共享 UnitVisual 的 run/idle 时间轴。
 ## 周期与 HumanVisual 保持一致，避免骑手与马身起伏明显脱节。
@@ -56,11 +48,20 @@ const FRONT_LEG_PART_NAMES: Array[String] = ["MountLegFront", "MountLegFront2"]
 const BACK_LEG_PART_NAMES: Array[String] = ["MountLegBack", "MountLegBack2"]
 
 var _body_rig: Node2D = null
+var _coat_style_id: String = "brown"
+var _saddle_style_id: String = "saddle_01"
 
 
-func rebuild() -> void:
+## 按马匹实例的毛色与马鞍重建部件。只替换贴图路径，动画结构保持不变。
+func rebuild(
+	coat_style_id: String = "brown",
+	saddle_style_id: String = "saddle_01"
+) -> void:
 	clear_parts()
 	_body_rig = null
+	_coat_style_id = coat_style_id
+	_saddle_style_id = saddle_style_id
+	var paths: Dictionary = MountVisualConfig.get_coat_paths(coat_style_id)
 	_add_sprite("MountShadow", SHADOW_MOUNTED_PATH, Layers.MOUNT_SHADOW)
 
 	# HorseBodyRig 是马匹整体运动的变换父节点：马身起伏/俯仰/缩放会同时带动四条腿。
@@ -69,16 +70,37 @@ func rebuild() -> void:
 	add_child(_body_rig)
 
 	# 四条马腿挂载在 rig 下，先继承马身整体变换，再叠加各自的小幅跃马动作。
-	_add_sprite("MountLegFront", HORSE_FRONT_LEG_PATH, Layers.MOUNT_LEG_FRONT, _body_rig)
-	_add_sprite("MountLegFront2", HORSE_FRONT_LEG_2_PATH, Layers.MOUNT_LEG_FRONT_2, _body_rig)
-	_add_sprite("MountLegBack", HORSE_BACK_LEG_PATH, Layers.MOUNT_LEG_BACK, _body_rig)
-	_add_sprite("MountLegBack2", HORSE_BACK_LEG_2_PATH, Layers.MOUNT_LEG_BACK_2, _body_rig)
+	_add_sprite(
+		"MountLegFront", str(paths["front_leg_1"]), Layers.MOUNT_LEG_FRONT, _body_rig
+	)
+	_add_sprite(
+		"MountLegFront2", str(paths["front_leg_2"]), Layers.MOUNT_LEG_FRONT_2, _body_rig
+	)
+	_add_sprite(
+		"MountLegBack", str(paths["back_leg_1"]), Layers.MOUNT_LEG_BACK, _body_rig
+	)
+	_add_sprite(
+		"MountLegBack2", str(paths["back_leg_2"]), Layers.MOUNT_LEG_BACK_2, _body_rig
+	)
 	for leg_name: String in FRONT_LEG_PART_NAMES + BACK_LEG_PART_NAMES:
 		lower_part_pivot(leg_name, LEG_PIVOT_DROP_Y)
 
-	_add_sprite("MountBody", HORSE_BODY_PATH, Layers.MOUNT_BODY, _body_rig)
-	_add_sprite("MountSaddle", HORSE_SADDLE_PATH, Layers.MOUNT_SADDLE, _body_rig)
-	_add_sprite("MountHead", HORSE_HEAD_PATH, Layers.MOUNT_HEAD, _body_rig)
+	_add_sprite("MountBody", str(paths["body"]), Layers.MOUNT_BODY, _body_rig)
+	_add_sprite(
+		"MountSaddle",
+		MountVisualConfig.get_saddle_path(saddle_style_id),
+		Layers.MOUNT_SADDLE,
+		_body_rig
+	)
+	_add_sprite("MountHead", str(paths["head"]), Layers.MOUNT_HEAD, _body_rig)
+
+
+func get_coat_style_id() -> String:
+	return _coat_style_id
+
+
+func get_saddle_style_id() -> String:
+	return _saddle_style_id
 
 
 func update_locomotion(

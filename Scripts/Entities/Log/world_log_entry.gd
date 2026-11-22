@@ -17,6 +17,8 @@ enum EventType {
 	NOBLE_DIED,
 	HOUSE_LEADER_CHANGED,
 	KINGDOM_PENDING,
+	## 玩家在村庄/城镇市场成功完成的交易；NPC 交易不写入世界日志。
+	PLAYER_TRADE,
 }
 
 var event_type: EventType = EventType.OTHER
@@ -40,7 +42,7 @@ static func from_dict(data: Dictionary) -> WorldLogEntry:
 	var entry := WorldLogEntry.new()
 	var type_value: int = int(data.get("event_type", EventType.OTHER))
 	if type_value < int(EventType.OTHER) \
-			or type_value > int(EventType.KINGDOM_PENDING):
+			or type_value > int(EventType.PLAYER_TRADE):
 		type_value = int(EventType.OTHER)
 	entry.event_type = type_value as EventType
 	entry.world_time_seconds = float(data.get("world_time_seconds", 0.0))

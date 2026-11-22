@@ -110,6 +110,12 @@ func create_unit(
 	unit.faction_id = faction_id
 	unit.is_player_character = resolved.is_player_character
 	unit.equipment = _sanitize_default_equipment(resolved.default_equipment)
+	var mount_slot: String = EquipmentConfig.SLOT_NAMES[EquipmentConfig.Slot.MOUNT]
+	if unit.equipment.has(mount_slot):
+		var mount_id: String = str(unit.equipment[mount_slot])
+		unit.set_mount_instance_data(MountInstanceData.create_deterministic(
+			mount_id, "unit|%s|%s" % [unit.unit_id, mount_id]
+		))
 
 	if not StatCalculator.apply_to_unit(unit, resolved, _equipment_configs):
 		push_error("UnitManager 无法计算单位基础属性: %s" % resolved.config_id)
@@ -273,7 +279,14 @@ func equip_item(unit_id: String, equipment_id: String) -> bool:
 
 	var had_previous: bool = unit.equipment.has(slot_key)
 	var previous: Variant = unit.equipment.get(slot_key)
+	var previous_mount_instance: Dictionary = unit.mount_instance.duplicate(true)
 	unit.equipment[slot_key] = equipment_id
+	if slot_key == EquipmentConfig.SLOT_NAMES[EquipmentConfig.Slot.MOUNT]:
+		var existing := unit.get_mount_instance_data()
+		if existing == null or existing.equipment_id != equipment_id:
+			unit.set_mount_instance_data(MountInstanceData.create_deterministic(
+				equipment_id, "unit|%s|%s" % [unit_id, equipment_id]
+			))
 	if recalculate_stats(unit_id):
 		return true
 
@@ -282,6 +295,7 @@ func equip_item(unit_id: String, equipment_id: String) -> bool:
 		unit.equipment[slot_key] = previous
 	else:
 		unit.equipment.erase(slot_key)
+	unit.mount_instance = previous_mount_instance
 	recalculate_stats(unit_id)
 	return false
 
@@ -298,57 +312,111 @@ func unequip_slot(unit_id: String, slot: String) -> bool:
 		return false
 
 	unit.equipment.erase(slot_key)
+	if slot_key == EquipmentConfig.SLOT_NAMES[EquipmentConfig.Slot.MOUNT]:
+		unit.mount_instance = {}
 	return recalculate_stats(unit_id)
 
 
-## 从玩家物品栏消耗 1 匹马并装备到 MOUNT 槽。
-## 库存不足、装备不是 MOUNT、单位已装备同一匹马时返回 false 且不修改数据。
-## 替换已有坐骑时，旧坐骑返还物品栏。
-func equip_mount(
-	unit_id: String, equipment_id: String, profile: PlayerProfile
-) -> bool:
+## 从物品持有者装备“某一匹具体马”。holder 可以是 PlayerProfile 或 PartyData。
+## 替换已有坐骑时，旧马匹实例原样返还持有者，外观不变。
+func equip_mount_instance(unit_id: String, instance_id: String, holder: Variant) -> bool:
 	var unit := get_unit(unit_id)
-	var equipment := get_equipment_config(equipment_id)
-	if unit == null or equipment == null or profile == null:
+	if unit == null or holder == null or instance_id.is_empty():
 		return false
-	if equipment.slot != EquipmentConfig.Slot.MOUNT:
+	var instance: MountInstanceData = holder.get_mount_instance(instance_id)
+	if instance == null:
+		return false
+	var equipment := get_equipment_config(instance.equipment_id)
+	if equipment == null or equipment.slot != EquipmentConfig.Slot.MOUNT:
 		return false
 
 	var slot_key: String = equipment.slot_name()
-	var previous: String = str(unit.equipment.get(slot_key, ""))
-	if previous == equipment_id:
-		return false
-	if profile.get_item_count(equipment_id) <= 0:
+	var had_previous: bool = unit.equipment.has(slot_key)
+	var previous_equipment: Variant = unit.equipment.get(slot_key)
+	var previous_instance: MountInstanceData = _ensure_unit_mount_instance(unit)
+
+	var removed: MountInstanceData = holder.remove_mount_instance(instance_id)
+	if removed == null:
 		return false
 
-	# 先扣库存，再走统一装备入口；失败时回滚，避免半更新。
-	if not profile.remove_item(equipment_id, 1):
-		return false
-	if equip_item(unit_id, equipment_id):
-		if not previous.is_empty():
-			profile.add_item(previous, 1)
+	unit.equipment[slot_key] = instance.equipment_id
+	unit.mount_instance = instance.to_dict()
+	if recalculate_stats(unit_id):
+		if had_previous and previous_instance != null:
+			holder.add_mount_instance(previous_instance)
 		return true
-	profile.add_item(equipment_id, 1)
+
+	# 回滚：恢复原装备与原马匹实例，再把新马匹放回持有者。
+	if had_previous:
+		unit.equipment[slot_key] = previous_equipment
+		unit.mount_instance = (
+			previous_instance.to_dict() if previous_instance != null else {}
+		)
+	else:
+		unit.equipment.erase(slot_key)
+		unit.mount_instance = {}
+	recalculate_stats(unit_id)
+	holder.add_mount_instance(removed)
 	return false
 
 
-## 卸下 MOUNT 装备并把坐骑返还玩家物品栏。
-func unequip_mount(unit_id: String, profile: PlayerProfile) -> bool:
+## 兼容旧调用：按装备 ID 从持有者取第一匹匹配的马。
+func equip_mount(
+	unit_id: String, equipment_id: String, holder: Variant
+) -> bool:
+	if holder == null:
+		return false
+	var instances: Array[MountInstanceData] = holder.get_mount_instances(equipment_id)
+	if instances.is_empty():
+		# 触发旧存档马匹数量迁移后再取一次。
+		holder.get_item_count(equipment_id)
+		instances = holder.get_mount_instances(equipment_id)
+	if instances.is_empty():
+		return false
+	return equip_mount_instance(unit_id, instances[0].instance_id, holder)
+
+
+## 卸下 MOUNT 装备并把同一匹马（含外观与实例 ID）返还持有者。
+func unequip_mount(unit_id: String, holder: Variant) -> bool:
 	var unit := get_unit(unit_id)
-	if unit == null or profile == null:
+	if unit == null or holder == null:
 		return false
 
 	var slot_key: String = EquipmentConfig.SLOT_NAMES[EquipmentConfig.Slot.MOUNT]
-	var mount_id: String = str(unit.equipment.get(slot_key, ""))
-	if mount_id.is_empty():
+	if not unit.equipment.has(slot_key):
 		return false
+	var previous_equipment: Variant = unit.equipment.get(slot_key)
+	var previous_instance := _ensure_unit_mount_instance(unit)
+	if previous_instance == null:
+		return false
+
 	if not unequip_slot(unit_id, slot_key):
 		return false
-	if not profile.add_item(mount_id, 1):
-		# 理论不会发生；回滚以保持“卸下必返还”的约束。
-		equip_item(unit_id, mount_id)
-		return false
-	return true
+	if holder.add_mount_instance(previous_instance):
+		return true
+
+	# 理论不会发生；回滚以保持“卸下必返还”的约束。
+	unit.equipment[slot_key] = previous_equipment
+	unit.mount_instance = previous_instance.to_dict()
+	recalculate_stats(unit_id)
+	return false
+
+
+## 读取单位当前坐骑实例；旧数据缺失时按单位 ID 生成确定性外观并写回。
+func _ensure_unit_mount_instance(unit: UnitData) -> MountInstanceData:
+	if unit == null:
+		return null
+	var slot_key: String = EquipmentConfig.SLOT_NAMES[EquipmentConfig.Slot.MOUNT]
+	var mount_id: String = str(unit.equipment.get(slot_key, ""))
+	if mount_id.is_empty():
+		return null
+	var instance := unit.get_mount_instance_data()
+	if instance == null or instance.equipment_id != mount_id:
+		instance = MountInstanceData.create_deterministic(
+			mount_id, "unit|%s|%s" % [unit.unit_id, mount_id]
+		)
+		unit.mount_instance = instance.to_dict()
+	return instance
 
 
 # ---------------------------------------------------------------------------
@@ -570,3 +638,7 @@ func _sanitize_unit_equipment(unit: UnitData) -> void:
 			invalid_slots.append(slot_name)
 	for slot_name: String in invalid_slots:
 		unit.equipment.erase(slot_name)
+	if not unit.equipment.has(
+		EquipmentConfig.SLOT_NAMES[EquipmentConfig.Slot.MOUNT]
+	):
+		unit.mount_instance = {}

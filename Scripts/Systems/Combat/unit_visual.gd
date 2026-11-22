@@ -68,7 +68,10 @@ func rebuild() -> void:
 		get_tabard_color(), plume_texture_path, tabard_texture_path
 	)
 	_apply_equipment_visuals()
-	_horse_visual.rebuild()
+	var mount := unit_data.get_mount_instance_data()
+	var coat_style_id: String = mount.coat_style_id if mount != null else "brown"
+	var saddle_style_id: String = mount.saddle_style_id if mount != null else "saddle_01"
+	_horse_visual.rebuild(coat_style_id, saddle_style_id)
 	set_mounted(unit_data.is_mounted)
 	set_facing(_facing)
 

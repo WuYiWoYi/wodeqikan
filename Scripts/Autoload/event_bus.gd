@@ -43,3 +43,8 @@ signal fief_recruited(
 )
 ## 普通冒险者被玩家招募成功的事实。
 signal adventurer_recruited(settlement_id: String, unit_id: String, unit_name: String)
+
+## 阶段 12：部队每日补给状态发生变化（只在低补给状态切换时广播）。
+signal party_supply_changed(party_id: String, is_food_low: bool, is_fodder_low: bool)
+## NPC 部队在市场中完成一次补给采购；只包含实际购买数量。
+signal npc_supply_purchased(party_id: String, bread_count: int, fodder_count: int)

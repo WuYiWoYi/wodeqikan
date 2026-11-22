@@ -11,14 +11,22 @@ const DEFAULT_WORLD_SIZE: Vector2 = Vector2(5000.0, 3000.0)
 const UNIT_CONFIG_DIR: String = "res://Data/Units"
 const EQUIPMENT_CONFIG_DIR: String = "res://Data/Equipment"
 const ITEM_CONFIG_DIR: String = "res://Data/Items"
+const MARKET_GOODS_CONFIG_DIR: String = "res://Data/Market"
 const FAMILY_CONFIG_DIR: String = "res://Data/Families"
 const APPEARANCE_CONFIG_PATH: String = "res://Data/Appearance/appearance_config.tres"
 const SETTLEMENT_ECONOMY_CONFIG_PATH: String = \
 	"res://Data/Settlements/settlement_economy_config.tres"
+## 旧存档升级 v6 时，为完全没有补给数据的部队补几天起步物资与少量资金。
+const MIGRATION_SUPPLY_DAYS: int = 3
+const MIGRATION_NPC_GOLD: int = 200
 
 var id_generator: IdGenerator = IdGenerator.new()
 var unit_manager: UnitManager = UnitManager.new()
 var item_manager: ItemManager = ItemManager.new()
+## 村庄/城镇市场库存与交易业务；玩家背包仍由 player_profile 唯一持有。
+var market_manager: MarketManager = MarketManager.new()
+## 阶段 12：所有部队每日补给消耗的唯一结算入口。
+var supply_manager: SupplyManager = SupplyManager.new()
 var party_manager: PartyManager = PartyManager.new()
 var settlement_manager: SettlementManager = SettlementManager.new()
 var faction_manager: FactionManager = FactionManager.new()
@@ -187,16 +195,19 @@ func to_save_data() -> SaveData:
 		"player_noble_id": player_lord_id,
 		"player_house_id": player_house_id,
 		"player_unit_id": player_unit_id,
-		"gold": player_profile.gold,
-		"inventory": player_profile.inventory.duplicate(),
-		"inventory_counts": player_profile.item_counts.duplicate(),
 	}
+	# 金币、堆叠物品与独立马匹实例都由 PlayerProfile 统一序列化。
+	var profile_payload: Dictionary = player_profile.to_dict()
+	for key: Variant in profile_payload:
+		save.player[key] = profile_payload[key]
+	save.supply_last_settled_day = supply_manager.last_settled_day
 	save.world_state = {}
 	save.scene_state = {}
 	save.world_log = world_log_manager.to_dict()
 	save.units = unit_manager.to_dict()
 	save.parties = party_manager.to_dict()
 	save.settlements = settlement_manager.to_dict()
+	save.markets = market_manager.to_dict()
 	save.nobles = noble_manager.to_dict()
 	# v4 兼容字段：旧读取方仍然可以只读 lords，但内容已经是完整贵族数据。
 	save.lords = save.nobles.duplicate(true)
@@ -205,6 +216,45 @@ func to_save_data() -> SaveData:
 	save.factions = {}
 	save.quests = {}
 	return save
+
+
+## 旧存档迁移：只给完全没有补给记录的部队补起始物资，避免开局立即全员缺粮。
+## 已有任意物品或金币的部队视为玩家/NPC 自己管理过补给，不再补发。
+func _migrate_party_supplies() -> void:
+	var player_party := party_manager.get_party(player_party_id)
+	if player_party != null:
+		var player_members: int = supply_manager.get_member_count(player_party)
+		if player_members > 0 \
+				and player_profile.get_item_count(SupplyManager.BREAD_ID) <= 0:
+			player_profile.add_item(
+				SupplyManager.BREAD_ID, player_members * MIGRATION_SUPPLY_DAYS
+			)
+		var player_mounts: int = supply_manager.get_total_mount_count(player_party)
+		if player_mounts > 0 \
+				and player_profile.get_item_count(SupplyManager.FODDER_ID) <= 0:
+			player_profile.add_item(
+				SupplyManager.FODDER_ID, player_mounts * MIGRATION_SUPPLY_DAYS
+			)
+
+	for party: PartyData in party_manager.get_all_parties():
+		if party == null or party.is_player_controlled() \
+				or party.party_id == player_party_id:
+			continue
+		# 强盗没有稳定经济来源，不补发补给与资金。
+		if party.party_kind == PartyData.PartyKind.BANDIT:
+			continue
+		if not party.inventory_data.stackable_counts.is_empty() or party.gold > 0:
+			continue
+		var members: int = maxi(1, party.member_unit_ids.size())
+		party.add_item(
+			SupplyManager.BREAD_ID, members * MIGRATION_SUPPLY_DAYS
+		)
+		var mounts: int = supply_manager.get_total_mount_count(party)
+		if mounts > 0:
+			party.add_item(
+				SupplyManager.FODDER_ID, mounts * MIGRATION_SUPPLY_DAYS
+			)
+		party.gold = MIGRATION_NPC_GOLD
 
 
 ## 从存档恢复权威数据。调用前 WorldContext 必须已经加入场景树并完成 manager 装配。
@@ -225,10 +275,9 @@ func load_from_save_data(save: SaveData) -> bool:
 	player_unit_id = str(save.player.get("player_unit_id", ""))
 	# 原地更新，保持 BattleManager 持有的 profile 引用一致。
 	var loaded_profile: PlayerProfile = PlayerProfile.from_dict(save.player)
-	player_profile.gold = loaded_profile.gold
-	player_profile.inventory = loaded_profile.inventory
-	player_profile.item_counts = loaded_profile.item_counts
+	player_profile.restore_from(loaded_profile)
 	ai_manager.player_party_id = player_party_id
+	supply_manager.set_player_party_id(player_party_id)
 	battle_manager.player_party_id = player_party_id
 
 	id_generator.restore_from(save.id_counters)
@@ -246,6 +295,21 @@ func load_from_save_data(save: SaveData) -> bool:
 		else save.lords
 	noble_manager.load_from_dict(noble_payload)
 	settlement_manager.load_from_dict(save.settlements)
+	# 市场库存按村庄/城镇独立恢复；旧存档缺失时 ensure_markets() 只补初始库存。
+	market_manager.load_from_dict(save.markets)
+	if not market_manager.ensure_markets():
+		push_error("[WorldContext] 村庄/城镇市场库存初始化失败")
+	# 补给结算日按存档恢复；旧存档没有该字段时以存档时刻所在游戏日为起点，
+	# 避免读档后立刻重复扣粮，也不会把读档前已结算的那一天再扣一次。
+	var settled_day: int = save.supply_last_settled_day
+	if settled_day < 0:
+		settled_day = int(TimeManager.get_date_parts(
+			save.world_elapsed_seconds
+		)["total_days"])
+	supply_manager.last_settled_day = settled_day
+	# v6 之前没有 NPC 背包/资金与玩家补给；只在升级旧存档时补一次。
+	if save.schema_version < 6:
+		_migrate_party_supplies()
 	house_manager.load_from_dict(save.houses)
 	kingdom_manager.load_from_dict(save.kingdoms)
 	world_log_manager.load_from_dict(save.world_log)
@@ -433,6 +497,17 @@ func register_static_configs() -> bool:
 			push_error("物品配置注册失败: %s" % path)
 			success = false
 
+	# 市场商品必须在装备/物品配置之后注册，才能校验 item_id 引用。
+	for path: String in _list_resource_paths(MARKET_GOODS_CONFIG_DIR):
+		var goods_config := load(path) as MarketGoodsConfig
+		if goods_config == null:
+			push_error("无法加载市场商品配置: %s" % path)
+			success = false
+			continue
+		if not market_manager.register_goods_config(goods_config):
+			push_error("市场商品配置注册失败: %s" % path)
+			success = false
+
 	for path: String in _list_resource_paths(FAMILY_CONFIG_DIR):
 		var family_config := load(path) as FamilyConfig
 		if family_config == null:
@@ -506,6 +581,14 @@ func _wire_managers() -> void:
 		party_manager, faction_manager, battle_manager, world_map_manager
 	)
 	world_log_manager.setup(battle_manager, party_manager, settlement_manager)
+	# 市场交易是玩家物品/金币变动的唯一业务入口；日志只记录玩家来源交易。
+	market_manager.setup(
+		settlement_manager, unit_manager, item_manager, world_log_manager
+	)
+	# 玩家补给使用 PlayerProfile，NPC 使用自己的 PartyData 背包；规则完全一致。
+	supply_manager.setup(
+		party_manager, unit_manager, player_profile, player_party_id
+	)
 	# 世界日志在所有管理者装配后接入，避免初始化阶段产生不完整日志。
 	noble_manager.setup_political(house_manager, kingdom_manager, world_log_manager)
 	house_manager.setup_political(kingdom_manager, world_log_manager)
@@ -536,7 +619,9 @@ func _wire_managers() -> void:
 		battle_manager,
 		lord_manager,
 		fief_recruitment_manager,
-		economy_config
+		economy_config,
+		supply_manager,
+		market_manager
 	)
 	world_simulation.bind(
 		unit_manager,
@@ -546,5 +631,6 @@ func _wire_managers() -> void:
 		battle_manager,
 		encounter_manager,
 		fief_recruitment_manager,
-		adventurer_recruitment_manager
+		adventurer_recruitment_manager,
+		supply_manager
 	)

@@ -38,6 +38,8 @@ const OLIN_KINGDOM_COLOR: Color = Color(0.72, 0.55, 0.22)
 const PLAYER_START_POSITION: Vector2 = Vector2(760.0, 620.0)
 const PLAYER_MOVE_SPEED: float = 150.0
 const PLAYER_SIGHT_RANGE: float = 300.0
+## 新游戏初始金币；读档完全以存档中的 PlayerProfile 为准。
+const PLAYER_STARTING_GOLD: int = 500
 
 ## 阶段 4 优化的 NPC 速度关系：治安队 > 强盗 > 商队。
 ## 旧存档通过 PartyData.movement_speed 保留原速度，不会在这里被重置。
@@ -74,6 +76,11 @@ const PLAYER_ARCHER_COUNT: int = (
 const PLAYER_TOTAL_MEMBER_COUNT: int = (
 	PLAYER_MILITIA_COUNT + PLAYER_TRAINED_COUNT + PLAYER_ARCHER_COUNT + 1
 )
+## 新世界补给：玩家带 7 天口粮，NPC 带 2 天并在不足时自行前往市场采购。
+const PLAYER_STARTING_SUPPLY_DAYS: int = 7
+const NPC_STARTING_SUPPLY_DAYS: int = 2
+const NPC_STARTING_GOLD: int = 300
+
 const TEST_MOUNT_ID: String = "mount_horse_01"
 ## 4 匹装备给骑乘职业步兵，额外 1 匹留在背包，便于验证“上马/下马”。
 const TEST_MOUNT_STOCK: int = PLAYER_MOUNTED_TRAINED_COUNT + 1
@@ -605,6 +612,9 @@ static func create_new_world(context: WorldContext) -> bool:
 	if not initialize_fief_economy(context):
 		push_error("封地经济初始化失败")
 		return false
+	if not context.market_manager.ensure_markets():
+		push_error("城镇市场初始化失败")
+		return false
 
 	return context.is_valid_world()
 
@@ -728,7 +738,51 @@ static func create_test_battle_forces(context: WorldContext) -> bool:
 			veteran
 		):
 			return false
+	_seed_party_supplies(context)
 	return true
+
+
+## 新世界补给初始值。玩家与 NPC 使用完全相同的物品字段与每日消耗规则，
+## 区别只在数量：玩家 7 天、NPC 2 天，NPC 随后会自行前往市场补到 7 天。
+static func _seed_party_supplies(context: WorldContext) -> void:
+	if context == null or context.supply_manager == null:
+		return
+	context.supply_manager.set_player_party_id(context.player_party_id)
+	context.supply_manager.reset_settlement_day()
+	for party: PartyData in context.party_manager.get_all_parties():
+		if party == null:
+			continue
+		if party.is_player_controlled() or party.party_id == context.player_party_id:
+			var player_members: int = context.supply_manager.get_member_count(party)
+			var player_mounts: int = context.supply_manager.get_total_mount_count(party)
+			if player_members > 0 \
+					and context.player_profile.get_item_count(SupplyManager.BREAD_ID) <= 0:
+				context.player_profile.add_item(
+					SupplyManager.BREAD_ID,
+					player_members * PLAYER_STARTING_SUPPLY_DAYS
+				)
+			if player_mounts > 0 \
+					and context.player_profile.get_item_count(SupplyManager.FODDER_ID) <= 0:
+				context.player_profile.add_item(
+					SupplyManager.FODDER_ID,
+					player_mounts * PLAYER_STARTING_SUPPLY_DAYS
+				)
+			continue
+		# 强盗没有稳定经济，不初始化市场补给；其余 NPC 部队与玩家共用规则。
+		if party.party_kind == PartyData.PartyKind.BANDIT:
+			continue
+		var members: int = context.supply_manager.get_member_count(party)
+		var mounts: int = context.supply_manager.get_total_mount_count(party)
+		if members > 0 and party.get_item_count(SupplyManager.BREAD_ID) <= 0:
+			party.add_item(
+				SupplyManager.BREAD_ID, members * NPC_STARTING_SUPPLY_DAYS
+			)
+		if mounts > 0 and party.get_item_count(SupplyManager.FODDER_ID) <= 0:
+			party.add_item(
+				SupplyManager.FODDER_ID, mounts * NPC_STARTING_SUPPLY_DAYS
+			)
+		if party.gold <= 0:
+			party.gold = NPC_STARTING_GOLD
 
 
 static func _find_party_by_name(context: WorldContext, party_name: String) -> PartyData:
@@ -745,6 +799,11 @@ static func _populate_player_party(
 ) -> bool:
 	if not party.member_unit_ids.is_empty():
 		return true
+	# 新游戏给玩家一笔可支撑初期市场交易的启动资金；已有存档不经过这里。
+	if context.player_profile.gold < PLAYER_STARTING_GOLD:
+		context.player_profile.add_gold(
+			PLAYER_STARTING_GOLD - context.player_profile.gold
+		)
 	var hero_config: UnitConfig = load(PLAYER_HERO_CONFIG_PATH) as UnitConfig
 	var archer_militia: UnitConfig = load(ARCHER_MILITIA_CONFIG_PATH) as UnitConfig
 	var archer_trained: UnitConfig = load(ARCHER_TRAINED_CONFIG_PATH) as UnitConfig

@@ -2,15 +2,25 @@ class_name PlayerProfile
 extends RefCounted
 ## 玩家会话级数据：金币与物品栏。
 ##
-## 存放在 WorldContext 中，随存档的 player 字典保存。
-## inventory 保持“出现过的物品 ID 列表”以兼容旧存档；item_counts 记录数量。
-## 旧存档缺少 item_counts 时，inventory 中每个物品按 1 件处理，不升级 Schema。
+## 物品存储委托给 InventoryData：普通物品按数量堆叠，马匹按独立实例保存。
+## inventory / item_counts 作为兼容访问入口保留，旧调用方无需改动。
 
 var gold: int = 0
-## 当前存放装备/战利品 ID；后续装备 UI 可直接读取。
-var inventory: Array[String] = []
-## { equipment_id: int }，与 inventory 同步；数量为 0 的物品不会保留。
-var item_counts: Dictionary = {}
+var _data: InventoryData = InventoryData.new()
+
+## 出现过的物品 ID 列表（兼容旧存档与 UI 枚举）。
+var inventory: Array[String]:
+	get:
+		return _data.inventory
+	set(value):
+		_data.inventory = value
+
+## { item_id: 数量 }，只包含可堆叠物品；马匹不再写入这里。
+var item_counts: Dictionary:
+	get:
+		return _data.stackable_counts
+	set(value):
+		_data.stackable_counts = value
 
 
 func add_gold(amount: int) -> void:
@@ -32,86 +42,109 @@ func spend_gold(amount: int) -> bool:
 	return true
 
 
-## 单件物品数量；未记录数量的旧数据按 1 件处理。
+## 单件物品数量；马匹返回独立实例数量。
 func get_item_count(equipment_id: String) -> int:
-	if equipment_id.is_empty():
-		return 0
-	if item_counts.has(equipment_id):
-		return maxi(0, int(item_counts[equipment_id]))
-	return 1 if inventory.has(equipment_id) else 0
+	return _data.get_item_count(equipment_id)
 
 
 func has_item(equipment_id: String) -> bool:
 	return get_item_count(equipment_id) > 0
 
 
-## 增加物品并叠加数量；新物品同时加入 inventory。
+## 增加物品并叠加数量；马匹会生成独立实例。
 func add_item(equipment_id: String, count: int = 1) -> bool:
-	if equipment_id.is_empty() or count <= 0:
-		return false
-	item_counts[equipment_id] = get_item_count(equipment_id) + count
-	if not inventory.has(equipment_id):
-		inventory.append(equipment_id)
-	return true
+	return _data.add_item(equipment_id, count)
 
 
 ## 消耗指定数量；数量不足时不修改任何数据。
 func remove_item(equipment_id: String, count: int = 1) -> bool:
-	if equipment_id.is_empty() or count <= 0:
-		return false
-	var current: int = get_item_count(equipment_id)
-	if current < count:
-		return false
-	var remaining: int = current - count
-	if remaining <= 0:
-		item_counts.erase(equipment_id)
-		inventory.erase(equipment_id)
-	else:
-		item_counts[equipment_id] = remaining
-	return true
+	return _data.remove_item(equipment_id, count)
+
+
+# ---------------------------------------------------------------------------
+# 马匹实例
+# ---------------------------------------------------------------------------
+
+
+func add_mount_instance(instance: MountInstanceData) -> bool:
+	return _data.add_mount_instance(instance)
+
+
+func remove_mount_instance(instance_id: String) -> MountInstanceData:
+	return _data.remove_mount_instance(instance_id)
+
+
+func take_mount_instance(item_id: String) -> MountInstanceData:
+	return _data.take_mount_instance(item_id)
+
+
+func get_mount_instance(instance_id: String) -> MountInstanceData:
+	return _data.get_mount_instance(instance_id)
+
+
+func has_mount_instance(instance_id: String) -> bool:
+	return _data.has_mount_instance(instance_id)
+
+
+func get_mount_instances(item_id: String = "") -> Array[MountInstanceData]:
+	return _data.get_mount_instances(item_id)
+
+
+func get_all_mount_instances() -> Array[MountInstanceData]:
+	return _data.get_all_mount_instances()
+
+
+func get_mount_count(item_id: String = "") -> int:
+	return _data.get_mount_count(item_id)
+
+
+func restore_mount_instances(instances: Array[MountInstanceData]) -> void:
+	_data.restore_mount_instances(instances)
+
+
+## 交易回滚专用：整体恢复背包，不生成新实例。
+func restore_inventory_state(
+	counts: Dictionary,
+	inventory_list: Array,
+	instances: Array
+) -> void:
+	_data.restore_state(inventory_list, counts, instances)
+
+
+func migrate_legacy_mount_counts() -> void:
+	_data.migrate_legacy_mount_counts()
+
+
+## 读档专用：原地替换内容，保持外部持有的 PlayerProfile 引用不变。
+func restore_from(other: PlayerProfile) -> void:
+	if other == null:
+		return
+	gold = maxi(0, other.gold)
+	_data = other._data
+
+
+# ---------------------------------------------------------------------------
+# 序列化
+# ---------------------------------------------------------------------------
 
 
 func to_dict() -> Dictionary:
-	return {
+	var payload: Dictionary = {
 		"gold": gold,
 		"inventory": inventory.duplicate(),
-		"inventory_counts": item_counts.duplicate(),
+		"inventory_counts": item_counts.duplicate(true),
 	}
+	var instances: Array[Dictionary] = []
+	for instance: MountInstanceData in _data.mount_instances:
+		if instance != null:
+			instances.append(instance.to_dict())
+	payload["mount_instances"] = instances
+	return payload
 
 
 static func from_dict(data: Dictionary) -> PlayerProfile:
 	var profile := PlayerProfile.new()
 	profile.gold = maxi(0, int(data.get("gold", 0)))
-
-	var values: Variant = data.get("inventory", [])
-	if values is Array:
-		for value: Variant in values:
-			var item_id: String = str(value)
-			if not item_id.is_empty() and not profile.inventory.has(item_id):
-				profile.inventory.append(item_id)
-
-	var counts_value: Variant = data.get("inventory_counts", {})
-	if counts_value is Dictionary:
-		for key: Variant in counts_value:
-			var item_id: String = str(key)
-			var count: int = maxi(0, int(counts_value[key]))
-			if item_id.is_empty() or count <= 0:
-				continue
-			profile.item_counts[item_id] = count
-			if not profile.inventory.has(item_id):
-				profile.inventory.append(item_id)
-
-	# 旧存档只有 inventory：每个条目按 1 件处理。
-	for item_id: String in profile.inventory:
-		if not profile.item_counts.has(item_id):
-			profile.item_counts[item_id] = 1
-
-	# 清理数量为 0 或不在 inventory 中的计数，保持两个字段一致。
-	for item_id: Variant in profile.item_counts.keys():
-		var key: String = str(item_id)
-		if int(profile.item_counts[item_id]) <= 0:
-			profile.item_counts.erase(item_id)
-		elif not profile.inventory.has(key):
-			profile.inventory.append(key)
-
+	profile._data = InventoryData.from_dict(data)
+	profile._data.migrate_legacy_mount_counts()
 	return profile

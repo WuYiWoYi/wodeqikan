@@ -1,7 +1,7 @@
 # 存档系统
 
 **核心脚本：** `Scripts/Autoload/save_manager.gd`、`Scripts/Core/Save/save_data.gd`
-**状态：** 保存/读取闭环、成员关系校验、士兵成长/装备/骑乘/工资恢复、玩家档案与物品数量、地点场景路径、AI/跟随字段兼容、领主/封地/采邑/冒险者、贵族/家族/王国持久化已实现；Schema v5
+**状态：** 保存/读取闭环、成员关系校验、士兵成长/装备/骑乘/工资恢复、玩家档案与物品数量、地点场景路径、AI/跟随字段兼容、领主/封地/采邑/冒险者、贵族/家族/王国、村庄/城镇市场库存、马匹个体、NPC 背包与金币、补给结算日持久化已实现；Schema v6
 
 ---
 
@@ -21,13 +21,13 @@ user://saves/<slot>.json
 
 Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录内。
 
-## 3. Schema v5
+## 3. Schema v6
 
 ```json
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "project_version": "0.2.0",
-  "saved_at": "2026-11-20T22:30:00",
+  "saved_at": "2026-11-22T22:30:00",
   "world": {
     "world_id": "WORLD_000001",
     "created_at": "2026-11-20T22:00:00",
@@ -35,7 +35,8 @@ Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录
   },
   "time": {
     "world_elapsed_seconds": 1234.5,
-    "world_base_speed": 1.0
+    "world_base_speed": 1.0,
+    "supply_last_settled_day": 8
   },
   "id_counters": {
     "WORLD": 1, "UNIT": 5, "PARTY": 4, "SETTLEMENT": 5,
@@ -46,8 +47,12 @@ Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录
     "player_lord_id": "LORD_000001",
     "player_unit_id": "UNIT_000005",
     "gold": 120,
-    "inventory": ["weapon_sword_01", "mount_horse_01"],
-    "inventory_counts": { "weapon_sword_01": 1, "mount_horse_01": 1 }
+    "inventory": ["weapon_sword_01", "bread"],
+    "inventory_counts": { "weapon_sword_01": 1, "bread": 14 },
+    "mount_instances": [
+      { "instance_id": "MOUNT_000001", "equipment_id": "mount_horse_01",
+        "coat_style_id": "brown", "saddle_style_id": "saddle_03", "display_name": "" }
+    ]
   },
   "world_state": {},
   "scene_state": {},
@@ -59,6 +64,14 @@ Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录
   "houses": { "HOUSE_PLAYER": { } },
   "kingdoms": { "KINGDOM_BURKNANIA": { } },
   "settlements": { "SETTLEMENT_000001": { } },
+  "markets": {
+    "SETTLEMENT_000006": {
+      "settlement_id": "SETTLEMENT_000006",
+      "stock": { "bread": 50, "fodder": 50 },
+      "mount_instances": [],
+      "initialized_items": ["bread", "fodder", "mount_horse_01"]
+    }
+  },
   "factions": {},
   "quests": {}
 }
@@ -70,12 +83,13 @@ Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录
 | `project_version` | 游戏版本，用于问题定位 |
 | `saved_at` | 保存时间（真实时间，可排序） |
 | `world` | 世界 ID、创建时间、世界尺寸 |
-| `time` | 世界累计时间与基础倍率 |
+| `time` | 世界累计时间、基础倍率与 `supply_last_settled_day`（上次补给结算日；缺失时取存档时刻所在日） |
 | `id_counters` | 各 ID 前缀的当前计数 |
-| `player` | 玩家部队 ID、玩家领主 ID、玩家角色单位 ID、金币与物品栏；`inventory` 为物品 ID 列表，`inventory_counts` 为数量字典；旧存档缺失 `inventory_counts` 时每个条目按 1 件处理 |
+| `player` | 玩家部队 ID、玩家领主 ID、玩家角色单位 ID、金币与物品栏；`inventory` 为物品 ID 列表，`inventory_counts` 为可堆叠数量，`mount_instances` 为马匹实例数组；旧存档缺失 `inventory_counts` 时每个条目按 1 件处理 |
 | `world_state` | 世界级标记（预留） |
 | `scene_state` | 局部状态（初期不使用） |
-| `world_log` | 最近 100 条世界日志；缺失时为空历史 |
+| `world_log` | 最近 20 条世界日志；缺失时为空历史，超过 20 条时读档立即裁剪 |
+| `markets` | 村庄/城镇市场 `{ settlement_id: { settlement_id, stock, mount_instances, initialized_items } }`；缺失时按商品配置初始化，已有库存/实例不重置 |
 | `lords` | 领主表 `{ lord_id: LordData }`；Schema v4 新增，v5 继续保留为兼容副本 |
 | `nobles` | 贵族表 `{ noble_id: NobleData }`；Schema v5 新增 |
 | `houses` | 家族表 `{ house_id: HouseData }`；Schema v5 新增，含 `banner_id` 映射 |
@@ -113,9 +127,11 @@ Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录
 - 阶段 4 仅扩展枚举值（`BANDIT` / `GUARD`、`FOLLOW_PARTY`），没有新增持久化字段；`current_order` 与 `current_target_id` 继续保存跟随指令。
 - `PartyData.attack_intent`、待处理遭遇、遭遇/交互 ID、战斗拒绝记录与暂停原因都是运行时状态，不进入存档；读档后 AI 会在下一次决策重新建立攻击意图。
 - `FactionManager` 的关系表是静态规则，不进入存档；新游戏与读档都会重建默认关系。
-- `PlayerProfile`（金币 / 物品列表 / 物品数量）存放在 `player` 字典中；`WorldContext` 在保存/读档时同步。
-- `inventory_counts` 是向后兼容的增量字段：旧存档只有 `inventory` 时，每个物品按 1 件恢复；没有升级 Schema。
-- 马匹装备保存在 `UnitData.equipment["MOUNT"]`。读档重算时 `is_mounted` 由 MOUNT 装备重新派生，不信任旧存档中单独的 `is_mounted` 标记；没有 MOUNT 的旧单位按步兵恢复。
+- `PlayerProfile`（金币 / 物品列表 / 可堆叠数量 / 马匹实例）存放在 `player` 字典中；`WorldContext` 在保存/读档时同步。
+- 玩家与 NPC 背包使用同一结构：`inventory_counts` 只含可堆叠物品，`mount_instances` 逐匹保存马匹；旧存档只有 `inventory` 时每个条目按 1 件恢复，马匹数量确定性迁移为实例（D146）。
+- 马匹装备保存在 `UnitData.equipment["MOUNT"]` 与 `UnitData.mount_instance`。读档重算时 `is_mounted` 由 MOUNT 装备重新派生，不信任旧存档中单独的 `is_mounted` 标记；只有装备 ID 而无实例的旧单位按 `unit_id + equipment_id` 确定性补建实例；没有 MOUNT 的旧单位按步兵恢复。
+- NPC 部队的 `PartyData.gold` 与 `inventory_counts` / `mount_instances` 随部队一起保存，供补给采购使用。
+- `supply_last_settled_day` 保存在 `time` 下；旧存档缺失时以 `world_elapsed_seconds` 所在游戏日为起点，避免读档立即扣粮。
 - 战斗中的 `BattleSession`、`BattleResultData`、控制权、当前 SceneTime 与战后临时状态不进入存档。
 - 战斗经验/奖励在结算时写入 `UnitData.exp` / `PlayerProfile`，随之后的存档保存；不会保存“待领取奖励”。
 - 新增字段均使用安全默认值，未升级 Schema。
@@ -206,16 +222,19 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 - `BattleSession` / `BattleUnitState` / `BattleParticipant` 不进入存档；战斗期间不序列化实时 HP、位置、战斗侧与索敌目标。
 - 离屏战斗是临时世界状态，读档后不会恢复；读档统一回到大地图。
 - 暂停原因不存档；读档后由新的进入状态建立。
-- 世界日志历史自 Schema v3 起进入存档，只保存最近 100 条；UI 滚动位置不保存。
+- 世界日志历史自 Schema v3 起进入存档，只保存最近 20 条；读档超过 20 条时立即裁剪；UI 滚动位置不保存。
+- 村庄/城镇市场库存与马匹实例保存在 `markets`；旧存档缺失时由 `MarketManager.ensure_markets()` 初始化一次，已有库存与 `initialized_items` 不重置。
+- 补给结算日 `supply_last_settled_day` 随 `time` 保存；读档后从该日继续，不会重复结算同一天。
 - 读档统一回到大地图，不恢复小场景或战斗。
 - 当前不支持 Schema v1 的完整恢复（旧存档缺少 `world_id`，会被判定为无效）。
 
 ## 9. 版本与迁移
 
 - `schema_version` 每次结构不兼容变更时加 1。
-- 当前版本 5；`SaveData.from_dict()` 接受 1..5。
+- 当前版本 6；`SaveData.from_dict()` 接受 1..6。
 - v3 → v4 新增 `lords` 与 `player.player_lord_id` / `player.player_unit_id`；旧存档缺失时由 `WorldContext` 补玩家领主身份，不伪造封地归属。
 - v4 → v5 新增 `nobles` / `houses` / `kingdoms` 与地点 `owner_house_id` / `owner_noble_id`；旧存档缺失时由 `lords`、`family_id` 与 `banner_id` 补建最小政治视图，并通过固定 ID 去重。
+- v5 → v6 新增马匹实例、NPC 背包与金币、市场马匹实例/`initialized_items`、`supply_last_settled_day`；读取 v5 及更早存档时执行一次补给初始化（只补完全没有任何补给记录的部队）与确定性马匹迁移。
 - 读取旧版本时执行迁移；`SaveData.from_dict()` 已保留 v1 → v2 入口，但完整字段迁移尚未完成。
 - 读取高于当前版本的存档直接拒绝。
 - 迁移逻辑集中在 `SaveData.from_dict()`，禁止散落。
@@ -262,7 +281,7 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 
 | 项 | 状态 |
 |---|---|
-| `SaveData` Schema v5 | 已实现 |
+| `SaveData` Schema v6 | 已实现 |
 | JSON 写入/读取 | 已实现 |
 | 临时文件 + 备份替换 | 已实现 |
 | 槽位列表/删除 | 已实现 |
@@ -274,6 +293,10 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 | 士兵等级/经验/装备往返 | 已实现（沿用现有字段） |
 | 马匹装备 / 骑乘状态往返 | 已实现：MOUNT 随装备保存，`is_mounted` 读档重算派生；旧存档按步兵兼容 |
 | 玩家物品数量 `inventory_counts` | 已实现：增量字段，旧存档每个条目按 1 件恢复，无 Schema 升级 |
+| 村庄/城镇市场库存 `markets` | 已实现：按地点恢复，含马匹实例与 `initialized_items` |
+| 马匹独立实例 `mount_instances` | 已实现（v6）；旧档数量确定性迁移 |
+| NPC 背包与金币 | 已实现（v6）；随 `parties` 保存 |
+| 补给结算日 `supply_last_settled_day` | 已实现（v6） |
 | 士兵工资 `wage` | 已实现：增量字段，旧存档缺失时按当前兵种配置补全 |
 | 地点小场景路径 `SettlementData.scene_path` | 已实现：增量字段，旧存档为空并回退默认村庄模板 |
 | 物品配置 `ItemConfig` | 已实现：静态注册，不进入存档 |
@@ -436,3 +459,34 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 - 百科面板层级、滚动位置、选中王国/家族均为 UI 状态。
 - 增援提示队列与淡入淡出计时不持久化。
 - 固定 ID 家族/王国（`HOUSE_*`、`KINGDOM_*`）由初始化器显式注册，不消耗 `IdGenerator` 计数。
+
+## 20. Schema v6：马匹个体、NPC 补给与市场扩展（阶段 12）
+
+### 20.1 新增/扩展字段
+
+| 位置 | 字段 | 说明 |
+|---|---|---|
+| `time` | `supply_last_settled_day` | 上次补给结算的游戏日；-1/缺失表示尚未结算 |
+| `player` | `mount_instances` | 玩家背包中的马匹实例数组 |
+| `player` | `inventory_counts` | 只保存可堆叠物品；马匹不再写入 |
+| `PartyData` | `inventory_counts` / `mount_instances` | NPC 自有背包 |
+| `PartyData` | `gold` | NPC 自有金币，补给采购使用 |
+| `PartyData` | `supply_bread_shortage` / `supply_fodder_shortage` | 上次结算缺口（只读展示） |
+| `markets` | `mount_instances` | 市场待售马匹实例 |
+| `markets` | `initialized_items` | 已初始化商品，防止售罄后补满 |
+| `UnitData` | `mount_instance` | 已装备马匹实例（外观随实例） |
+
+### 20.2 读档顺序与兼容
+
+1. 恢复单位与部队，包括 NPC 金币、背包与马匹实例。
+2. `MarketManager.ensure_markets()` 按地点补齐缺失商品，保留已有库存/实例/`initialized_items`。
+3. `schema_version < 6` 时执行一次 `_migrate_party_supplies()`：只为完全没有补给记录的部队补起步物资与少量金币，已管理过补给的部队不补发。
+4. 解析 `supply_last_settled_day`；缺失时使用 `world_elapsed_seconds` 所在游戏日。
+5. `SupplyManager.set_player_party_id()` 后从该日继续，避免读档立即扣粮或重复扣同一天。
+6. 旧档马匹数量（玩家、市场、单位装备）使用 `create_deterministic()` 迁移，反复读取结果一致。
+
+### 20.3 不持久化
+
+- 未确认的交易预览（`TradeSession`）不进入存档。
+- NPC 采购的临时目标、重试计时与采购状态为运行时字段，读档后由 `AIManager` 重新决策。
+- 低补给提示浮字、`EventBus` 订阅关系与暂停原因不持久化。

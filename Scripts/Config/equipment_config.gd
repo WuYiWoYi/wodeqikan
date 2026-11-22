@@ -79,6 +79,9 @@ func validate() -> bool:
 	if slot_to_string(slot).is_empty():
 		push_error("EquipmentConfig 槽位非法: %s" % equipment_id)
 		return false
+	# MOUNT 装备自动登记为“不可堆叠的马匹物品”，供背包与市场识别。
+	if slot == Slot.MOUNT:
+		MountInstanceData.register_mount_item(equipment_id.strip_edges())
 	if slot == Slot.WEAPON and attack_type == AttackType.RANGED:
 		if projectile_speed <= 0.0:
 			push_error("远程武器 projectile_speed 必须大于 0: %s" % equipment_id)

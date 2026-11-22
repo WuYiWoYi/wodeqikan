@@ -67,6 +67,9 @@ var _dialogue_choices: VBoxContainer = null
 
 ## 与大地图共用的世界日志面板。
 var _world_log_panel: WorldLogPanel = null
+## 与大地图完全相同的市场组件：村庄只提供面包/草料，库存与 WorldContext 共享。
+var _market_panel: MarketPanel = null
+var _market_pause_active: bool = false
 
 
 func _ready() -> void:
@@ -96,6 +99,9 @@ func _exit_tree() -> void:
 	if _dialogue_pause_active:
 		TimeManager.pop_pause(GameManager.PAUSE_REASON_WORLD_DIALOGUE)
 		_dialogue_pause_active = false
+	if _market_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_market_pause_active = false
 	TimeManager.pop_pause(GameManager.PAUSE_REASON_SMALL_SCENE)
 
 
@@ -265,6 +271,49 @@ func _build_ui() -> void:
 	_build_exit_countdown()
 	_build_world_log_panel()
 	_build_dialogue_panel()
+	_build_market_panel()
+
+
+## 村庄与大地图共用同一个 MarketPanel；打开时沿用 UI 面板暂停原因。
+func _build_market_panel() -> void:
+	_market_panel = MarketPanel.new()
+	_market_panel.name = "VillageMarketPanel"
+	_market_panel.visible = false
+	_market_panel.closed.connect(_on_market_closed)
+	_market_panel.traded.connect(_on_market_traded)
+	_ui_root.add_child(_market_panel)
+	_market_panel.setup(_context)
+
+
+func _open_village_market() -> void:
+	if _settlement == null or _market_panel == null:
+		return
+	if not _market_panel.open(_settlement):
+		_status_label.text = "该村庄暂无可用补给市场。"
+		return
+	if not _market_pause_active:
+		TimeManager.push_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_market_pause_active = true
+	_moving = false
+	_player_visual.update_locomotion(0.0, false)
+
+
+func _on_market_closed() -> void:
+	if _market_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_market_pause_active = false
+
+
+func _on_market_traded(_result: Dictionary) -> void:
+	_status_label.text = "补给交易已完成。"
+
+
+func _is_market_open() -> bool:
+	return _market_panel != null and _market_panel.visible
+
+
+func get_market_panel() -> MarketPanel:
+	return _market_panel
 
 
 ## 与大地图共用同一世界日志组件；村庄放在右上角避免遮挡底部对话。
@@ -396,7 +445,8 @@ func _physics_process(delta: float) -> void:
 	var camera_free: bool = _camera_rig != null and _camera_rig.is_free_mode()
 	# 自由视角下 WASD/方向键只移动摄像机，不改变玩家角色位置。
 	var input := Vector2.ZERO if camera_free else _read_input()
-	_moving = input != Vector2.ZERO and not _dialogue_open and not camera_free
+	_moving = input != Vector2.ZERO and not _dialogue_open \
+		and not _is_market_open() and not camera_free
 	if _moving:
 		var speed: float = maxf(_player_unit.move_speed, 1.0) \
 			* VILLAGE_MOVE_SPEED_MULTIPLIER
@@ -485,7 +535,7 @@ func _update_exit_state(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if _returning or _dialogue_open:
+	if _returning or _dialogue_open or _is_market_open():
 		return
 	if event is InputEventKey:
 		var key_event := event as InputEventKey
@@ -540,7 +590,7 @@ func _find_candidate_position(candidate: AdventurerCandidateData) -> Vector2:
 
 ## 与冒险者候选人交互。距离不足时不打开对话。
 func try_interact_with_candidate(candidate_id: String) -> bool:
-	if _returning or _dialogue_open or _settlement == null:
+	if _returning or _dialogue_open or _is_market_open() or _settlement == null:
 		return false
 	var candidate := _settlement.get_candidate(candidate_id)
 	if candidate == null:
@@ -590,7 +640,7 @@ func _open_candidate_dialogue(candidate: AdventurerCandidateData) -> bool:
 
 ## 与村庄头人交互。距离不足时不打开对话，返回 false。
 func try_interact_with_elder() -> bool:
-	if _returning or _dialogue_open:
+	if _returning or _dialogue_open or _is_market_open():
 		return false
 	if _player_position.distance_to(ELDER_POSITION) > INTERACT_DISTANCE:
 		_status_label.text = "距离太远，走近村庄头人后再交谈"
@@ -604,8 +654,8 @@ func _open_dialogue() -> bool:
 		push_error("村庄对话配置加载失败: %s" % VILLAGE_ELDER_DIALOGUE_PATH)
 		_status_label.text = "对话配置缺失"
 		return false
-	if _can_player_recruit_fief():
-		data = _build_elder_dialogue_with_fief(data)
+	# 头人对话始终提供“购买补给”；玩家拥有该村时额外提供采邑征召。
+	data = _build_elder_dialogue(data)
 	if not _context.dialogue_manager.start_dialogue(data):
 		_status_label.text = "无法开始对话"
 		return false
@@ -613,8 +663,8 @@ func _open_dialogue() -> bool:
 	return true
 
 
-## 玩家拥有该村庄时，在头人对话中增加封地征召选项；其余对话仍来自数据配置。
-func _build_elder_dialogue_with_fief(base: DialogueData) -> DialogueData:
+## 在基础对话上追加运行时选项；其余对话内容仍来自数据配置。
+func _build_elder_dialogue(base: DialogueData) -> DialogueData:
 	var data := DialogueData.new()
 	data.dialogue_id = base.dialogue_id
 	data.speaker_name = base.speaker_name
@@ -625,11 +675,17 @@ func _build_elder_dialogue_with_fief(base: DialogueData) -> DialogueData:
 	var choices: Array = (choices_value as Array).duplicate(true) \
 		if choices_value is Array else []
 	choices.append({
-		"text": "征召 1 组采邑（6 人，剩余 %d 组）"
-			% _settlement.fief_recruitment_stock,
+		"text": "购买补给（面包、草料）",
 		"next_node_id": "",
-		"action": "recruit_fief",
+		"action": "open_market",
 	})
+	if _can_player_recruit_fief():
+		choices.append({
+			"text": "征召 1 组采邑（6 人，剩余 %d 组）"
+				% _settlement.fief_recruitment_stock,
+			"next_node_id": "",
+			"action": "recruit_fief",
+		})
 	start_node["choices"] = choices
 	data.nodes[data.start_node_id] = start_node
 	return data
@@ -717,6 +773,10 @@ func _execute_dialogue_action(action: String, choice: Dictionary) -> String:
 				_refresh_candidate_label(candidate)
 				return "冒险者已加入你的队伍。"
 			return _context.adventurer_recruitment_manager.last_error
+		"open_market":
+			# 等当前对话完全关闭后再打开市场，避免暂停原因与输入状态互相覆盖。
+			call_deferred("_open_village_market")
+			return ""
 		"recruit_fief":
 			var player_lord: LordData = _context.get_player_lord()
 			if player_lord == null:
