@@ -27,6 +27,10 @@ var item_manager: ItemManager = ItemManager.new()
 var market_manager: MarketManager = MarketManager.new()
 ## 阶段 12：所有部队每日补给消耗的唯一结算入口。
 var supply_manager: SupplyManager = SupplyManager.new()
+## 阶段 13：伤兵按 WorldTime 整小时顺序恢复的唯一结算入口。
+var wounded_healing_manager: WoundedHealingManager = WoundedHealingManager.new()
+## 阶段 13：俘虏出售统一业务入口（价格集中配置、原子结算）。
+var prisoner_trade_manager: PrisonerTradeManager = PrisonerTradeManager.new()
 var party_manager: PartyManager = PartyManager.new()
 var settlement_manager: SettlementManager = SettlementManager.new()
 var faction_manager: FactionManager = FactionManager.new()
@@ -201,6 +205,7 @@ func to_save_data() -> SaveData:
 	for key: Variant in profile_payload:
 		save.player[key] = profile_payload[key]
 	save.supply_last_settled_day = supply_manager.last_settled_day
+	save.healing_last_settled_hour = wounded_healing_manager.last_settled_hour
 	save.world_state = {}
 	save.scene_state = {}
 	save.world_log = world_log_manager.to_dict()
@@ -290,6 +295,10 @@ func load_from_save_data(save: SaveData) -> bool:
 	var sanitize_notes: Array[String] = party_manager.sanitize_loaded_runtime_state()
 	for message: String in sanitize_notes:
 		print("[WorldContext] %s" % message)
+	# 阶段 13：俘虏与成员互斥；旧存档没有俘虏字段，校正为幂等操作。
+	var prisoner_notes: Array[String] = party_manager.sanitize_prisoner_ownership()
+	for message: String in prisoner_notes:
+		print("[WorldContext] %s" % message)
 	# v5 读取 nobles；v4 存档没有 nobles 时回退到 lords。
 	var noble_payload: Dictionary = save.nobles if not save.nobles.is_empty() \
 		else save.lords
@@ -307,6 +316,10 @@ func load_from_save_data(save: SaveData) -> bool:
 			save.world_elapsed_seconds
 		)["total_days"])
 	supply_manager.last_settled_day = settled_day
+	# 伤兵治疗按游戏小时结算；旧存档没有记录时以存档时刻为起点。
+	wounded_healing_manager.restore_settled_hour(
+		save.healing_last_settled_hour, save.world_elapsed_seconds
+	)
 	# v6 之前没有 NPC 背包/资金与玩家补给；只在升级旧存档时补一次。
 	if save.schema_version < 6:
 		_migrate_party_supplies()
@@ -577,6 +590,13 @@ func _wire_managers() -> void:
 	battle_manager.setup(
 		unit_manager, party_manager, id_generator, faction_manager, player_profile
 	)
+	# 负伤概率来自集中配置；缺失时保持关闭（阵亡即永久死亡），不散落硬编码。
+	if ResourceLoader.exists(BattleManager.WOUNDED_CONFIG_PATH):
+		var wounded_config := load(
+			BattleManager.WOUNDED_CONFIG_PATH
+		) as WoundedConfig
+		if wounded_config != null:
+			battle_manager.set_wounded_config(wounded_config)
 	encounter_manager.setup(
 		party_manager, faction_manager, battle_manager, world_map_manager
 	)
@@ -589,6 +609,8 @@ func _wire_managers() -> void:
 	supply_manager.setup(
 		party_manager, unit_manager, player_profile, player_party_id
 	)
+	wounded_healing_manager.setup(party_manager, unit_manager)
+	prisoner_trade_manager.setup(party_manager, unit_manager, player_profile)
 	# 世界日志在所有管理者装配后接入，避免初始化阶段产生不完整日志。
 	noble_manager.setup_political(house_manager, kingdom_manager, world_log_manager)
 	house_manager.setup_political(kingdom_manager, world_log_manager)
@@ -632,5 +654,6 @@ func _wire_managers() -> void:
 		encounter_manager,
 		fief_recruitment_manager,
 		adventurer_recruitment_manager,
-		supply_manager
+		supply_manager,
+		wounded_healing_manager
 	)

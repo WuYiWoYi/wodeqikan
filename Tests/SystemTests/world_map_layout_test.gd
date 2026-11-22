@@ -128,10 +128,12 @@ func _run() -> void:
 	_check(style != null, "加载部队标记样式")
 	if style != null:
 		_check(is_equal_approx(style.marker_radius, 18.0), "圆形半径保持 18")
-		_check(style.flag_max_size > 30.0, "内部旗帜尺寸增大")
+		_check(is_equal_approx(style.border_width, 2.0), "圆形边框宽度保持 2")
+		# 阶段 13：只放大圆形内部旗帜美术，圆形底盘/边框/点击区域不变。
+		_check(style.flag_max_size > 44.0, "内部旗帜尺寸继续增大")
 		_check(
-			style.flag_max_size <= style.marker_radius * 2.0 + 4.0,
-			"旗帜不改变圆形底盘尺寸"
+			style.flag_max_size > style.marker_radius * 2.0,
+			"旗帜可大于圆盘但由遮罩裁剪"
 		)
 		_check(
 			style.get_flag_clip_uv_radius() < 0.5,

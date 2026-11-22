@@ -34,6 +34,7 @@
 | `movement_speed` | float | 像素 / 游戏秒 |
 | `sight_range` | float | 视野半径 |
 | `member_unit_ids` | Array[String] | 成员单位 ID |
+| `prisoner_unit_ids` | Array[String] | 本部队关押的俘虏 Unit ID；与成员列表互斥，阶段 13 新增 |
 | `current_order` | enum | NONE / MOVE / HOLD / INTERACT / BATTLE / FOLLOW_PARTY |
 | `current_target_id` | String | 跟随/追击目标部队 ID；战斗中也会被清空 |
 | `movement_state` | enum | IDLE / MOVING |
@@ -93,6 +94,9 @@ party.member_unit_ids.has(unit.unit_id)
 - 阵亡单位由 `BattleManager` 经 `PartyManager.remove_member()` 移除，再从 `UnitManager` 删除；存活单位保留成员关系。
 - 部队全员阵亡后 `PartyData` 保留但成员为空，`battle_state = DISABLED`；空部队不再触发大地图交互，也不执行 AI。
 - 大地图 AI 只处理非玩家、`AVAILABLE` 且未在移动的部队；行为类型来自 `ai_type`。
+- 俘虏归属独立于成员关系：`unit.prisoner_owner_party_id == party.party_id ⇔ party.prisoner_unit_ids.has(unit.unit_id)`。
+- 任何单位不能同时出现在成员列表与俘虏列表；俘虏同一时间只能有一个关押部队。
+- 部队解散时，关押俘虏的 `prisoner_owner_party_id` 清空；俘虏 Unit 保留，不自动转为成员。
 
 ## 4. PartyManager API
 
@@ -108,7 +112,14 @@ party.member_unit_ids.has(unit.unit_id)
 | `remove_member(party_id, unit_id) -> bool` | 移除成员并清空归属；单位保留 |
 | `get_member_ids(party_id)` / `get_units_of_party(party_id)` | 获取成员 ID / 数据 |
 | `get_total_wage(party_id) -> int` | 汇总成员每日工资；只统计与展示，不自动扣除 |
-| `validate_membership_consistency() -> Array[String]` | 双向归属校验，空列表表示通过 |
+| `validate_membership_consistency() -> Array[String]` | 双向归属校验（含俘虏冲突），空列表表示通过 |
+| `get_prisoner_ids(party_id)` / `get_prisoner_units(party_id)` | 获取俘虏 ID / 数据 |
+| `is_prisoner(unit_id)` / `get_prisoner_owner_party_id(unit_id)` | 查询俘虏归属 |
+| `add_prisoner(party_id, unit_id) -> bool` | 加入俘虏；校验部队/单位存在、非任何部队成员、未被其他部队关押、非死亡 |
+| `transfer_prisoner(unit_id, target_party_id) -> bool` | 俘虏转押，保持双向一致 |
+| `remove_prisoner(party_id, unit_id) -> bool` | 从指定部队的俘虏列表移除并清空归属；Unit 保留 |
+| `release_prisoner(unit_id) -> bool` | 按当前归属释放俘虏 |
+| `sanitize_prisoner_ownership() -> Array[String]` | 读档后幂等清洗：成员身份优先、去重、清理悬空归属 |
 | `to_dict()` / `load_from_dict()` | 存档序列化；读档重复 ID 报错并跳过 |
 | `apply_runtime_defaults(player_party_id)` | 读档后补齐控制类型/部队类型；不修改成员、位置或路线 |
 
@@ -418,3 +429,20 @@ FiefRecruitmentManager / AdventurerRecruitmentManager
 - 增援提示使用 `leader_noble_id` 查找 `NobleData.display_name` 与 `HouseData.house_name`，再通过 `FamilyConfig.banner_texture_path` 取旗帜。
 - 部队悬浮与百科显示贵族名称、爵位与家族；部队本身不复制贵族状态。
 - 旧存档缺少 `leader_noble_id` 时读取 `leader_lord_id`，再缺失时政治关系回退到 `family_id` / 阵营。
+
+## 16. 俘虏列表与归属（阶段 13 新增）
+
+- `PartyData.prisoner_unit_ids` 是部队关押俘虏的唯一权威列表；`UnitData.prisoner_owner_party_id` 是反向归属。
+- 俘虏是独立 `UnitData`：唯一 ID、不可堆叠、保留等级/装备/属性；不是背包物品，也不进入 `member_unit_ids`。
+- 加入/转移/移除只能通过 `PartyManager` 的俘虏 API，禁止 UI 或其他系统直接改数组。
+- 俘虏不能战斗、移动、攻击、被治疗或领取工资；`remove_party()` 只清空归属，不删除 Unit。
+- 战斗结算由 `BattleManager` 调用 `add_prisoner()` 写入非玩家胜利方份额；玩家份额在确认后写入。
+- 读档流程：
+  1. 恢复 `UnitData` 与 `PartyData`；
+  2. 调用 `sanitize_prisoner_ownership()`：
+     - 若单位同时是成员，以成员身份为准并从俘虏列表移除；
+     - 去重；
+     - 清空不存在的部队/单位引用；
+     - 重复调用结果不变。
+- `validate_membership_consistency()` 额外报告：重复俘虏、成员/俘虏冲突、跨部队重复关押、缺失 Unit、归属字段与列表不一致。
+- 容量上限、逃跑、忠诚、叛乱与俘虏招募明确未实现（KI530/KI531）。

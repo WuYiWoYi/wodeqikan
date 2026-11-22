@@ -119,6 +119,14 @@ else:                       基础倍率（1 或 2）
 - 读档：`start_session()` 后恢复存档中的 `world_elapsed_seconds` 与 `world_base_speed`。
 - 读档会清除旧暂停原因；不恢复存档时的临时暂停原因。
 
+### 4.2 小时边界驱动的世界结算（阶段 13）
+
+- `WoundedHealingManager` 使用与日历相同的换算：`floor(world_elapsed_seconds / 6.0)` 得到累计游戏小时。
+- 每次世界 tick 检查是否跨过新的整小时；跨过 `n` 小时则一次性结算 `n * healing_per_hour` 点治疗。
+- 暂停时世界 tick 不推进，治疗也不推进；1x/2x 都按游戏小时获得相同治疗量。
+- `last_settled_hour` 持久化在 `time.healing_last_settled_hour`；读档缺失时以存档时刻所在小时为起点，不补算离线时间。
+- 该规则同样适用于 `SupplyManager` 的日边界结算与离屏战斗的小时结算：统一以 `world_elapsed_seconds` 换算，不由场景或 UI 自行累计。
+
 ## 5. 状态与规则
 
 | 状态 | WorldTime | SceneTime | 实现方式 |
@@ -166,6 +174,8 @@ else:                       基础倍率（1 或 2）
 
 - `time.world_elapsed_seconds`
 - `time.world_base_speed`
+- `time.supply_last_settled_day`（补给结算）
+- `time.healing_last_settled_hour`（伤兵治疗结算）
 
 暂停原因不存档；读档后由进入状态重新建立。保存面板打开时的暂停原因不会写入基础倍率。
 
@@ -183,6 +193,7 @@ else:                       基础倍率（1 或 2）
 | 游戏内日期 | 已实现：1103-01-01 起、30 天/月、12 月/年；大地图显示年月日 + 时间段 |
 | 时间段 | 已实现：清晨 / 上午 / 下午 / 黄昏 / 夜晚 / 深夜，集中配置 |
 | 日期驱动 | 统一由 `world_elapsed_seconds` 换算；没有系统自行累计日期 |
+| 伤兵治疗小时结算 | 已实现：整小时边界、暂停不推进、1x/2x 一致、读档不补算（`WoundedHealingManager`） |
 
 ## 9. 待确认
 

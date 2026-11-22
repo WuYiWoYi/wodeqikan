@@ -9,6 +9,7 @@ var unit_id: String = ""
 var _name_label: Label = null
 var _class_label: Label = null
 var _stats_label: Label = null
+var _status_label: Label = null
 var _selected: bool = false
 
 
@@ -18,7 +19,7 @@ func setup(unit: UnitData, config: UnitConfig) -> void:
 	text = ""
 	toggle_mode = true
 	focus_mode = Control.FOCUS_NONE
-	custom_minimum_size = Vector2(0.0, 66.0)
+	custom_minimum_size = Vector2(0.0, 84.0 if unit.is_wounded() else 66.0)
 	tooltip_text = "点击查看士兵详情"
 	_build(unit, config)
 	set_selected(false)
@@ -87,6 +88,16 @@ func _build(unit: UnitData, config: UnitConfig) -> void:
 	_stats_label.text = "HP %d/%d    攻击 %d" % [
 		unit.current_hp, unit.max_hp, unit.attack
 	]
+
+	# 伤兵是显式状态，必须在成员列表中可识别；永久死亡不会出现在这里。
+	_status_label = _make_label("", 13)
+	_status_label.name = "MemberStatus"
+	_status_label.visible = false
+	column.add_child(_status_label)
+	if unit.is_wounded():
+		_status_label.visible = true
+		_status_label.text = "伤兵（无法战斗，按小时恢复）"
+		_status_label.add_theme_color_override("font_color", Color("#e8a06a"))
 
 
 func _make_label(label_text: String, font_size: int) -> Label:

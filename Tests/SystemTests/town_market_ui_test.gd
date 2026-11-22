@@ -258,6 +258,8 @@ func _test_open_market_and_preview() -> void:
 	)
 	var count_before: int = _context.player_profile.get_item_count(HORSE_ID)
 	var gold_before: int = _context.player_profile.gold
+	# 前面的村庄交易已合法写入日志；这里只验证预览不新增日志。
+	var log_before: int = _context.world_log_manager.get_entry_count()
 
 	_press_first("MarketBuyButton_%s_*" % HORSE_ID)
 	_check(_market.get_preview_purchase_count(HORSE_ID) == 1, "购买预览数量增加 1")
@@ -276,7 +278,7 @@ func _test_open_market_and_preview() -> void:
 	)
 	_check(_context.player_profile.gold == gold_before, "交易预览不修改玩家金币")
 	_check(
-		_context.world_log_manager.get_entry_count() == 0,
+		_context.world_log_manager.get_entry_count() == log_before,
 		"交易预览不写世界日志"
 	)
 	_press_button("MarketResetButton")
@@ -289,6 +291,7 @@ func _test_cancel_keeps_real_data() -> void:
 	)
 	var count_before: int = _context.player_profile.get_item_count(HORSE_ID)
 	var gold_before: int = _context.player_profile.gold
+	var log_before: int = _context.world_log_manager.get_entry_count()
 	_press_button("MarketCancelButton")
 	_check(not _market.visible, "取消交易关闭市场")
 	_check(_settlement_panel.visible, "取消交易后恢复地点面板")
@@ -301,7 +304,10 @@ func _test_cancel_keeps_real_data() -> void:
 		"取消交易不修改玩家背包"
 	)
 	_check(_context.player_profile.gold == gold_before, "取消交易不修改金币")
-	_check(_context.world_log_manager.get_entry_count() == 0, "取消交易不写日志")
+	_check(
+		_context.world_log_manager.get_entry_count() == log_before,
+		"取消交易不写日志"
+	)
 	_check(
 		TimeManager.has_pause_reason(GameManager.PAUSE_REASON_UI_PANEL),
 		"返回地点面板后继续保持暂停"

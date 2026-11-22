@@ -8,9 +8,10 @@ extends RefCounted
 ## v5 增加贵族、家族与王国数据；旧存档的 lords 会迁移为 nobles。
 ## 阶段 11 增加 markets 字段（可选，缺失时按商品配置初始化），不提升 Schema。
 ## v6（阶段 12）增加独立马匹实例、村庄市场、NPC 背包/资金与每日补给结算日。
-## 读取时保留 v1 → v6 的浅迁移入口，缺失字段按安全默认值恢复。
+## v7（阶段 13）增加伤兵状态、部队俘虏列表、俘虏归属与伤兵治疗结算小时。
+## 读取时保留 v1 → v7 的浅迁移入口，缺失字段按安全默认值恢复。
 
-const CURRENT_SCHEMA_VERSION: int = 6
+const CURRENT_SCHEMA_VERSION: int = 7
 
 var schema_version: int = CURRENT_SCHEMA_VERSION
 var project_version: String = "0.2.0"
@@ -26,6 +27,9 @@ var id_counters: Dictionary = {}
 ## 上一次完成补给结算的游戏日（TimeManager total_days）。
 ## -1 表示旧存档尚未结算过，读档后以当前日作为起点。
 var supply_last_settled_day: int = -1
+## 阶段 13：上一次完成伤兵治疗结算的游戏小时（累计小时）。
+## -1 表示旧存档/新世界尚未初始化，读档后以当前小时为起点，不补发历史治疗。
+var healing_last_settled_hour: int = -1
 
 var player_party_id: String = ""
 var player: Dictionary = {}
@@ -68,6 +72,7 @@ func to_dict() -> Dictionary:
 			"world_elapsed_seconds": world_elapsed_seconds,
 			"world_base_speed": world_base_speed,
 			"supply_last_settled_day": supply_last_settled_day,
+			"healing_last_settled_hour": healing_last_settled_hour,
 		},
 		"id_counters": id_counters.duplicate(true),
 		"player": player_payload,
@@ -113,6 +118,9 @@ static func from_dict(payload: Dictionary) -> SaveData:
 	save.supply_last_settled_day = int(
 		time_block.get("supply_last_settled_day", -1)
 	)
+	save.healing_last_settled_hour = int(
+		time_block.get("healing_last_settled_hour", -1)
+	)
 
 	save.id_counters = _as_dict(payload.get("id_counters", {}))
 	save.player = _as_dict(payload.get("player", {}))
@@ -134,6 +142,10 @@ static func from_dict(payload: Dictionary) -> SaveData:
 	# Schema v1 -> v2 迁移：旧存档缺少 world 字段，保留原始 player 数据。
 	if save.schema_version < 2:
 		save.schema_version = 2
+	# v6 -> v7：缺失的伤兵/俘虏字段由 UnitData/PartyData 的默认值补齐；
+	# 归属双向校正由 PartyManager.sanitize_prisoner_ownership() 幂等完成。
+	if save.schema_version < 7:
+		save.schema_version = 7
 	# v4 -> v5：旧存档只有 lords，没有独立 nobles/houses/kingdoms；
 	# 具体政治数据由 WorldContext 在加载后迁移，不在这里伪造实体。
 	return save

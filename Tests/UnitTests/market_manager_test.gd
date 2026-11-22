@@ -121,15 +121,17 @@ func _test_village_supply_trade() -> void:
 
 
 func _test_sale() -> void:
+	var gold_before: int = _profile.gold
+	var log_before: int = _log.get_entry_count()
 	var result := _markets.execute_player_trade(
 		_town.settlement_id, {}, {HORSE_ID: 1}, _profile, "sell-1"
 	)
 	_check(bool(result.get("success", false)), "出售普通战马成功")
 	_check(_profile.get_item_count(HORSE_ID) == 0, "出售后玩家战马归零")
 	_check(_markets.get_stock(_town.settlement_id, HORSE_ID) == 3, "出售后市场库存恢复 1")
-	_check(_profile.gold == 970, "出售获得 70 金币")
+	_check(_profile.gold == gold_before + 70, "出售获得 70 金币")
 	_check(int(result.get("gold_received", 0)) == 70, "结果记录实际获得")
-	_check(_log.get_entry_count() == 2, "玩家出售写入一条世界日志")
+	_check(_log.get_entry_count() == log_before + 1, "玩家出售写入一条世界日志")
 	_check(
 		_log.get_entries().back().text.contains("出售了普通战马 ×1")
 			and _log.get_entries().back().text.contains("获得 70 金币"),
@@ -139,6 +141,8 @@ func _test_sale() -> void:
 
 func _test_mixed_trade() -> void:
 	_profile.add_item(HORSE_ID, 1)
+	var gold_before: int = _profile.gold
+	var log_before: int = _log.get_entry_count()
 	var result := _markets.execute_player_trade(
 		_town.settlement_id,
 		{HORSE_ID: 2},
@@ -149,9 +153,9 @@ func _test_mixed_trade() -> void:
 	_check(bool(result.get("success", false)), "混合购买与出售成功")
 	_check(_profile.get_item_count(HORSE_ID) == 2, "混合交易后玩家净增 1 匹战马")
 	_check(_markets.get_stock(_town.settlement_id, HORSE_ID) == 2, "混合交易后市场净减 1")
-	_check(_profile.gold == 840, "混合交易最终支付 130 金币")
+	_check(_profile.gold == gold_before - 130, "混合交易最终支付 130 金币")
 	_check(int(result.get("net_gold", 0)) == 130, "混合交易净金额为 130")
-	_check(_log.get_entry_count() == 3, "混合交易写入一条日志")
+	_check(_log.get_entry_count() == log_before + 1, "混合交易写入一条日志")
 	_check(
 		_log.get_entries().back().text.contains("最终支付 130 金币"),
 		"混合日志记录最终支付金额"

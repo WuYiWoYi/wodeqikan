@@ -237,8 +237,8 @@ func get_sale_counts() -> Dictionary:
 	for item_id: String in _initial_player_counts:
 		if MountInstanceData.is_mount_item(item_id):
 			continue
-		var delta: int = get_player_count(item_id) \
-			- int(_initial_player_counts.get(item_id, 0))
+		var delta: int = int(_initial_player_counts.get(item_id, 0)) \
+			- get_player_count(item_id)
 		if delta > 0:
 			result[item_id] = delta
 	return result

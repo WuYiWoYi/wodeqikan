@@ -27,9 +27,23 @@ var player_won: bool = false
 var side_party_ids: Dictionary = {}
 ## 每个参战部队的快照：party_id / faction_id / side_index / status。
 var participants: Array[Dictionary] = []
-## party_id -> 阵亡/存活人数
+## party_id -> 永久阵亡 / 伤兵 / 存活人数。
+## casualties 只统计永久死亡，伤兵单独记录，仍留在原部队。
 var casualties: Dictionary = {}
+var wounded: Dictionary = {}
 var survivors: Dictionary = {}
+
+## 阶段 13：可分配俘虏（战败方伤兵）与胜利方分配结果。
+## 个体顺序稳定，分配结果只由 battle_id 与真实参战记录决定。
+var prisoner_pool: Array[String] = []
+## party_id -> Array[String]；所有胜利部队分配到的俘虏个体。
+var prisoner_allocations: Dictionary = {}
+## party_id -> 有效参战人数（实际加入本场战斗的单位，含增援）。
+var participant_unit_counts: Dictionary = {}
+## 玩家部队的俘虏是否已经确认提交；防止战后界面重复结算。
+var player_prisoners_committed: bool = false
+## 参战人数总和为 0 时的异常标记；此时按稳定顺序兜底分配。
+var prisoner_allocation_degraded: bool = false
 
 ## unit_id -> 获得经验；party_id -> 该部队总经验。
 var exp_gained_by_unit: Dictionary = {}
@@ -53,6 +67,10 @@ func get_party_survivors(party_id: String) -> int:
 	return int(survivors.get(party_id, 0))
 
 
+func get_party_wounded(party_id: String) -> int:
+	return int(wounded.get(party_id, 0))
+
+
 func get_side_party_ids(side_index: int) -> Array[String]:
 	var ids := side_party_ids.get(side_index, []) as Array[String]
 	return ids.duplicate()
@@ -69,6 +87,31 @@ func get_side_survivors(side_index: int) -> int:
 	var total: int = 0
 	for party_id: String in get_side_party_ids(side_index):
 		total += get_party_survivors(party_id)
+	return total
+
+
+## 指定部队在本场战斗分配到的俘虏 ID 副本。
+func get_prisoners_for_party(party_id: String) -> Array[String]:
+	var ids: Array[String] = []
+	var raw: Variant = prisoner_allocations.get(party_id, [])
+	if raw is Array:
+		for value: Variant in raw:
+			ids.append(str(value))
+	return ids
+
+
+func get_total_prisoners() -> int:
+	return prisoner_pool.size()
+
+
+func get_participant_unit_count(party_id: String) -> int:
+	return int(participant_unit_counts.get(party_id, 0))
+
+
+func get_side_wounded(side_index: int) -> int:
+	var total: int = 0
+	for party_id: String in get_side_party_ids(side_index):
+		total += get_party_wounded(party_id)
 	return total
 
 
@@ -98,7 +141,13 @@ func to_dict() -> Dictionary:
 		"side_party_ids": side_party_ids.duplicate(true),
 		"participants": participants.duplicate(true),
 		"casualties": casualties.duplicate(true),
+		"wounded": wounded.duplicate(true),
 		"survivors": survivors.duplicate(true),
+		"prisoner_pool": prisoner_pool.duplicate(),
+		"prisoner_allocations": prisoner_allocations.duplicate(true),
+		"participant_unit_counts": participant_unit_counts.duplicate(true),
+		"player_prisoners_committed": player_prisoners_committed,
+		"prisoner_allocation_degraded": prisoner_allocation_degraded,
 		"exp_gained_by_unit": exp_gained_by_unit.duplicate(true),
 		"exp_gained_by_party": exp_gained_by_party.duplicate(true),
 		"player_exp_gained": player_exp_gained,

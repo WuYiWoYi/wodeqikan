@@ -4,6 +4,55 @@
 
 ---
 
+## 2026-11-22 · 阶段 13：大地图部队展示、伤兵恢复与俘虏系统
+
+### 新增
+
+- `WoundedConfig`（`Data/Combat/wounded_config.tres`）：按 tier 集中配置负伤概率，默认 1/2/3 级 = 50%/60%/80%，可整体禁用。
+- `HealingConfig`（`Data/Combat/healing_config.tres`）：每游戏小时基础治疗点与预留药物加成。
+- `PrisonerPriceConfig`（`Data/Settlements/prisoner_price_config.tres`）：按单位等级集中配置俘虏售价，默认 10/20/30 金币。
+- `WoundedHealingManager`：按 `WorldTime` 整小时结算的伤兵顺序治疗管理器，接入 `WorldContext` 与 `WorldSimulation`。
+- `PrisonerTradeManager`：城镇酒馆出售俘虏的原子业务入口，校验、去重、结算与售出状态写入。
+- `SettlementStationedBar`：地点下方停留部队家族旗帜条；无圆形底盘、自动换行、地点间隔离。
+- `PrisonerSelectionPanel`：战后俘虏选择界面（左待接收/右已有，支持转移、撤回、重置，确认才提交）。
+- `TavernPanel`：城镇酒馆菜单、出售俘虏双栏界面、雇佣兵信息占位与离开。
+- `UnitData` 新增 `Status.WOUNDED`、`prisoner_owner_party_id`、`sold_to_settlement_id` 及对应状态方法。
+- `PartyData.prisoner_unit_ids` 与 `PartyManager` 俘虏 API（添加/转移/移除/释放、一致性校验与幂等清洗）。
+- `BattleResultData` 新增 `prisoner_pool`、`prisoner_allocations`、`participant_unit_counts`、`player_prisoners_committed`、`prisoner_allocation_degraded`。
+- `BattleManager` 新增负伤判定、最大余数分配、待玩家确认份额、原子提交/回滚与未接收俘虏释放。
+- `SaveData` v7：伤兵状态/HP、俘虏归属与列表、`healing_last_settled_hour`、村庄候选人字段。
+- 测试：`wounded_system_test`、`wounded_healing_test`、`stage13_village_candidates_test`、`stage13_world_map_ui_test`、`stage13_prisoner_test`、`stage13_prisoner_ui_flow_test`、`stage13_tavern_test`。
+
+### 变更
+
+- 战斗结算把“HP≤0 即永久死亡”改为“按 tier 概率负伤，否则永久死亡”；玩家角色仍永久死亡。
+- 伤兵保留原部队成员身份和数据，HP=0，不能参战/移动/攻击；治疗满血后自动恢复 `ACTIVE`。
+- 战败方伤兵进入俘虏池；胜利方按实际参战单位数（含增援，非存活数）分配，玩家份额需在战后界面确认。
+- 地点标记优先显示家族旗帜；家族归属变化时刷新，无家族时保留原建筑美术。
+- 停留在地点交互范围内的部队隐藏圆形标记，改在地点下方显示家族旗帜条；离开/解散/转移/摧毁后恢复。
+- 玩家 UI 与悬浮提示统一显示最终移动速度，静止时也显示。
+- 村庄初始化时生成初始冒险者，复用既有候选人数据与招募流程。
+- 城镇地点面板新增酒馆入口；出售俘虏价格不再散落在 UI 中。
+- 存档 Schema 6 → 7；v6 及更早存档读取时执行幂等默认值与俘虏归属清洗。
+
+### 决策
+
+- D152：负伤概率只由 `WoundedConfig` 提供，战斗结算统一读取 tier 概率。
+- D153：伤兵治疗只由 `WorldTime` 整小时边界驱动，暂停不推进，治疗点按成员顺序消耗并允许溢出。
+- D154：俘虏池只取战败方伤兵；胜利方份额按实际参战单位数用最大余数法分配，平局按稳定 party_id。
+- D155：玩家俘虏份额先挂起，确认时原子提交；取消/未接收单位释放并移出世界。
+- D156：俘虏价格集中配置；酒馆出售必须一次性原子结算，售出单位进入 `sold_to_settlement_id` 非玩家状态。
+- D157：存档 Schema v7 与伤兵/俘虏/治疗进度迁移；读档清洗保证成员与俘虏互斥、无重复 Unit。
+
+### 验证
+
+- 已运行本阶段相关测试：`wounded_system_test`、`wounded_healing_test`、`stage13_village_candidates_test`、`stage13_world_map_ui_test`、`stage13_prisoner_test`、`stage13_prisoner_ui_flow_test`、`stage13_tavern_test`，以及战斗结算、存档、政治层级、市场与部队架构回归套件，均通过。
+- 已修复 `TradeSession.get_sale_counts()` 买卖方向相反导致村庄出售被当成购买的既有缺陷。
+- `supply_manager_test` 仍有一条与阶段 13 无关的 NPC 草料缺口断言失败，记录于 `Known_Issues.md`。
+- 未改变无关的战斗/移动/AI 架构。
+
+---
+
 ## 2026-11-22 · 阶段 12：马匹个体、补给消耗与村庄/城镇交易
 
 ### 新增

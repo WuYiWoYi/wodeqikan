@@ -99,6 +99,8 @@ var movement_speed: float = 10.0
 var sight_range: float = 40.0
 
 var member_unit_ids: Array[String] = []
+## 阶段 13：本部队持有的俘虏。俘虏与成员互斥，必须经 PartyManager 修改。
+var prisoner_unit_ids: Array[String] = []
 var current_order: OrderType = OrderType.NONE
 var current_target_id: String = ""
 var movement_state: MovementState = MovementState.IDLE
@@ -164,6 +166,10 @@ var item_counts: Dictionary:
 
 func has_member(unit_id: String) -> bool:
 	return member_unit_ids.has(unit_id)
+
+
+func has_prisoner(unit_id: String) -> bool:
+	return prisoner_unit_ids.has(unit_id)
 
 
 func is_available_for_world() -> bool:
@@ -341,6 +347,7 @@ func to_dict() -> Dictionary:
 		"movement_speed": movement_speed,
 		"sight_range": sight_range,
 		"member_unit_ids": member_unit_ids.duplicate(),
+		"prisoner_unit_ids": prisoner_unit_ids.duplicate(),
 		"current_order": int(current_order),
 		"current_target_id": current_target_id,
 		"movement_state": int(movement_state),
@@ -399,6 +406,14 @@ static func from_dict(data: Dictionary) -> PartyData:
 	if member_values is Array:
 		for value: Variant in member_values:
 			party.member_unit_ids.append(str(value))
+
+	# 阶段 13：旧存档没有俘虏列表。读档后由 WorldContext 统一校验归属。
+	var prisoner_values: Variant = data.get("prisoner_unit_ids", [])
+	if prisoner_values is Array:
+		for value: Variant in prisoner_values:
+			var prisoner_id: String = str(value)
+			if not prisoner_id.is_empty() and not party.prisoner_unit_ids.has(prisoner_id):
+				party.prisoner_unit_ids.append(prisoner_id)
 
 	var ai_value: int = int(data.get("ai_type", PartyAIType.NONE))
 	if ai_value < PartyAIType.NONE or ai_value > PartyAIType.GUARD:

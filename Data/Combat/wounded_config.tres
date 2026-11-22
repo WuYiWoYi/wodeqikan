@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="WoundedConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/wounded_config.gd" id="1_woundedconfig"]
+
+[resource]
+script = ExtResource("1_woundedconfig")
+enabled = true
+tier_wounded_chances = Array[float]([0.5, 0.6, 0.8])

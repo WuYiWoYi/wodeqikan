@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="HealingConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/healing_config.gd" id="1_healingconfig"]
+
+[resource]
+script = ExtResource("1_healingconfig")
+base_healing_per_hour = 1
+medicine_healing_bonus = 0

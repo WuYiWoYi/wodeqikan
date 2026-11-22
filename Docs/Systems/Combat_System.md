@@ -3,7 +3,7 @@
 **核心数据：** `Scripts/Systems/Combat/battle_session.gd`、`battle_unit_state.gd`
 **核心逻辑：** `Scripts/Systems/Combat/battle_manager.gd`
 **场景与表现：** `Scripts/UI/Battle/battle_scene.gd`、`Scripts/Systems/Combat/unit_actor.gd`、`unit_controller.gd`
-**状态：** 双方/多方实时战斗、多场 AI 离屏战斗并行、按游戏小时结算的离屏战斗、1800×1024 战场与参数化部署、增援加入既有会话与后方展开、增援提示、360°定向矩形攻击、玩家自由攻击、武器决定攻击距离、实体碰撞、统一攻击规则、多人围攻、控制权转移与观战、双方半场列阵/接敌放松/目标分流/局部避让、克制步态/待机动画、跃马式马腿动画、长矛前后摇与攻击后保持、骑乘战斗加速、左右手武器独立层级、人物头部/头盔分离、满血隐藏生命条、1920×1080 显示、统一 BattleResult、经验/奖励与撤退已实现；复杂战术指挥、显式攻击槽位、受击动画与士气未实现
+**状态：** 双方/多方实时战斗、多场 AI 离屏战斗并行、按游戏小时结算的离屏战斗、1800×1024 战场与参数化部署、增援加入既有会话与后方展开、增援提示、360°定向矩形攻击、玩家自由攻击、武器决定攻击距离、实体碰撞、统一攻击规则、多人围攻、控制权转移与观战、双方半场列阵/接敌放松/目标分流/局部避让、克制步态/待机动画、跃马式马腿动画、长矛前后摇与攻击后保持、骑乘战斗加速、左右手武器独立层级、人物头部/头盔分离、满血隐藏生命条、1920×1080 显示、统一 BattleResult、经验/奖励、撤退、按 tier 负伤判定、俘虏池分配与玩家战后接收已实现；复杂战术指挥、显式攻击槽位、受击动画与士气未实现
 
 > 本文是项目实际的战斗系统文档。任务书中提到的 `Battle_System.md` 与本文对应，未另建重复文档。
 
@@ -372,20 +372,24 @@ BattleScene (Node2D)
 ### 6.2 结算顺序
 
 1. 通过 `get_battle(battle_id)` 从 `active_battles` 取会话，防止无效 ID 和重复结算。
-2. 根据结果确定获胜/失败侧，生成 `BattleResultData`（预览或最终）。
-3. 基于战斗中的 `BattleUnitState` 统计各部队阵亡/存活。
-4. 结算经验：存活单位基础经验 + 获胜侧额外经验；通过 `UnitManager.add_exp()` 升级。
-5. 结算奖励：仅玩家参与且玩家所在侧获胜时，生成金币/装备战利品并写入 `PlayerProfile`。
-6. 对每个 `BattleUnitState`：
-   - 存活：`UnitData.current_hp = battle_hp`（clamp 到 `[0, max_hp]`）。
-   - 阵亡：`current_hp = 0`，经 `PartyManager.remove_member()` 清空归属，再 `UnitManager.remove_unit()` 删除数据，广播 `unit_died`。
-7. 解锁部队：有存活成员的恢复为 `AVAILABLE`，全员阵亡的置为 `DISABLED`；清空当前命令与移动目标。
-8. 将 `BattleResultData` 标记为 finalized，保存到 `session.final_result`；从 `active_battles` 与 `party_battle_lookup` 中只移除本场战斗，若它是玩家屏幕战斗再清理 `current_battle`。
-9. 移除 `battle` 暂停原因，恢复此前世界时间状态；广播 `battle_finished`。
-10. 场景控制器切换回大地图。
+2. 对每个 HP≤0 的非玩家单位执行一次负伤判定（见第 16 节），结果写入 `BattleUnitState.wounded` 与 `wounded_decided`；预览与最终结算共用，不重复掷骰。
+3. 根据结果确定获胜/失败侧，生成 `BattleResultData`（预览或最终）。
+4. 基于战斗中的 `BattleUnitState` 统计各部队永久阵亡/伤兵/存活。
+5. 结算经验：仅存活单位获得基础经验 + 获胜侧额外经验；伤兵与阵亡均为 0；通过 `UnitManager.add_exp()` 升级。
+6. 结算奖励：仅玩家参与且玩家所在侧获胜时，生成金币/装备战利品并写入 `PlayerProfile`；伤兵保留装备，不进入战利品。
+7. 若胜利成立，构建俘虏池（战败方伤兵）并按实际参战单位数分配（见第 17 节）。
+8. 对每个 `BattleUnitState`：
+   - 存活：`UnitData.current_hp = battle_hp`（clamp 到 `[0, max_hp]`），状态恢复 `ACTIVE`。
+   - 伤兵：`mark_wounded()`，HP=0，保留原部队成员身份、等级、装备与经验。
+   - 永久阵亡：`mark_dead()`，经 `PartyManager.remove_member()` 清空归属，再 `UnitManager.remove_unit()` 删除数据，广播 `unit_died`。
+9. 领取俘虏：非玩家胜利方立即写入 `PartyManager.add_prisoner()`；玩家份额挂起，等待战后选择界面确认。
+10. 解锁部队：有可行动成员的恢复为 `AVAILABLE`；只有伤兵的部队保留成员但暂停移动/AI，等待治疗；全员永久阵亡的置为 `DISABLED`。
+11. 将 `BattleResultData` 标记为 finalized，保存到 `session.final_result`；从 `active_battles` 与 `party_battle_lookup` 中只移除本场战斗，若它是玩家屏幕战斗再清理 `current_battle`。
+12. 移除 `battle` 暂停原因，恢复此前世界时间状态；广播 `battle_finished`。
+13. 场景控制器切换回大地图；若玩家有未确认俘虏份额，先显示 `PrisonerSelectionPanel`。
 
-阵亡单位不会以“0 HP 但仍属于部队”的形式残留；存活单位保留原 `unit_id` 与成员关系。
-同一场战斗只能结算一次，重复调用不会再次发经验或奖励。
+阵亡单位不会以“0 HP 但仍属于部队”的形式残留；伤兵以 `WOUNDED` 状态保留；存活与伤兵都保留原 `unit_id` 与成员关系。
+同一场战斗只能结算一次，重复调用不会再次发经验、奖励或俘虏。
 
 ### 6.3 经验与奖励规则
 
@@ -393,11 +397,11 @@ BattleScene (Node2D)
 |---|---|
 | 存活经验 | 参战且存活：+10 |
 | 获胜额外经验 | 获胜侧存活单位再 +20 |
-| 阵亡经验 | 0 |
+| 阵亡/伤兵经验 | 0 |
 | 中止战斗 | 不发放经验 |
 | 撤退 | 存活单位仅获得基础经验，无获胜奖励 |
 | 金币 | 玩家参与且获胜：50 + 敌方阵亡人数 × 5 |
-| 战利品 | 从阵亡敌方单位装备中取最多 3 件唯一装备 ID |
+| 战利品 | 从永久阵亡敌方单位装备中取最多 3 件唯一装备 ID；伤兵不参与掉落 |
 | 玩家未参与 | NPC 对 NPC 战斗只发经验，不发玩家奖励 |
 
 经验与奖励集中配置在 `BattleManager` 常量中；同一场战斗只应用一次。
@@ -724,3 +728,64 @@ can_ranged_attack(a, b)        → 攻击者存活 ∧ 目标存活 ∧ 敌对 �
 - 大地图战斗摘要只在悬浮对应 `BattleMarker` 时显示，按 `side_index` 分列部队与兵种；离开或结束即隐藏。
 - 玩家主动攻击先经过二次确认；确认时重校验有效性、占用、关系与距离，取消零副作用，重复确认不产生第二场战斗。
 - 加入友军既有战斗不弹攻击确认。
+
+## 16. 战斗负伤判定（阶段 13）
+
+### 16.1 配置
+
+- `WoundedConfig`（`Data/Combat/wounded_config.tres`）是唯一概率来源：
+  - `tier_wounded_chances[0..2]` 默认 `[0.5, 0.6, 0.8]`；
+  - `enabled=false` 时所有 HP≤0 单位永久死亡；
+  - `get_wounded_chance(tier)` 对越界 tier 取边界值，并 clamp 到 `[0,1]`。
+- `BattleManager.set_wounded_config()` 注入并 `sanitize()`；`_wounded_rng` 使用固定初始种子，测试可通过 `set_wounded_rng_seed()` 复现。
+
+### 16.2 判定时机与顺序
+
+- `build_battle_result()` 在统计伤亡前调用 `_decide_wounded_outcomes(session)`。
+- 只处理 `wounded_decided == false` 且 `alive == false` 或 `battle_hp <= 0` 的单位。
+- 玩家角色（`is_player_character`）不掷骰，按永久死亡处理。
+- 有 Unit 且配置启用时按 `UnitConfig.tier` 取概率；否则永久死亡。
+- 结果写回 `BattleUnitState.wounded`；预览与最终结算共享，不会二次随机。
+
+### 16.3 写回与后续
+
+- `_settle_session()`：
+  - 伤兵调用 `UnitData.mark_wounded()`，HP=0，并防御性确保仍属于 `state.party_id`；
+  - 永久死亡调用 `mark_dead()` 后移除成员并删除 Unit；
+  - 存活写回 HP 并恢复 `ACTIVE`。
+- `BattleResultData.wounded[party_id]` 与 `casualties`/`survivors` 分开统计。
+- 伤兵不获得经验、不进入战利品、不生成可战斗控制器；只含伤兵的部队暂停大地图移动/AI。
+- 离屏战斗仍按小时移除 0 HP 单位；最终结算时伤兵会补回原部队，再进入俘虏池（KI401）。
+
+## 17. 俘虏分配与玩家接收（阶段 13）
+
+### 17.1 俘虏池
+
+- 仅在胜利成立（非中止/撤退/平局）时构建。
+- 池 = 战败侧所有 `BattleUnitState.wounded == true` 的单位，按稳定顺序（side/party/unit ID）排序。
+- 永久死亡单位不进入池；玩家角色不会成为俘虏。
+
+### 17.2 分配算法
+
+```text
+share_i = floor(P * N_i / N)
+```
+
+- `P` = 俘虏池大小；`N_i` = 第 i 个胜利方部队**实际参战单位数**（含中途加入与增援，每单位只计一次，不使用存活数）；`N` = 胜利方参战总数。
+- 先取整，再按余数降序补足；余数相同按稳定 `party_id` 升序。
+- 份额之和恒等于 `P`；单胜利方获得全部；`N=0` 时走显式回退并标记 `prisoner_allocation_degraded`。
+- 个体按稳定顺序分配；不依赖 Dictionary 遍历顺序。
+
+### 17.3 接收与确认
+
+- 非玩家胜利方：`_claim_battle_prisoners()` 立即 `add_prisoner()`。
+- 玩家胜利方：份额保存在 `_pending_prisoner_settlements[battle_id]`，通过 `has_pending_prisoner_selection()` / `get_pending_player_prisoners()` 查询。
+- `commit_player_prisoners(battle_id, accepted)`：
+  1. 归一化并去重接受列表；
+  2. 校验每个单位在份额内、非成员、未被其他部队关押、非死亡；
+  3. 全部通过后逐个 `add_prisoner()`，任一失败回滚；
+  4. 未接收单位经 `_release_unclaimed_prisoner()` 清除归属并从 `UnitManager` 删除；
+  5. 写入 `player_prisoners_committed = true` 并移除挂起记录；重复提交返回 false。
+- `PrisonerSelectionPanel` 只维护预览：左侧为可分俘虏，右侧为玩家已有俘虏；支持转移、撤回与重置，确认只发出信号，由 `BattleScene` 调用管理器提交。
+- 失败方、无俘虏或玩家无份额时不显示选择界面，直接返回大地图。
+- 详细数据关系见 [Party_System.md](Party_System.md) 第 16 节与 [Wounded_Prisoner_System.md](Wounded_Prisoner_System.md)。

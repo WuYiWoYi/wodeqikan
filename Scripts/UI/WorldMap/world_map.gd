@@ -40,6 +40,11 @@ const NPC_DIALOGUE_BOTTOM_MARGIN: float = 48.0
 const NPC_DIALOGUE_PORTRAIT_SIZE := Vector2(180.0, 220.0)
 ## 固定屏幕地点名称与圆形标记顶部之间的屏幕间距（像素）。
 const SETTLEMENT_NAME_GAP_ABOVE_MARKER: float = 10.0
+## 部队与建筑的实际距离小于该值时视为“停留在地点上”。
+## 只比较当前位置，不读取移动目标；移动中的部队不算停留。
+const STATIONED_PARTY_RADIUS: float = 26.0
+## 停留部队旗帜条与建筑美术之间的屏幕间距。
+const STATIONED_BAR_GAP: float = 8.0
 
 ## 大地图镜头模式：默认平滑跟随玩家；按 WASD 后自由移动，直到玩家重新下达移动/跟随指令。
 enum CameraMode {
@@ -81,6 +86,7 @@ var _settlement_recruit_button: Button = null
 var _settlement_recruit_status_label: Label = null
 var _settlement_enter_button: Button = null
 var _settlement_market_button: Button = null
+var _settlement_tavern_button: Button = null
 var _settlement_pause_active: bool = false
 var _settlement_entry_pending: bool = false
 
@@ -109,6 +115,8 @@ var _party_manage_pause_active: bool = false
 var _inventory_panel: InventoryPanel = null
 var _inventory_pause_active: bool = false
 var _market_panel: MarketPanel = null
+## 阶段 13：城镇酒馆二级界面。
+var _tavern_panel: TavernPanel = null
 
 var _encounter_panel: PanelContainer = null
 var _encounter_portrait: EncounterPortrait = null
@@ -152,6 +160,10 @@ var _party_marker_style: PartyMarkerStyle = null
 ## 固定屏幕层的地点名称标签：{ settlement_id: SettlementNameTag }。
 var _settlement_name_layer: Control = null
 var _settlement_name_tags: Dictionary = {}
+## 地点下方的停留部队旗帜条：{ settlement_id: SettlementStationedBar }。
+var _stationed_bars: Dictionary = {}
+## 本帧停留在建筑上的部队：{ party_id: settlement_id }。用于隐藏普通圆形图标。
+var _stationed_party_ids: Dictionary = {}
 ## 每场战斗独立的标记：{ battle_id: BattleMarker }。
 var _battle_markers: Dictionary = {}
 var _battle_summary_panel: PanelContainer = null
@@ -285,6 +297,8 @@ func _process(delta: float) -> void:
 
 	_update_camera(delta)
 	_update_settlement_name_tags()
+	# 先计算停留部队，再更新战斗/图标显示，保证同一支部队不会同时出现在两处。
+	_update_stationed_parties()
 	_update_player_info()
 	_update_battle_display()
 	_update_focus_state()
@@ -510,7 +524,11 @@ func _is_focusing_party() -> bool:
 
 
 func _find_party_at(world_position: Vector2) -> PartyData:
-	return _find_party_within(world_position, PARTY_CLICK_RADIUS)
+	var party := _find_party_within(world_position, PARTY_CLICK_RADIUS)
+	# 停留部队的圆形图标已隐藏，点击时让位给建筑本身。
+	if party != null and _stationed_party_ids.has(party.party_id):
+		return null
+	return party
 
 
 ## 返回点击位置附近最近的地点；只用于主动点击判定，不做逐帧自动检测。
@@ -612,6 +630,8 @@ func _build_settlement_name_tags() -> void:
 	_set_full_rect(_settlement_name_layer)
 	_ui_root.add_child(_settlement_name_layer)
 	_settlement_name_tags.clear()
+	_stationed_bars.clear()
+	_stationed_party_ids.clear()
 
 	for settlement: SettlementData in _context.settlement_manager.get_all_settlements():
 		var tag := SettlementNameTag.new()
@@ -620,6 +640,12 @@ func _build_settlement_name_tags() -> void:
 		# 徽章读取地点实际家族归属；无家族时仅显示名称。
 		tag.setup(settlement, _get_family_config(settlement.family_id))
 		_settlement_name_tags[settlement.settlement_id] = tag
+
+		# 每个地点独立的停留部队旗帜条；初始为空且隐藏。
+		var bar := SettlementStationedBar.new()
+		bar.name = "StationedPartyBar_%s" % settlement.settlement_id
+		_settlement_name_layer.add_child(bar)
+		_stationed_bars[settlement.settlement_id] = bar
 	# 名称层放在 UI 最底层，避免覆盖地点/部队/日志面板。
 	_ui_root.move_child(_settlement_name_layer, 0)
 	_update_settlement_name_tags()
@@ -637,6 +663,11 @@ func _update_settlement_name_tags() -> void:
 		) as SettlementNameTag
 		if tag == null:
 			continue
+		# 建筑所属家族变化时重建徽章，避免继续显示旧家族旗帜。
+		if tag.get_bound_family_id() != settlement.family_id:
+			tag.setup(settlement, _get_family_config(settlement.family_id))
+		# 名称文本/徽章尺寸变化后同步半透明底板。
+		tag.update_background_layout()
 		var screen_position: Vector2 = (
 			canvas_transform * settlement.world_position
 		)
@@ -651,6 +682,128 @@ func _update_settlement_name_tags() -> void:
 		)
 		tag.visible = visible_rect.has_point(screen_position)
 		tag.set_screen_position(anchor)
+
+
+## 每帧重新计算“停留在地点上”的部队。
+## 判定只看部队当前世界坐标与建筑的距离；移动中的部队不算停留。
+## 停留部队隐藏普通圆形图标，改为在对应建筑下方显示家族旗帜。
+func _update_stationed_parties() -> void:
+	_stationed_party_ids.clear()
+	if _context == null or _settlement_name_layer == null:
+		return
+
+	var groups: Dictionary = {}
+	# 按 party_id 稳定排序，保证旗帜顺序可复现，不依赖字典遍历顺序。
+	var parties: Array[PartyData] = []
+	for party: PartyData in _context.party_manager.get_all_parties():
+		if party != null:
+			parties.append(party)
+	parties.sort_custom(
+		func(a: PartyData, b: PartyData) -> bool:
+			return a.party_id < b.party_id
+	)
+
+	for party: PartyData in parties:
+		if not _is_party_stationed(party):
+			continue
+		var settlement := _find_stationed_settlement(party.world_position)
+		if settlement == null:
+			continue
+		_stationed_party_ids[party.party_id] = settlement.settlement_id
+		if not groups.has(settlement.settlement_id):
+			groups[settlement.settlement_id] = []
+		(groups[settlement.settlement_id] as Array).append(
+			_build_stationed_banner_entry(party)
+		)
+
+	var canvas_transform := get_viewport().get_canvas_transform()
+	for settlement: SettlementData in _context.settlement_manager.get_all_settlements():
+		var bar := _stationed_bars.get(settlement.settlement_id) as SettlementStationedBar
+		if bar == null:
+			continue
+		var entries: Array[Dictionary] = []
+		if groups.has(settlement.settlement_id):
+			for entry: Variant in groups[settlement.settlement_id]:
+				entries.append(entry as Dictionary)
+		bar.set_entries(entries)
+		if entries.is_empty():
+			bar.visible = false
+			continue
+		var screen_position: Vector2 = (
+			canvas_transform * settlement.world_position
+		)
+		var marker_radius: float = SettlementIcon.get_name_anchor_radius(
+			settlement.settlement_type
+		) * camera.zoom.y
+		bar.position = screen_position + Vector2(
+			-bar.size.x * 0.5, marker_radius + STATIONED_BAR_GAP
+		)
+		# 可见性只由“是否有停留部队”决定；离开屏幕的旗帜由引擎自然裁掉。
+		bar.visible = true
+
+
+## 停留判定：成员非空、未参与战斗、当前不在移动、且坐标贴近某个建筑。
+func _is_party_stationed(party: PartyData) -> bool:
+	if party == null or party.member_unit_ids.is_empty():
+		return false
+	if party.movement_state == PartyData.MovementState.MOVING:
+		return false
+	if not party.is_available_for_world():
+		return false
+	if _context == null or _context.battle_manager == null:
+		return false
+	if _context.battle_manager.get_battle_for_party(party.party_id) != null:
+		return false
+	return _find_stationed_settlement(party.world_position) != null
+
+
+func _find_stationed_settlement(world_position: Vector2) -> SettlementData:
+	if _context == null:
+		return null
+	var nearest: SettlementData = null
+	var nearest_distance: float = STATIONED_PARTY_RADIUS
+	for settlement: SettlementData in _context.settlement_manager.get_all_settlements():
+		if settlement == null:
+			continue
+		var distance := settlement.world_position.distance_to(world_position)
+		if distance <= nearest_distance:
+			nearest_distance = distance
+			nearest = settlement
+	return nearest
+
+
+## 停留部队旗帜只读取部队/家族数据，不生成圆形底盘。
+func _build_stationed_banner_entry(party: PartyData) -> Dictionary:
+	var family := _get_family_config(party.family_id)
+	var texture_path: String = party.banner_texture_path
+	if texture_path.is_empty() and family != null:
+		texture_path = family.banner_texture_path
+	var color: Color = Color("#7a4a42")
+	if family != null:
+		color = family.primary_color
+	else:
+		color = _get_party_marker_style().get_faction_color(
+			party.faction_id, color
+		)
+	return {
+		"party_id": party.party_id,
+		"display_name": party.party_name,
+		"texture": _load_texture(texture_path),
+		"texture_path": texture_path,
+		"color": color,
+	}
+
+
+func get_stationed_bar(settlement_id: String) -> SettlementStationedBar:
+	return _stationed_bars.get(settlement_id) as SettlementStationedBar
+
+
+func get_stationed_settlement_id(party_id: String) -> String:
+	return str(_stationed_party_ids.get(party_id, ""))
+
+
+func is_party_stationed(party_id: String) -> bool:
+	return _stationed_party_ids.has(party_id)
 
 
 func get_settlement_name_tag(settlement_id: String) -> SettlementNameTag:
@@ -685,6 +838,7 @@ func _build_ui() -> void:
 	_build_encyclopedia_panel()
 	# 市场是覆盖层，最后加入以保证显示在地点/背包面板之上。
 	_build_market_panel()
+	_build_tavern_panel()
 
 
 func _build_top_bar() -> void:
@@ -858,6 +1012,12 @@ func _build_settlement_panel() -> void:
 	_settlement_market_button.visible = false
 	_settlement_market_button.pressed.connect(_on_settlement_market_pressed)
 	column.add_child(_settlement_market_button)
+
+	_settlement_tavern_button = _make_button("进入酒馆", "SettlementTavernButton")
+	_settlement_tavern_button.custom_minimum_size = Vector2(0.0, 36.0)
+	_settlement_tavern_button.visible = false
+	_settlement_tavern_button.pressed.connect(_on_settlement_tavern_pressed)
+	column.add_child(_settlement_tavern_button)
 
 	_settlement_enter_button = _make_button("进入村庄", "SettlementEnterButton")
 	_settlement_enter_button.custom_minimum_size = Vector2(0.0, 36.0)
@@ -1453,6 +1613,62 @@ func get_market_panel() -> MarketPanel:
 	return _market_panel
 
 
+# ---------------------------------------------------------------------------
+# 城镇酒馆（阶段 13）
+# ---------------------------------------------------------------------------
+
+
+func _build_tavern_panel() -> void:
+	_tavern_panel = TavernPanel.new()
+	_tavern_panel.name = "TavernPanel"
+	_tavern_panel.visible = false
+	_tavern_panel.closed.connect(_on_tavern_closed)
+	_ui_root.add_child(_tavern_panel)
+	_tavern_panel.setup(_context)
+
+
+func get_tavern_panel() -> TavernPanel:
+	return _tavern_panel
+
+
+func _on_settlement_tavern_pressed() -> void:
+	if _context == null or _tavern_panel == null:
+		return
+	var settlement := _context.settlement_manager.get_settlement(
+		_settlement_latch_id
+	)
+	if settlement == null or settlement.settlement_type != SettlementData.SettlementType.TOWN:
+		return
+	if not _tavern_panel.open(settlement):
+		return
+	# 酒馆覆盖地点面板，沿用 ui_panel 暂停原因；关闭后恢复地点面板。
+	_settlement_panel.visible = false
+	if not _settlement_pause_active:
+		TimeManager.push_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_settlement_pause_active = true
+
+
+## 离开酒馆：恢复城镇信息面板，世界保持暂停。
+func _on_tavern_closed() -> void:
+	if _inventory_panel != null:
+		_inventory_panel.refresh()
+	if _context == null:
+		return
+	var settlement := _context.settlement_manager.get_settlement(
+		_settlement_latch_id
+	)
+	if settlement != null:
+		_settlement_panel.visible = true
+		_refresh_settlement_info(settlement)
+		return
+	_settlement_panel.visible = false
+	if _settlement_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_settlement_pause_active = false
+	_set_time_buttons_enabled(true)
+	_update_time_ui()
+
+
 func _on_settlement_market_pressed() -> void:
 	if _context == null or _market_panel == null:
 		return
@@ -1610,7 +1826,7 @@ func _update_party_hover() -> void:
 ## 供输入与自动化测试共用：在给定世界坐标上显示对应部队的悬浮面板。
 func _apply_party_hover(world_position: Vector2) -> void:
 	var party := _find_party_within(world_position, PARTY_HOVER_RADIUS)
-	if party == null:
+	if party == null or _stationed_party_ids.has(party.party_id):
 		_hide_party_hover()
 		return
 	# 参战部队已经合并到战斗标记，不再显示原图标悬浮信息。
@@ -1660,6 +1876,8 @@ func _party_composition_signature(party: PartyData) -> String:
 		_party_activity_text(party),
 		party.leader_noble_id,
 		party.family_id,
+		# 速度变化（例如换乘/配置调整）时也刷新悬浮面板。
+		"%.1f" % _get_party_speed(party),
 	]
 	for unit_id: String in party.member_unit_ids:
 		var unit := _context.unit_manager.get_unit(unit_id)
@@ -1762,6 +1980,15 @@ func _rebuild_party_hover(party: PartyData) -> void:
 	_hover_content.add_child(title)
 
 	var height: float = 58.0
+
+	# 所有部队（玩家与 NPC）都显示统一的最终移动速度；停止时同样保留。
+	var speed_label := _make_label(
+		"移动速度：%.1f" % _get_party_speed(party), 14
+	)
+	speed_label.name = "PartyHoverSpeed"
+	speed_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hover_content.add_child(speed_label)
+	height += HOVER_PANEL_LINE_HEIGHT
 	# 指挥贵族与家族归属始终显示；构成详情仍只在按住 Alt 时展开。
 	var leader_noble := _context.noble_manager.get_noble(party.leader_noble_id) \
 		if _context.noble_manager != null and not party.leader_noble_id.is_empty() \
@@ -1962,18 +2189,25 @@ func _ensure_battle_marker(battle: BattleSession) -> void:
 
 
 ## 每场战斗只隐藏自己参战部队的图标；未参战部队始终显示。
+## 停留在地点上的部队同时隐藏普通图标，避免与地点下方旗帜重复显示。
 func _update_battle_participant_icons(battles: Array[BattleSession]) -> void:
 	for party_id_value: Variant in _party_icons.keys():
 		var party_id: String = str(party_id_value)
 		var icon := _party_icons.get(party_id) as PartyIcon
 		if icon == null or not is_instance_valid(icon):
 			continue
+		# 部队被消灭/解散后清理遗留图标，避免继续显示已不存在的部队。
+		if _context.party_manager.get_party(party_id) == null:
+			_party_icons.erase(party_id)
+			icon.queue_free()
+			continue
 		var involved_in_battle: bool = false
 		for battle: BattleSession in battles:
 			if battle.is_party_involved(party_id):
 				involved_in_battle = true
 				break
-		icon.visible = not involved_in_battle
+		icon.visible = not involved_in_battle \
+			and not _stationed_party_ids.has(party_id)
 
 
 func _refresh_battle_summary(battle: BattleSession) -> void:
@@ -2906,6 +3140,11 @@ func _open_settlement(settlement: SettlementData) -> void:
 	_settlement_market_button.visible = has_market
 	_settlement_market_button.disabled = not has_market
 	_settlement_market_button.text = "购买补给" if is_village else "交易市场"
+	# 酒馆只存在于城镇。
+	_settlement_tavern_button.visible = is_town
+	_settlement_tavern_button.disabled = not is_town
+	if _tavern_panel != null:
+		_tavern_panel.visible = false
 	_refresh_settlement_info(settlement)
 	_settlement_recruit_status_label.text = ""
 	_settlement_panel.visible = true
@@ -3820,6 +4059,14 @@ func _update_time_ui() -> void:
 		_speed_two_button.button_pressed = is_equal_approx(effective, TimeManager.SPEED_DOUBLE)
 
 
+## 大地图最终移动速度的唯一读取入口：调用 WorldMapManager 的统一计算，
+## UI 不自行根据成员/坐骑/装备重算。显示格式与悬浮面板保持一致。
+func _get_party_speed(party: PartyData) -> float:
+	if party == null or _context == null or _context.world_map_manager == null:
+		return 0.0
+	return _context.world_map_manager.get_effective_movement_speed(party)
+
+
 func _update_player_info() -> void:
 	if _player_info_label == null or _player_party == null:
 		return
@@ -3838,8 +4085,9 @@ func _update_player_info() -> void:
 			if house != null:
 				house_name = house.house_name
 		identity_text = "    身份：%s · %s" % [house_name, player_noble.get_rank_text()]
-	_player_info_label.text = "%s    坐标 (%d, %d)    状态：%s%s" % [
+	_player_info_label.text = "%s    移动速度：%.1f    坐标 (%d, %d)    状态：%s%s" % [
 		_player_party.party_name,
+		_get_party_speed(_player_party),
 		int(round(_player_party.world_position.x)),
 		int(round(_player_party.world_position.y)),
 		state_text,

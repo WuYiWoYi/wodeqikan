@@ -14,6 +14,8 @@ var _fief_recruitment_manager: FiefRecruitmentManager = null
 var _adventurer_recruitment_manager: AdventurerRecruitmentManager = null
 ## 阶段 12：每日补给消耗必须由统一的 SupplyManager 在 WorldTime 日边界结算。
 var _supply_manager: SupplyManager = null
+## 阶段 13：伤兵治疗由 WorldTime 整小时边界结算，暂停时不会推进。
+var _wounded_healing_manager: WoundedHealingManager = null
 
 
 func bind(
@@ -25,7 +27,8 @@ func bind(
 	encounter_manager: EncounterManager = null,
 	fief_recruitment_manager: FiefRecruitmentManager = null,
 	adventurer_recruitment_manager: AdventurerRecruitmentManager = null,
-	supply_manager: SupplyManager = null
+	supply_manager: SupplyManager = null,
+	wounded_healing_manager: WoundedHealingManager = null
 ) -> void:
 	_unit_manager = unit_manager
 	_party_manager = party_manager
@@ -36,6 +39,7 @@ func bind(
 	_fief_recruitment_manager = fief_recruitment_manager
 	_adventurer_recruitment_manager = adventurer_recruitment_manager
 	_supply_manager = supply_manager
+	_wounded_healing_manager = wounded_healing_manager
 
 
 func on_world_tick(fixed_delta: float) -> void:
@@ -60,6 +64,11 @@ func on_world_tick(fixed_delta: float) -> void:
 	# 放在 AI 之前，保证 NPC 决策看到的是当天结算后的补给状态。
 	if _supply_manager != null:
 		_supply_manager.update_daily()
+
+	# 伤兵治疗同样只依赖 WorldTime；放在战斗/遭遇处理前，
+	# 避免同一 tick 内刚产生的伤兵立刻获得整小时治疗。
+	if _wounded_healing_manager != null:
+		_wounded_healing_manager.tick()
 
 	if _encounter_manager != null:
 		_encounter_manager.update_encounters()

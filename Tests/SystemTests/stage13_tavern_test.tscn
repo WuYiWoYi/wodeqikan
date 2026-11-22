@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Tests/SystemTests/stage13_tavern_test.gd" id="1_stage13_tavern"]
+
+[node name="Stage13TavernTest" type="Node"]
+script = ExtResource("1_stage13_tavern")

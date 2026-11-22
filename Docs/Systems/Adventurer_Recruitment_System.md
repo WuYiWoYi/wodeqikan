@@ -43,7 +43,10 @@
 
 ## 3. 候选人池与刷新
 
-- 新游戏每个村庄初始生成 `adventurer_initial_count`（默认 2）名候选人。
+- 新游戏每个符合条件的村庄初始生成 `adventurer_initial_count`（默认 2，上限 `adventurer_max_candidates`）名候选人。
+- 阶段 13 起每个候选人拥有独立 Unit 身份：`candidate.unit_data` 保存完整快照，`candidate.unit_id` 关联快照 ID；候选人归村庄候选数据所有，不进入任何部队。
+- 快照通过 `UnitManager.create_unit` 同源的创建逻辑生成（默认 tier 1 步兵），不是 UI 假数据；招募成功时把快照原样转为玩家部队成员，并沿用等级/装备/外观。
+- `initialize_settlement(fill_initial)` 先幂等补齐已有候选人身份，再按数量补足初始人数；读档时 `fill_initial=false`，不会重复生成或重复创建身份。
 - `AdventurerRecruitmentManager.tick(world_delta)` 只由 `WorldSimulation` 调用：
   - 只处理村庄；
   - 当前候选人数达到 `adventurer_max_candidates`（默认 5）时计时归零；
@@ -98,11 +101,13 @@
 - 读档不重新生成候选人，只修正边界与刷新计时。
 - 旧存档没有候选人字段时按空列表恢复；下一次世界 tick 按刷新规则补充。
 - 新游戏/读档的初始补齐只由 `WorldInitializer` 与 `WorldContext` 明确调用，避免读档重复生成。
+- 阶段 13 起候选人快照随存档保存；读档先 `ensure_candidate_identities()` 补旧档缺失快照，再恢复候选人数，保证同一候选人不会生成第二个 Unit。
 
 ## 8. 测试
 
 - `Tests/SystemTests/fief_adventurer_system_test.tscn`：1 金币扣款、只生成 1 个单位、姓名/外观持久化、重复招募拒绝、离开清理幂等、刷新上限、日志。
 - `Tests/SystemTests/fief_adventurer_ui_test.tscn`：村庄候选 NPC、距离交互、对话按钮、已招募标记、离开清理、日志面板。
+- `Tests/SystemTests/stage13_village_candidates_test.tscn`：初始候选人数量/上限、独立 Unit 身份、村庄归属、不重复、招募后进入玩家部队、存档往返。
 
 ## 9. 未实现
 

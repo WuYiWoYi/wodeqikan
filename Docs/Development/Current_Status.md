@@ -1,8 +1,8 @@
 # 当前开发状态
 
 **更新日期：** 2026-11-22
-**当前阶段：** 阶段 12 · 马匹个体、补给消耗与村庄/城镇交易
-**整体状态：** 阶段 11 已完成玩家背包 UI 与城镇交易；阶段 12 新增马匹独立实例与毛色/马鞍外观、面包/草料与批量购买、`SupplyManager` 每日消耗、NPC 领主补给采购、村庄购买补给入口、村庄/城镇市场范围、交易预览直接移动与重置、图标、存档 Schema v6 与旧档迁移；代码、数据与测试已写入，尚未在 Godot 运行时执行
+**当前阶段：** 阶段 13 · 大地图部队展示、伤兵恢复与俘虏系统
+**整体状态：** 阶段 13 已完成大地图地点/停留部队展示、部队内部旗帜放大、统一移动速度显示、村庄初始候选人、伤兵判定与顺序治疗、战后俘虏分配/玩家接收、城镇酒馆出售俘虏，以及存档 Schema v7；本阶段相关自动化测试已在 Godot 4.6.1 headless 实际运行通过，仅 `supply_manager_test` 保留一条与本阶段无关的既有失败
 
 ---
 
@@ -37,7 +37,8 @@
 | 9 大地图布局 · 部队旗帜 | 完成 | 地点按王国/家族聚类、道路与巡逻点同步、部队内部旗帜放大且圆形底盘不变 |
 | 10 战后追击 · AI 助攻 · 增援部署 · 大地图交互 | 完成 | 战后追击/冷却恢复、强盗与贵族敌对、视野门槛助攻、按初始侧部署增援、行动意图悬浮、战斗标记悬浮、WASD 自由镜头、主动攻击二次确认、旗帜进一步放大 |
 | 11 玩家背包 · 城镇交易市场 | 完成 | 玩家背包 UI、城镇市场入口、双栏交易预览、原子化买卖、交易日志、20 条日志上限、市场库存存档、NPC 交易来源预留 |
-| 12 马匹个体 · 补给消耗 · 村庄/城镇交易 | 完成（待运行时验证） | 马匹实例与外观、面包/草料与批量购买、每日补给结算、NPC 补给采购、村庄市场入口、交易直接移动/重置/图标、Schema v6 |
+| 12 马匹个体 · 补给消耗 · 村庄/城镇交易 | 完成 | 马匹实例与外观、面包/草料与批量购买、每日补给结算、NPC 补给采购、村庄市场入口、交易直接移动/重置/图标、Schema v6 |
+| 13 大地图展示 · 伤兵恢复 · 俘虏系统 | 完成 | 家族旗帜与停留部队旗帜条、内部旗帜放大、统一速度显示、村庄初始候选人、伤兵判定、WorldTime 顺序治疗、俘虏分配/选择界面、酒馆出售、Schema v7 |
 | 6（原路线图）援军与高级战斗 | 部分完成 | 增援加入既有战斗已完成；玩家手动选择加入方、士气与高级指挥未开始 |
 | 7 沙盒扩展 | 未开始 | — |
 
@@ -1559,7 +1560,46 @@
 - 扩展 `market_manager_test`：村庄市场、面包/草料交易、马匹实例库存、旧档村庄市场、快照含实例 ID。
 - 扩展 `town_market_ui_test`：村庄按钮与批量购买、重置、取消、马匹逐匹行、读档恢复。
 - 扩展 `save_persistence_test` / `political_hierarchy_test`：Schema 6。
-- 当前环境未找到可执行的 Godot 二进制，以上测试尚未实际运行；需编辑器重新导入以刷新 `global_script_class_cache.cfg`。
+- 阶段 13 期间已用 Godot 4.6.1 headless 实际运行相关套件并通过；`supply_manager_test` 保留一条与本阶段无关的既有失败（KI534）。
+
+## 8.26 阶段 13 · 大地图部队展示、伤兵恢复与俘虏系统
+
+### 新增
+
+- `WoundedConfig`（`Data/Combat/wounded_config.tres`）：tier 负伤概率 50%/60%/80%，`enabled` 可关闭。
+- `HealingConfig`（`Data/Combat/healing_config.tres`）：每游戏小时基础治疗点与预留药物加成。
+- `PrisonerPriceConfig`（`Data/Settlements/prisoner_price_config.tres`）：等级 1/2/3 = 10/20/30 金币。
+- `WoundedHealingManager`：挂在 `WorldContext`，由 `WorldSimulation` 每 tick 调用，按整小时与成员顺序治疗。
+- `PrisonerTradeManager`：城镇酒馆出售俘虏的唯一业务入口。
+- `SettlementStationedBar`：地点下方停留部队旗帜条（无圆形底盘、自动换行、地点隔离）。
+- `PrisonerSelectionPanel`：战后俘虏选择 UI；`TavernPanel`：酒馆菜单、出售与雇佣兵占位。
+- `UnitData.Status.WOUNDED`、`prisoner_owner_party_id`、`sold_to_settlement_id`；`PartyData.prisoner_unit_ids`。
+- `PartyManager` 俘虏 API 与 `sanitize_prisoner_ownership()`；`BattleManager` 负伤判定、最大余数分配、待确认份额与原子提交。
+- `SaveData` v7 字段与幂等迁移（战斗结算仍由运行时会话状态与唯一 `battle_id` 防重复）。
+- 测试：`wounded_system_test`、`wounded_healing_test`、`stage13_village_candidates_test`、`stage13_world_map_ui_test`、`stage13_prisoner_test`、`stage13_prisoner_ui_flow_test`、`stage13_tavern_test`。
+
+### 变更
+
+- 战斗结算：HP≤0 的非玩家单位按 tier 概率成为伤兵，否则永久死亡；玩家角色仍永久死亡。
+- 伤兵保留成员身份与全部数据，HP=0、不可战斗/移动/攻击；治疗到 HP>0 后恢复 `ACTIVE`。
+- 伤兵按成员列表顺序消耗治疗点，满血溢出；暂停不推进，1x/2x 每游戏小时一致。
+- 战败方伤兵组成俘虏池；胜利方按实际参战单位数（含增援）分配；玩家份额需在结果面板之后确认。
+- 地点标记优先家族旗帜；停留部队隐藏圆形标记并在地点下方显示家族旗帜条。
+- 玩家 UI 与悬浮提示统一显示最终移动速度。
+- 村庄初始化生成初始冒险者并归村庄候选数据所有。
+- 城镇地点面板新增酒馆入口；出售俘虏价格集中配置。
+- 存档 Schema 6 → 7；读档清洗成员/俘虏互斥与悬空归属。
+
+### 测试
+
+- 新增 `wounded_system_test`：tier 概率、玩家不受影响、伤兵身份/数据保留、不能战斗、死亡清理排除、治愈恢复；战败方伤兵离开原部队并进入玩家待确认俘虏份额。
+- 新增 `wounded_healing_test`：配置、成员顺序与溢出、重排、跳过满血、整小时/不重复、暂停、1x/2x、全部部队、移除部队、战斗中跳过、读档不补算。
+- 新增 `stage13_prisoner_test`：份额算法、归属规则、玩家/盟友分配、待确认幂等、失败方、增援计数、选择面板预览/重置/确认、存档清洗。
+- 新增 `stage13_prisoner_ui_flow_test`：结果面板 → 俘虏选择 UI → 提交归属，确认前不改真实数据。
+- 新增 `stage13_tavern_test`：价格、原子性/失败回滚、城镇入口、菜单、雇佣兵占位、出售预览/重置/确认、离开恢复。
+- 新增 `stage13_village_candidates_test`、`stage13_world_map_ui_test`：村庄初始候选人与大地图展示/速度/停留旗帜条。
+- 更新 `battle_side_result_test`（关闭随机负伤）、`save_persistence_test` / `political_hierarchy_test`（Schema 7）、`market_manager_test` / `town_market_ui_test`（动态基线）。
+- 已运行并通过上述套件及相关回归；`supply_manager_test` 既有失败见 KI534。
 
 ## 9. 自动化验收
 
@@ -1623,8 +1663,8 @@
 | `Tests/SystemTests/small_scene_camera_test.tscn` | 统一视野、跟随、自由视角、边界限制、切回跟随、村庄摄像机 |
 | `Tests/SystemTests/player_pursuit_encounter_test.tscn` | 同向追击接触、停止/清目标、暂停与面板、撤退、拒绝锁、重新触发、进入战斗；阶段 10 追加：地图移动清除追击焦点、目标转向后追击刷新、目标进入战斗时焦点保留、战后冷却等待、冷却后 AI 重新追击玩家 |
 | `Tests/SystemTests/world_map_battle_marker_test.tscn` | 单战斗标记、参战图标隐藏、按 side_index 分列汇总、小时伤亡刷新、同侧加入、三方三列、两场战斗双标记与独立图标隐藏/恢复、结束清理；阶段 10 追加：摘要面板仅悬浮显示、默认隐藏、多战斗切换、离开/结束隐藏、不拦截地图输入 |
-| `Tests/SystemTests/save_persistence_test.tscn` | Schema v5、世界日志往返、世界/地点/部队/士兵/经济恢复、战后成员与 HP、失效战斗状态清理、领袖校验 |
-| `Tests/SystemTests/political_hierarchy_test.tscn` | 5 家族/2 王国/7 贵族、贵族引用与循环校验、附庸与战争传播、玩家中立、独立部队、Schema v5 往返、国王死亡选举与待定王国 |
+| `Tests/SystemTests/save_persistence_test.tscn` | Schema v7、世界日志往返、世界/地点/部队/士兵/经济恢复、战后成员与 HP、失效战斗状态清理、领袖校验 |
+| `Tests/SystemTests/political_hierarchy_test.tscn` | 5 家族/2 王国/7 贵族、贵族引用与循环校验、附庸与战争传播、玩家中立、独立部队、Schema v7 往返、国王死亡选举与待定王国 |
 | `Tests/SystemTests/battle_reinforcement_test.tscn` | 增援加入既有会话、侧别判定、逐单位标记、场景单位数量、既有控制器保持、后方展开/边界/不重叠、旗帜提示与排队、玩家/敌方侧不提示；阶段 10 追加：按初始侧锚点部署（右侧/下方）、多方战斗各自后方、网格排满时备用扫描点仍不重叠、既有 HP/冷却/控制器保持 |
 | `Tests/SystemTests/encyclopedia_ui_test.tscn` | 百科入口、暂停、一级真实数据、二/三级导航与返回、死亡动态刷新、占位徽章、关闭恢复速度、相机不重置 |
 | `Tests/SystemTests/battle_result_delay_test.tscn` | 胜利数据立即生成、面板约 3 秒延迟、失败即时、延迟期间退出取消、无重复展示 |
@@ -1635,6 +1675,13 @@
 | `Tests/SystemTests/faction_bandit_hostility_test.tscn` | 强盗对两王国国王/骑士、独立家族与玩家家族一律敌对；同家族/同王国友好；王国间敌对；商队对玩家中立、对治安队友好；改名后仍按类型敌对 |
 | `Tests/SystemTests/party_intent_hover_test.tscn` | 悬浮行动意图：待命、巡逻静止/移动、前往地点、追击、跟随友军、跟随敌对按追击、战场响应、领主征召、意图变化自动刷新、Alt 构成展开、显示不修改 AI |
 | `Tests/SystemTests/party_attack_confirmation_test.tscn` | 主动攻击先弹二次确认且不创建战斗、取消无任何副作用、确认前重校验失效条件并显示原因、重复入口只创建一场战斗、加入友军既有战斗不弹确认 |
+| `Tests/UnitTests/wounded_system_test.tscn` | tier 负伤概率、玩家永久死亡、伤兵身份/等级/装备保留、HP=0、不可战斗、死亡清理排除、治愈恢复、战败方伤兵转为待确认俘虏 |
+| `Tests/UnitTests/wounded_healing_test.tscn` | 配置与药物预留、成员顺序与溢出、重排、跳过满血、整小时边界、不重复结算、暂停、1x/2x、所有部队、移除部队、战斗中跳过、读档不补算 |
+| `Tests/SystemTests/stage13_village_candidates_test.tscn` | 村庄初始候选人数量/上限/身份唯一/归属村庄、刷新与招募复用、存档不重复 |
+| `Tests/SystemTests/stage13_world_map_ui_test.tscn` | 地点家族旗帜与归属刷新、地点下停留部队旗帜条/换行/隔离/恢复、内部旗帜尺寸、统一速度显示 |
+| `Tests/SystemTests/stage13_prisoner_test.tscn` | 份额算法与不变量、归属互斥、玩家/盟友分配、待确认与幂等提交、失败方无份额、增援计数、选择面板预览/重置、存档清洗 |
+| `Tests/SystemTests/stage13_prisoner_ui_flow_test.tscn` | 结果面板确认后进入俘虏选择 UI、左侧分配、确认前不写真实数据、提交后进入玩家俘虏列表 |
+| `Tests/SystemTests/stage13_tavern_test.tscn` | 价格配置、出售原子性与失败回滚、城镇入口、酒馆菜单、雇佣兵占位、出售预览/重置/确认、离开恢复地点面板 |
 
 ### 运行命令
 

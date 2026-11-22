@@ -187,6 +187,12 @@ func _test_settlement_name_tags() -> void:
 
 
 func _test_hover_panel() -> void:
+	# 商队初始停留在地点上，阶段 13 会改为显示地点下方旗帜、隐藏圆形图标；
+	# 悬浮信息测试先把商队移离建筑，避免与停留展示规则冲突。
+	_merchant.world_position = Vector2(2600.0, 1800.0)
+	_merchant.target_position = _merchant.world_position
+	_merchant.movement_state = PartyData.MovementState.IDLE
+	_map.call("_update_stationed_parties")
 	_map.call("set_alt_detail_active", false)
 	_map.call("apply_hover_for_test", _merchant.world_position)
 	_check(_map.call("is_hover_panel_visible") == true, "悬浮部队图标显示信息面板")

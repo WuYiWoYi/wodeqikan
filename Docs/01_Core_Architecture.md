@@ -46,6 +46,8 @@ GameManager (Autoload)
     ├── ItemManager（消耗品静态配置）             │
     ├── MarketManager（村庄/城镇市场与交易）       │
     ├── SupplyManager（每日补给结算）              │
+    ├── WoundedHealingManager（伤兵小时治疗）      │
+    ├── PrisonerTradeManager（酒馆出售俘虏）       │
     ├── PartyManager                              │
     ├── SettlementManager                         │
     ├── NobleManager（贵族，继承 LordManager）     │
@@ -106,6 +108,9 @@ GameManager (Autoload)
 | `ItemManager` | `ItemConfig` 静态注册与查询（消耗品/杂物） | 持有数量、玩家背包写操作 |
 | `MarketManager` | 村庄/城镇商品注册、独立库存、马匹实例交易、交易校验与原子结算、市场库存序列化 | 持有玩家背包/金币、操作 UI、决定是否采购（AI 决策） |
 | `SupplyManager` | 按 `TimeManager` 日边界统一结算玩家/NPC 面包与草料、剩余天数与采购需求查询 | 市场交易、价格计算、路线决策、UI |
+| `WoundedHealingManager` | 按 `WorldTime` 整小时生成治疗点、按成员顺序治疗、恢复伤兵状态与仅伤兵部队 | 战斗内 HP、补给、工资、UI |
+| `PrisonerTradeManager` | 城镇酒馆出售俘虏的校验、集中定价、原子结算与售出状态写入 | 直接修改 Unit 状态、UI 预览逻辑 |
+| `BattleManager`（阶段 13 扩展） | 负伤判定、俘虏池构建、最大余数分配、玩家份额挂起与原子提交 | UI 直接写入俘虏归属 |
 | `PartyManager` | `PartyData` 增删查、成员关系维护、工资汇总 | 部队 AI |
 | `SettlementManager` | `SettlementData` 增删查、场景路径与序列化 | 地点图标、交互面板 |
 | `LordManager` | `LordData` 增删查、玩家领主查询、部队引用校验、序列化 | AI 决策、封地分配、UI |

@@ -1,6 +1,6 @@
 # 我的骑砍 · 项目总索引
 
-**文档版本：** V0.33（阶段 12：马匹个体、补给消耗与村庄/城镇交易）
+**文档版本：** V0.34（阶段 13：大地图部队展示、伤兵恢复与俘虏系统）
 **更新日期：** 2026-11-22
 **引擎：** Godot 4.6.1 / GDScript
 **源规划：** [2D 中世纪沙盒战略游戏核心架构设计与开发规划 V0.2](../md/2D%20中世纪沙盒战略游戏核心架构设计与开发规划.md)
@@ -42,6 +42,8 @@ WorldContext（一局游戏，跨场景常驻）
 ├── ItemManager      消耗品/杂物静态配置
 ├── MarketManager    村庄/城镇市场库存与交易唯一业务入口
 ├── SupplyManager    每日补给消耗与采购需求
+├── WoundedHealingManager  WorldTime 整小时伤兵治疗
+├── PrisonerTradeManager   城镇酒馆出售俘虏
 ├── PartyManager
 ├── SettlementManager
 ├── NobleManager     贵族（继承 LordManager）
@@ -72,7 +74,7 @@ WorldContext（一局游戏，跨场景常驻）
 | 文档 | 职责 |
 |---|---|
 | [01_Core_Architecture.md](01_Core_Architecture.md) | 分层、依赖方向、更新管线、数据权威、事件契约 |
-| [02_Development_Roadmap.md](02_Development_Roadmap.md) | 阶段 0–8 的任务、依赖与验收标准 |
+| [02_Development_Roadmap.md](02_Development_Roadmap.md) | 阶段 0–13 的任务、依赖与验收标准 |
 | [03_Design_Conventions.md](03_Design_Conventions.md) | 命名、代码、数据、场景、文档规范 |
 | [04_Change_Log.md](04_Change_Log.md) | 重要变更历史 |
 
@@ -99,6 +101,7 @@ WorldContext（一局游戏，跨场景常驻）
 | [Systems/Inventory_Economy_System.md](Systems/Inventory_Economy_System.md) | 背包 UI、金币、工资、三级兵种、晋升与村庄/城镇交易 |
 | [Systems/Mount_System.md](Systems/Mount_System.md) | 马匹独立实例、毛色/马鞍、装备卸下、市场逐匹交易与旧档迁移 |
 | [Systems/Supply_System.md](Systems/Supply_System.md) | 每日面包/草料消耗、缺口、采购需求与 NPC 补给采购 |
+| [Systems/Wounded_Prisoner_System.md](Systems/Wounded_Prisoner_System.md) | 伤兵判定、顺序治疗、俘虏分配/接收与酒馆出售 |
 | [Systems/Save_System.md](Systems/Save_System.md) | 存档结构、版本、迁移与限制 |
 
 ### 开发状态文档
@@ -167,6 +170,7 @@ WorldContext（一局游戏，跨场景常驻）
 - 2026-11-22 阶段 10：遭遇检测不再要求 MOVING，玩家追击焦点跨目标移动/战斗保留并在战后冷却结束后恢复；战后冷却继续由 `BattleManager` 统一写入；`FactionManager` 统一强盗对所有政治家族贵族敌对；AI 通过 `VisionManager`（含战斗参战方）发现并加入既有战斗，检查全部战斗侧且不自动创建第三侧；增援按初始侧锚点 + 3 列网格部署，排满时半场扫描；大地图新增行动意图悬浮、仅悬浮显示的战斗摘要、WASD 自由镜头与主动攻击二次确认；`flag_max_size` 38 → 44；新增 `faction_bandit_hostility_test`、`party_intent_hover_test`、`party_attack_confirmation_test`。
 - 2026-11-22 阶段 11：新增只读玩家背包 UI（金币/名称/类型/数量/描述）；城镇地点面板按 `SettlementType.TOWN` 显示交易市场入口；新增 `MarketGoodsConfig`/`MarketData`/`MarketManager` 与 `SaveData.markets`，市场库存按城镇独立初始化、存档与恢复；双栏交易界面只修改预览，确认时由 `MarketManager.execute_player_trade()` 原子结算背包/库存/金币并写入 `PLAYER_TRADE` 世界日志；世界日志上限 100 → 20，保存/读档同步裁剪；新游戏初始金币 500；NPC 交易来源接口已预留但不写世界日志；新增 `market_manager_test`、`town_market_ui_test`。
 - 2026-11-22 阶段 12：马匹改为 `MountInstanceData` 独立实例，创建时随机黑/白/棕毛色与 8 种马鞍之一并随存档持久化；背包/市场/装备统一按 `instance_id` 移动，旧数量确定性迁移；新增面包/草料与 10/50 批量购买；`SupplyManager` 按 `WorldTime` 日边界结算玩家与 NPC 每日消耗，缺口不为负；`AIManager` 低补给时前往最近有库存的村庄/城镇（不含城堡），用自有金币补至 7 天并浮字提示，不写玩家日志；市场范围扩展为村庄（面包/草料）与城镇（面包/草料/马匹），村庄新增大地图与村长对话入口；交易 UI 改为左右直接移动、每行图标、马匹逐匹显示，重置恢复打开时快照；存档 Schema v5 → v6，新增补给结算日、NPC 背包/金币、市场马匹实例与 `initialized_items`；新增 `mount_instance_test`、`supply_manager_test`、`ai_supply_purchase_test`。
+- 2026-11-22 阶段 13：地点标记按所属家族显示旗帜并在地点下方显示停留部队旗帜条；部队圆形标记内部旗帜独立放大，玩家 UI 与悬浮显示统一最终移动速度；新增村庄初始冒险者候选人；战斗结算按 tier 概率产生伤兵（保留 Unit 身份与数据）；`WoundedHealingManager` 按 `WorldTime` 整小时顺序治疗，支持溢出与存档续算；战败方伤兵成为俘虏池，按实际参战单位数用最大余数法分给胜利方，玩家在战后选择界面确认接收；城镇酒馆可按等级出售俘虏；存档 Schema v6 → v7，新增伤兵状态、俘虏归属/列表、治疗结算小时与村庄候选人字段；新增 `wounded_healing_test`、`stage13_prisoner_test`、`stage13_tavern_test`、`stage13_prisoner_ui_flow_test` 等。
 
 详见 [Development/Current_Status.md](Development/Current_Status.md)。
 
@@ -205,6 +209,13 @@ Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/world_lo
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/market_manager_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/mount_instance_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/supply_manager_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/wounded_system_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/UnitTests/wounded_healing_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/stage13_village_candidates_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/stage13_world_map_ui_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/stage13_prisoner_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/stage13_prisoner_ui_flow_test.tscn
+Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/stage13_tavern_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/town_market_ui_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/ai_supply_purchase_test.tscn
 Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/world_log_ui_test.tscn

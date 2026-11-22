@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Tests/SystemTests/stage13_world_map_ui_test.gd" id="1_s13_world_map_ui"]
+
+[node name="Stage13WorldMapUiTest" type="Node"]
+script = ExtResource("1_s13_world_map_ui")

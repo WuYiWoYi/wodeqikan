@@ -6,9 +6,18 @@ extends RefCounted
 ## 派生数据：max_hp / attack 等最终属性，由 StatCalculator 依据配置与装备重算。
 ## current_hp 在非战斗状态下由世界侧写入；战斗期间以 BattleUnitState 为准。
 
+## 单位生命周期状态。伤兵保留身份与部队归属，永久死亡才会被移出部队。
+enum Status {
+	ACTIVE,
+	WOUNDED,
+	DEAD,
+}
+
 var unit_id: String = ""
 var config_id: String = ""
 var display_name: String = ""
+## 显式状态；current_hp <= 0 且仍留在部队中时必须是 WOUNDED。
+var status: Status = Status.ACTIVE
 
 var level: int = 1
 var exp: int = 0
@@ -35,6 +44,11 @@ var faction_id: String = ""
 ## 家族身份（持久化）。空字符串表示无家族，使用阵营色/默认外观。
 var family_id: String = ""
 var current_party_id: String = ""
+## 阶段 13：俘虏归属。非空表示该单位被对应部队关押，不能同时作为成员。
+## 只有 PartyManager 的俘虏接口可以修改该字段。
+var prisoner_owner_party_id: String = ""
+## 已出售给城镇时的记录；非空表示该单位已离开玩家/部队控制。
+var sold_to_settlement_id: String = ""
 var equipment: Dictionary = {}
 ## 单位当前坐骑的独立实例外观（阶段 12）。
 ## 与 equipment["MOUNT"] 的基础装备 ID 分离；卸下时原样返还背包。
@@ -56,7 +70,52 @@ var origin_faction_id: String = ""
 
 
 func is_alive() -> bool:
-	return current_hp > 0
+	return status != Status.DEAD and current_hp > 0
+
+
+func is_wounded() -> bool:
+	return status == Status.WOUNDED
+
+
+func is_dead() -> bool:
+	return status == Status.DEAD
+
+
+## 是否为某支部队持有的俘虏。
+func is_prisoner() -> bool:
+	return not prisoner_owner_party_id.is_empty()
+
+
+## 标记为俘虏。归属填写部队 ID；空字符串表示战后待分配俘虏。
+func mark_prisoner(owner_party_id: String = "") -> void:
+	prisoner_owner_party_id = owner_party_id
+	current_party_id = ""
+	if status == Status.ACTIVE:
+		status = Status.WOUNDED
+
+
+## 解除俘虏归属（释放/出售前由 PartyManager 统一调用）。
+func clear_prisoner_ownership() -> void:
+	prisoner_owner_party_id = ""
+
+
+## 出售给城镇：离开所有部队与俘虏列表，保留 Unit 身份与数据。
+func mark_sold(settlement_id: String) -> void:
+	prisoner_owner_party_id = ""
+	current_party_id = ""
+	sold_to_settlement_id = settlement_id
+
+
+## 战斗结算：负伤但保留单位身份与部队归属。HP 必须为 0。
+func mark_wounded() -> void:
+	status = Status.WOUNDED
+	current_hp = 0
+
+
+## 主动标为永久死亡；实际移除由 BattleManager/UnitManager 负责。
+func mark_dead() -> void:
+	status = Status.DEAD
+	current_hp = 0
 
 
 ## 当前装备的武器是否为远程武器。攻击行为入口统一读取该派生值。
@@ -66,6 +125,10 @@ func is_ranged_attacker() -> bool:
 
 func clamp_hp() -> void:
 	current_hp = clampi(current_hp, 0, maxi(max_hp, 0))
+	# HP 重新变为有效值（治疗/读档修正）时自动恢复为正常状态；
+	# 负伤只能由战斗结算显式写入，避免 UI 或属性重算误判。
+	if current_hp > 0 and status == Status.WOUNDED:
+		status = Status.ACTIVE
 
 
 ## 当前坐骑的实例数据；没有 MOUNT 装备或数据缺失时返回 null。
@@ -84,6 +147,7 @@ func to_dict() -> Dictionary:
 		"unit_id": unit_id,
 		"config_id": config_id,
 		"display_name": display_name,
+		"status": int(status),
 		"level": level,
 		"exp": exp,
 		"wage": wage,
@@ -101,6 +165,8 @@ func to_dict() -> Dictionary:
 		"faction_id": faction_id,
 		"family_id": family_id,
 		"current_party_id": current_party_id,
+		"prisoner_owner_party_id": prisoner_owner_party_id,
+		"sold_to_settlement_id": sold_to_settlement_id,
 		"equipment": equipment.duplicate(true),
 		"mount_instance": mount_instance.duplicate(true),
 		"is_mounted": is_mounted,
@@ -118,6 +184,12 @@ static func from_dict(data: Dictionary) -> UnitData:
 	unit.unit_id = str(data.get("unit_id", ""))
 	unit.config_id = str(data.get("config_id", ""))
 	unit.display_name = str(data.get("display_name", ""))
+	# 旧存档没有 status：先默认正常，读完全部 HP 字段后再归一化；
+	# HP=0 且未标记死亡的单位按伤兵恢复，避免读档误删仍在部队中的单位。
+	var status_value: int = int(data.get("status", Status.ACTIVE))
+	if status_value < Status.ACTIVE or status_value > Status.DEAD:
+		status_value = Status.ACTIVE
+	unit.status = status_value as Status
 	unit.level = int(data.get("level", 1))
 	unit.exp = int(data.get("exp", 0))
 	# 旧存档没有 wage：保留 -1 哨兵，UnitManager 重算时按配置补全。
@@ -139,6 +211,9 @@ static func from_dict(data: Dictionary) -> UnitData:
 	unit.faction_id = str(data.get("faction_id", ""))
 	unit.family_id = str(data.get("family_id", ""))
 	unit.current_party_id = str(data.get("current_party_id", ""))
+	# 阶段 13：旧存档没有俘虏/出售字段，默认普通归属。
+	unit.prisoner_owner_party_id = str(data.get("prisoner_owner_party_id", ""))
+	unit.sold_to_settlement_id = str(data.get("sold_to_settlement_id", ""))
 	unit.is_player_character = bool(data.get("is_player_character", false))
 
 	# 外观字段是阶段 6 追加的可选数据；旧存档没有时保持空字典。
@@ -176,4 +251,7 @@ static func from_dict(data: Dictionary) -> UnitData:
 		unit.mount_instance = {}
 
 	unit.clamp_hp()
+	# 显式状态与 HP 必须一致：未死亡的 0 HP 单位视为伤兵。
+	if unit.status == Status.ACTIVE and unit.current_hp <= 0:
+		unit.status = Status.WOUNDED
 	return unit

@@ -12,6 +12,8 @@ extends RefCounted
 
 const JOIN_RADIUS: float = 60.0
 const OFFSCREEN_CONFIG_PATH: String = "res://Data/Combat/offscreen_battle_default.tres"
+## 负伤概率配置；由 WorldContext 注入。未注入时按永久死亡处理（测试默认）。
+const WOUNDED_CONFIG_PATH: String = "res://Data/Combat/wounded_config.tres"
 ## 战斗结束后存活部队的禁止再战时间（世界秒）。
 ## 避免双方刚解锁就因仍在接触范围内而立刻重新开战，导致看似卡死。
 const POST_BATTLE_ENGAGEMENT_COOLDOWN: float = 30.0
@@ -38,6 +40,14 @@ var offscreen_config: OffscreenBattleConfig = null
 var offscreen_resolver: OffscreenBattleResolver = null
 ## { battle_id: OffscreenBattleResolver }
 var _offscreen_resolvers: Dictionary = {}
+## 已结算但仍等待玩家确认接收的俘虏：{ battle_id: BattleSession }。
+## 用 battle_id 唯一标识结算，确认后立即移除，防止重复提交。
+var _pending_prisoner_settlements: Dictionary = {}
+
+## 负伤概率的唯一配置入口；null 表示不启用负伤（阵亡即永久死亡）。
+var wounded_config: WoundedConfig = null
+## 负伤判定随机源；固定种子保证同一世界的结算可复现。
+var _wounded_rng: RandomNumberGenerator = RandomNumberGenerator.new()
 
 var _unit_manager: UnitManager = null
 var _party_manager: PartyManager = null
@@ -62,6 +72,20 @@ func setup(
 		offscreen_config = _load_offscreen_config()
 	offscreen_resolver = OffscreenBattleResolver.new()
 	offscreen_resolver.setup(offscreen_config)
+	# 固定初始种子：同一场战斗的判定可复现；测试可通过 set_wounded_rng_seed 覆盖。
+	_wounded_rng.seed = 0x5A17C0DE
+
+
+## 注入负伤概率配置；传入 null 时关闭负伤判定。
+func set_wounded_config(config: WoundedConfig) -> void:
+	wounded_config = config
+	if wounded_config != null:
+		wounded_config.sanitize()
+
+
+## 测试用：重置负伤判定随机序列，保证概率采样可复现。
+func set_wounded_rng_seed(seed_value: int) -> void:
+	_wounded_rng.seed = seed_value
 
 
 ## 替换离屏战斗参数；已开始的战斗不会回溯修改已完成的小时结算。
@@ -422,6 +446,7 @@ func finish_battle(battle_id: String, result: int) -> bool:
 	session.final_result = result_data
 
 	_settle_session(session)
+	_claim_battle_prisoners(session, result_data)
 	_unlock_session_parties(session)
 	_remove_battle_registry(session)
 	if current_battle == session:
@@ -443,6 +468,9 @@ func build_battle_result(
 	var data := BattleResultData.new()
 	if session == null:
 		return data
+
+	# 负伤判定必须先于结果统计；每场战斗只判定一次，预览与最终结算一致。
+	_decide_wounded_outcomes(session)
 
 	data.battle_id = session.battle_id
 	data.result_code = int(result)
@@ -487,6 +515,7 @@ func build_battle_result(
 			"status": int(participant.status),
 		})
 		var party_casualties: int = 0
+		var party_wounded: int = 0
 		var party_survivors: int = 0
 		for unit_id: String in session.get_party_unit_ids(participant.party_id):
 			var state := session.get_unit_state(unit_id)
@@ -494,10 +523,18 @@ func build_battle_result(
 				continue
 			if state.alive and state.battle_hp > 0:
 				party_survivors += 1
+			elif state.wounded:
+				party_wounded += 1
 			else:
 				party_casualties += 1
 		data.casualties[participant.party_id] = party_casualties
+		data.wounded[participant.party_id] = party_wounded
 		data.survivors[participant.party_id] = party_survivors
+
+	# 阶段 13：战败方伤兵成为可分配俘虏，按真实参战人数分给胜利部队。
+	# 预览与最终结算使用同一套稳定顺序，重复调用不会改变结果。
+	if win_bonus_applies:
+		_build_prisoner_allocation(session, data)
 
 	# 经验：存活单位获得基础经验，获胜侧额外奖励；中止战斗不发放。
 	if battle_result != BattleSession.BattleResult.ABORTED:
@@ -539,7 +576,9 @@ func build_battle_result(
 				continue
 			for unit_id: String in session.get_party_unit_ids(participant.party_id):
 				var state := session.get_unit_state(unit_id)
-				if state != null and (not state.alive or state.battle_hp <= 0):
+				# 伤兵仍保有装备，只有永久死亡的单位才掉落战利品。
+				if state != null and (not state.alive or state.battle_hp <= 0) \
+						and not state.wounded:
 					var unit := _unit_manager.get_unit(unit_id)
 					if unit == null:
 						continue
@@ -863,6 +902,34 @@ func _ensure_screen_battle(session: BattleSession) -> void:
 		session.paused_world = true
 
 
+## 结算前一次性决定每个 0 HP 单位的去留。
+## 玩家角色保留原有永久死亡规则；普通士兵按 tier 概率负伤。
+## 判定结果写回 BattleUnitState，预览与最终结算共用，不会重复掷骰。
+func _decide_wounded_outcomes(session: BattleSession) -> void:
+	if session == null:
+		return
+	for value: Variant in session.unit_states.values():
+		var state := value as BattleUnitState
+		if state == null or state.wounded_decided:
+			continue
+		if state.alive and state.battle_hp > 0:
+			continue
+		state.wounded_decided = true
+		state.wounded = false
+		var unit := _unit_manager.get_unit(state.unit_id)
+		if unit == null or unit.is_player_character:
+			continue
+		if wounded_config == null or not wounded_config.enabled:
+			continue
+		var config := _unit_manager.get_unit_config(unit.config_id)
+		var tier: int = config.tier if config != null else 1
+		var chance: float = wounded_config.get_wounded_chance(tier)
+		if chance <= 0.0:
+			continue
+		if _wounded_rng.randf() < chance:
+			state.wounded = true
+
+
 func _settle_session(session: BattleSession) -> void:
 	for value: Variant in session.unit_states.values():
 		var state := value as BattleUnitState
@@ -876,10 +943,20 @@ func _settle_session(session: BattleSession) -> void:
 		if not state.alive or final_hp <= 0:
 			state.alive = false
 			state.battle_hp = 0
-			unit.current_hp = 0
-			_destroy_dead_unit(state)
+			if state.wounded:
+				# 伤兵保留原部队成员身份、等级、装备与经验，只把 HP 置 0。
+				unit.mark_wounded()
+				# 防御性修复：经历异常增援/转队后确保仍属于本战斗的部队。
+				if unit.current_party_id != state.party_id:
+					var party := _party_manager.get_party(state.party_id)
+					if party != null:
+						_party_manager.add_member(party.party_id, unit.unit_id)
+			else:
+				unit.mark_dead()
+				_destroy_dead_unit(state)
 		else:
 			unit.current_hp = final_hp
+			unit.status = UnitData.Status.ACTIVE
 
 
 ## 阵亡单位不能继续作为部队正常成员保留。
@@ -904,8 +981,9 @@ func _unlock_session_parties(session: BattleSession) -> void:
 		var party := _party_manager.get_party(party_id)
 		if party == null:
 			continue
-		# 全员阵亡的部队不再参与世界模拟，也停止大地图 AI。
-		if party.member_unit_ids.is_empty():
+		# 没有任何可战斗成员的部队（全员永久阵亡或仅剩伤兵）停止世界移动与 AI。
+		# 只有伤兵的部队仍保留成员，等待阶段 13 的顺序治疗恢复后重新启用。
+		if _count_living_units(party) == 0:
 			party.battle_state = PartyData.BattleState.DISABLED
 		else:
 			party.battle_state = PartyData.BattleState.AVAILABLE
@@ -925,3 +1003,240 @@ func _unlock_session_parties(session: BattleSession) -> void:
 		party.battle_response_id = ""
 		party.battle_response_until = 0.0
 		EventBus.party_battle_state_changed.emit(party.party_id, int(party.battle_state))
+
+
+# ---------------------------------------------------------------------------
+# 俘虏分配与接收（阶段 13）
+# ---------------------------------------------------------------------------
+
+
+## 最大余数法：把 total_prisoners 按 participant_counts 的比例分给各部队。
+## 返回 { party_id: 数量 }；数量和恒等于 total_prisoners。
+## 余数相同时按 party_id 字典序决定先后，保证结果稳定可复现。
+static func compute_prisoner_shares(
+	total_prisoners: int, participant_counts: Dictionary
+) -> Dictionary:
+	var shares: Dictionary = {}
+	var party_ids: Array[String] = []
+	for key: Variant in participant_counts:
+		party_ids.append(str(key))
+	party_ids.sort()
+	for party_id: String in party_ids:
+		shares[party_id] = 0
+	if total_prisoners <= 0 or party_ids.is_empty():
+		return shares
+
+	var total_count: int = 0
+	for party_id: String in party_ids:
+		total_count += maxi(0, int(participant_counts.get(party_id, 0)))
+
+	# 有效参战人数总和为 0：不允许除零或随机分配，按稳定 ID 首个部队兜底。
+	if total_count <= 0:
+		shares[party_ids[0]] = total_prisoners
+		return shares
+
+	var assigned: int = 0
+	var remainders: Array[Dictionary] = []
+	for party_id: String in party_ids:
+		var count: int = maxi(0, int(participant_counts.get(party_id, 0)))
+		var product: int = total_prisoners * count
+		var base: int = product / total_count
+		shares[party_id] = base
+		assigned += base
+		remainders.append({"party_id": party_id, "remainder": product % total_count})
+
+	var remaining: int = total_prisoners - assigned
+	remainders.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		var rem_a: int = int(a["remainder"])
+		var rem_b: int = int(b["remainder"])
+		if rem_a != rem_b:
+			return rem_a > rem_b
+		return str(a["party_id"]) < str(b["party_id"])
+	)
+	var index: int = 0
+	while remaining > 0 and not remainders.is_empty():
+		var entry := remainders[index % remainders.size()]
+		var party_id: String = str(entry["party_id"])
+		shares[party_id] = int(shares.get(party_id, 0)) + 1
+		remaining -= 1
+		index += 1
+	return shares
+
+
+## 统计胜利方真实参战人数，分配战败方伤兵为俘虏。
+## 只读取 BattleSession 的实际参战记录，不使用战斗结束后的剩余人数。
+func _build_prisoner_allocation(
+	session: BattleSession, data: BattleResultData
+) -> void:
+	var winning_side: int = data.winning_side_index
+	if session == null or data == null or winning_side < 0:
+		return
+
+	for participant_value: Variant in session.participants.values():
+		var participant := participant_value as BattleParticipant
+		if participant == null:
+			continue
+		# get_party_unit_ids 基于实际加入战斗的状态表，增援也会计入且只计一次。
+		data.participant_unit_counts[participant.party_id] = \
+			session.get_party_unit_ids(participant.party_id).size()
+
+	var winner_ids: Array[String] = session.get_side_party_ids(winning_side)
+	winner_ids.sort()
+
+	var pool: Array[String] = []
+	for side_index: int in session.get_side_indices():
+		if side_index == winning_side:
+			continue
+		for unit_id: String in session.get_side_unit_ids(side_index):
+			var state := session.get_unit_state(unit_id)
+			if state != null and state.wounded:
+				pool.append(unit_id)
+	pool.sort()
+	data.prisoner_pool = pool
+	if pool.is_empty() or winner_ids.is_empty():
+		return
+
+	var counts: Dictionary = {}
+	for party_id: String in winner_ids:
+		counts[party_id] = data.get_participant_unit_count(party_id)
+	var total_count: int = 0
+	for party_id: String in counts:
+		total_count += int(counts[party_id])
+	if total_count <= 0:
+		data.prisoner_allocation_degraded = true
+
+	var shares := compute_prisoner_shares(pool.size(), counts)
+	var allocations: Dictionary = {}
+	var cursor: int = 0
+	for party_id: String in winner_ids:
+		var quota: int = int(shares.get(party_id, 0))
+		var assigned_ids: Array[String] = []
+		for _i: int in range(quota):
+			if cursor >= pool.size():
+				break
+			assigned_ids.append(pool[cursor])
+			cursor += 1
+		allocations[party_id] = assigned_ids
+	data.prisoner_allocations = allocations
+
+
+## 结算后立即把俘虏从战败部队移出：非玩家胜利部队直接接收，
+## 玩家份额保留为“待确认”，由战后界面确认后提交。
+func _claim_battle_prisoners(
+	session: BattleSession, data: BattleResultData
+) -> void:
+	if session == null or data == null or data.prisoner_pool.is_empty():
+		return
+
+	for unit_id: String in data.prisoner_pool:
+		var unit := _unit_manager.get_unit(unit_id)
+		if unit == null:
+			continue
+		var state := session.get_unit_state(unit_id)
+		if state != null:
+			_party_manager.remove_member(state.party_id, unit_id)
+		if not unit.current_party_id.is_empty():
+			_party_manager.remove_member(unit.current_party_id, unit_id)
+		# 待分配状态：已不再属于任何部队，也不会参与移动或治疗。
+		unit.mark_prisoner("")
+
+	for party_id: String in data.prisoner_allocations:
+		if party_id == player_party_id:
+			continue
+		for unit_id: String in data.get_prisoners_for_party(party_id):
+			if not _party_manager.add_prisoner(party_id, unit_id):
+				push_warning(
+					"俘虏分配失败：单位 %s → 部队 %s" % [unit_id, party_id]
+				)
+
+	var player_share := data.get_prisoners_for_party(player_party_id)
+	if not player_share.is_empty() and data.player_involved and data.player_won:
+		_pending_prisoner_settlements[session.battle_id] = session
+
+
+## 战后界面是否仍有等待玩家确认的俘虏。
+func has_pending_prisoner_selection(battle_id: String) -> bool:
+	return _pending_prisoner_settlements.has(battle_id)
+
+
+## 玩家本次可分到的俘虏 ID（稳定顺序）。
+func get_pending_player_prisoners(battle_id: String) -> Array[String]:
+	var session := _pending_prisoner_settlements.get(battle_id) as BattleSession
+	if session == null or session.final_result == null:
+		return []
+	return session.final_result.get_prisoners_for_party(player_party_id)
+
+
+## 提交玩家战后选择。accepted_unit_ids 必须是分配列表的子集；
+## 未接收的俘虏被释放（移出世界）。重复调用返回 false 且不改变数据。
+func commit_player_prisoners(
+	battle_id: String, accepted_unit_ids: Array
+) -> bool:
+	var session := _pending_prisoner_settlements.get(battle_id) as BattleSession
+	if session == null or session.final_result == null:
+		return false
+	var data := session.final_result
+	if data.player_prisoners_committed:
+		_pending_prisoner_settlements.erase(battle_id)
+		return false
+
+	var allocation := data.get_prisoners_for_party(player_party_id)
+	var player_party := _party_manager.get_party(player_party_id)
+
+	# 规范化选择：只接受分配列表内的单位，去重。
+	var accepted: Dictionary = {}
+	var accepted_ids: Array[String] = []
+	for value: Variant in accepted_unit_ids:
+		var unit_id: String = str(value)
+		if not allocation.has(unit_id) or accepted.has(unit_id):
+			continue
+		accepted[unit_id] = true
+		accepted_ids.append(unit_id)
+
+	# 先校验全部待接收单位，全部通过后再提交，避免部分结算。
+	if player_party != null:
+		var valid_ids: Array[String] = []
+		for unit_id: String in accepted_ids:
+			var unit := _unit_manager.get_unit(unit_id)
+			if unit == null or unit.status == UnitData.Status.DEAD \
+					or not unit.current_party_id.is_empty() \
+					or _party_manager.is_prisoner(unit_id):
+				accepted.erase(unit_id)
+				continue
+			valid_ids.append(unit_id)
+		accepted_ids = valid_ids
+
+	var added_ids: Array[String] = []
+	var commit_ok: bool = player_party != null
+	if commit_ok:
+		for unit_id: String in accepted_ids:
+			if _party_manager.add_prisoner(player_party_id, unit_id):
+				added_ids.append(unit_id)
+			else:
+				commit_ok = false
+				break
+	if not commit_ok:
+		# 回滚已加入的俘虏，保持待确认状态供重试。
+		for unit_id: String in added_ids:
+			_party_manager.remove_prisoner(player_party_id, unit_id)
+		return false
+
+	for unit_id: String in allocation:
+		if accepted.has(unit_id):
+			continue
+		_release_unclaimed_prisoner(unit_id)
+
+	data.player_prisoners_committed = true
+	_pending_prisoner_settlements.erase(battle_id)
+	return true
+
+
+## 玩家未接收的俘虏：清空归属并移出世界，避免留下无主伤兵。
+func _release_unclaimed_prisoner(unit_id: String) -> void:
+	var unit := _unit_manager.get_unit(unit_id)
+	if unit == null:
+		return
+	unit.clear_prisoner_ownership()
+	if not unit.current_party_id.is_empty():
+		_party_manager.remove_member(unit.current_party_id, unit_id)
+	_unit_manager.remove_unit(unit_id)

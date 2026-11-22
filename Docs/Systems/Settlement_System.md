@@ -2,7 +2,7 @@
 
 **核心数据：** `Scripts/Entities/Settlement/settlement_data.gd`
 **核心逻辑：** `Scripts/Core/World/settlement_manager.gd`
-**状态：** 数据仓储、地图图标、基础交互面板、村庄小场景入口、封地归属、采邑储备、冒险者候选人与村庄/城镇市场入口已实现
+**状态：** 数据仓储、地图图标、基础交互面板、村庄小场景入口、封地归属、采邑储备、冒险者候选人、村庄/城镇市场入口与城镇酒馆入口已实现
 
 ---
 
@@ -230,3 +230,16 @@ Milestone 1 只做基础面板；阶段 6 起村庄面板增加进入小场景�
 - 市场面板是屏幕覆盖层，不切换 Town 场景；`Scenes/Town/town.tscn` 仍保持空场景占位。
 - 村庄市场出售面包/草料，城镇市场额外出售马匹；库存按地点独立持久化，卖光后读档不会补满。
 - 市场库存与交易规则见 [Inventory_Economy_System.md](Inventory_Economy_System.md) 第 4.3 节。
+
+## 12. 城镇酒馆入口（阶段 13 新增）
+
+- 地点面板新增按钮 `SettlementTavernButton`：仅 `SettlementType.TOWN` 可见，村庄与城堡隐藏并禁用。
+- 点击后打开 `TavernPanel` 并隐藏地点面板，继续持有一个 `PAUSE_REASON_UI_PANEL`；关闭酒馆时恢复地点面板或成对释放暂停原因。
+- 酒馆菜单：
+  - “出售俘虏”：进入左买家（当前城镇）/右玩家俘虏的双栏界面；
+  - “查看雇佣兵信息”：占位界面，明确暂无真实雇佣兵；
+  - “离开酒馆”：返回地点面板。
+- 出售界面逐名显示俘虏名称、等级与身份；右侧行操作“卖出”，左侧行操作“撤回”；“重置出售”恢复打开时快照；只有“确认出售”调用 `PrisonerTradeManager.sell_prisoners()` 一次性原子结算。
+- 售价只取 `PrisonerPriceConfig`（默认 1/2/3 级 = 10/20/30 金币），UI 不写死价格，也不按装备/伤势/经验改价。
+- 成功出售后金币进入 `PlayerProfile`，Unit 退出玩家控制并写入 `sold_to_settlement_id`；失败不改任何金币或归属。
+- 详细规则见 [Wounded_Prisoner_System.md](Wounded_Prisoner_System.md)。

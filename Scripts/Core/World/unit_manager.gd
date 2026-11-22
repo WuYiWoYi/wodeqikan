@@ -80,6 +80,44 @@ func create_unit(
 	display_name: String = "",
 	level: int = 0
 ) -> UnitData:
+	var unit := _build_unit_data(config, faction_id, display_name, level)
+	if unit == null:
+		return null
+	if _units.has(unit.unit_id):
+		push_error("UnitManager 生成出重复单位 ID: %s" % unit.unit_id)
+		return null
+	_units[unit.unit_id] = unit
+	return unit
+
+
+## 创建一个尚未进入仓储、也不属于任何部队的独立 UnitData。
+##
+## 用于村庄冒险者候选人：候选人需要真实的单位身份（唯一 ID、等级、属性、
+## 外观与装备），但在被招募前不应出现在 UnitManager 仓储或任何部队中。
+## 招募成功后再通过 add_unit() 注册到仓储并加入玩家部队。
+## 属性仍由 StatCalculator 统一计算，不维护第二套公式。
+func create_detached_unit(
+	config: UnitConfig,
+	faction_id: String,
+	display_name: String = "",
+	level: int = 0
+) -> UnitData:
+	var unit := _build_unit_data(config, faction_id, display_name, level)
+	if unit == null:
+		return null
+	if _units.has(unit.unit_id):
+		push_error("UnitManager 生成出重复单位 ID: %s" % unit.unit_id)
+		return null
+	return unit
+
+
+## 创建单位数据但不注册；create_unit / create_detached_unit 的唯一构造入口。
+func _build_unit_data(
+	config: UnitConfig,
+	faction_id: String,
+	display_name: String,
+	level: int
+) -> UnitData:
 	if _id_generator == null:
 		push_error("UnitManager 尚未初始化 IdGenerator")
 		return null
@@ -92,9 +130,6 @@ func create_unit(
 
 	var unit := UnitData.new()
 	unit.unit_id = _id_generator.next_id(IdGenerator.UNIT)
-	if _units.has(unit.unit_id):
-		push_error("UnitManager 生成出重复单位 ID: %s" % unit.unit_id)
-		return null
 
 	unit.config_id = resolved.config_id
 	unit.display_name = (
@@ -132,7 +167,6 @@ func create_unit(
 	unit.current_hp = unit.max_hp
 	unit.current_party_id = ""
 
-	_units[unit.unit_id] = unit
 	return unit
 
 

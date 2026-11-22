@@ -2797,3 +2797,114 @@
 **原因：** 补给与马匹个体是新增持久化数据；必须让旧档可继续游玩且不因读档产生重复结算。
 
 **影响：** 读档流程依赖 Schema 版本判断迁移；新存档必须写入 v6 字段。
+
+---
+
+## D152 · 负伤概率集中配置
+
+**日期：** 2026-11-22
+**状态：** 已确定
+
+**决策：**
+
+- 战斗结算对 HP≤0 的非玩家单位按 tier 读取 `WoundedConfig.tier_wounded_chances`：1/2/3 级默认 50%/60%/80%。
+- 概率不在多个结算点硬编码；`enabled=false` 时全部永久死亡，供特殊模式与测试使用。
+- 玩家角色不参与负伤判定，保留原有永久死亡规则。
+
+**原因：** 负伤规则需要可调、可复现，并避免不同结算路径出现概率漂移。
+
+**影响：** `BattleManager` 注入配置后生成 `BattleUnitState.wounded`；Unit 写回阶段再调用 `UnitData.mark_wounded()`。
+
+---
+
+## D153 · 伤兵只由 WorldTime 整小时顺序治疗
+
+**日期：** 2026-11-22
+**状态：** 已确定
+
+**决策：**
+
+- `WoundedHealingManager` 每游戏小时生成 `base_healing_per_hour + medicine_healing_bonus` 点治疗量。
+- 按 `PartyData.member_unit_ids` 顺序治疗，当前伤兵满血后溢出到下一名；全部满血时丢弃余量。
+- 只依赖 `WorldTime`，暂停不推进，1x/2x 每游戏小时一致；同一小时只结算一次，跨小时累计。
+- 玩家与 NPC 部队统一生效；已移除/销毁部队不再治疗。
+- `healing_last_settled_hour` 随存档持久化，读档不补算离线小时。
+
+**原因：** 逐帧增加治疗量会造成倍速/帧率差异；按成员顺序保证结果稳定可测试。
+
+**影响：** `WorldSimulation` 在补给结算之后、战斗/遭遇处理之前调用 `tick()`；治疗量不足时保留伤兵状态。
+
+---
+
+## D154 · 战败方伤兵作为俘虏池并按实际参战数分配
+
+**日期：** 2026-11-22
+**状态：** 已确定
+
+**决策：**
+
+- 俘虏池只包含战斗结束时战败方的 `WOUNDED` 单位，不包含永久死亡单位。
+- 胜利方分配权重为实际参战单位数，统计来源为 `BattleSession` 的参战/增援单位，每单位只计一次，不使用存活数。
+- 使用最大余数法：`share_i = floor(P * N_i / N)`，余数按降序、平局按稳定 `party_id` 升序补齐，保证份额和恒等于 P。
+- 单胜利方获得全部；`N=0` 时走显式回退（稳定顺序第一方获得全部），并标记 `prisoner_allocation_degraded`。
+- 分配顺序按稳定 party_id 与单位 ID 排序，不依赖 Dictionary 插入顺序。
+
+**原因：** “谁真正参战谁分俘虏”符合需求，且整数分配必须可复现、无损。
+
+**影响：** `BattleResultData` 保存 `participant_unit_counts`、`prisoner_pool`、`prisoner_allocations`；`BattleManager.compute_prisoner_shares()` 为纯静态函数，便于单元测试。
+
+---
+
+## D155 · 玩家俘虏份额挂起并原子确认
+
+**日期：** 2026-11-22
+**状态：** 已确定
+
+**决策：**
+
+- 战斗结算时非玩家胜利方立即接收份额；玩家份额保存在 `_pending_prisoner_settlements`，等待战后 UI 确认。
+- `commit_player_prisoners(battle_id, accepted)` 先整体校验，再通过 `PartyManager.add_prisoner()` 原子写入；任一失败回滚。
+- 未接收单位调用 `_release_unclaimed_prisoner()`：清除归属、必要时移出成员，并从 `UnitManager` 删除，避免产生无归属幽灵单位。
+- 同一战斗重复提交返回 false；确认后清除挂起记录。
+- 成员与俘虏互斥：`add_member` 拒绝俘虏/已售出单位，`add_prisoner` 拒绝任何部队成员。
+
+**原因：** UI 不能直接修改核心 Unit 状态；战后选择必须可取消、可重试且不产生重复归属。
+
+**影响：** `BattleScene` 在原有结果面板确认后展示 `PrisonerSelectionPanel`；失败方不显示该界面。
+
+---
+
+## D156 · 城镇酒馆出售俘虏与集中定价
+
+**日期：** 2026-11-22
+**状态：** 已确定
+
+**决策：**
+
+- 只有 `SettlementType.TOWN` 的地点面板显示“进入酒馆”。
+- `PrisonerPriceConfig.level_prices` 集中定义 1/2/3 级价格（默认 10/20/30），超出等级取边界价格。
+- `PrisonerTradeManager.sell_prisoners()` 先校验全部单位（存在、属于该玩家部队、非成员、价格>0、地点有效），再一次性加金币、移除俘虏并写入 `sold_to_settlement_id`。
+- UI 只维护预览；确认按钮才调用管理器，失败不产生部分结算。
+
+**原因：** 价格规则属于数据配置，交易必须原子，售出单位要有明确的非玩家状态。
+
+**影响：** `TavernPanel` 复用市场式左买/右卖交互；售出单位退出玩家控制与俘虏列表。
+
+---
+
+## D157 · 存档 Schema v7 与伤兵/俘虏迁移
+
+**日期：** 2026-11-22
+**状态：** 已确定
+
+**决策：**
+
+- `SaveData.CURRENT_SCHEMA_VERSION` 6 → 7。
+- v7 新增/完善：`UnitData.status/current_hp`、`prisoner_owner_party_id`、`sold_to_settlement_id`、`PartyData.prisoner_unit_ids`、`healing_last_settled_hour`、村庄候选人字段。
+- 读档时缺失字段取安全默认值；版本小于 7 的存档执行一次幂等迁移，不重复生成 Unit。
+- 读档后调用 `PartyManager.sanitize_prisoner_ownership()`：成员身份优先于俘虏、去重、清理悬空归属；重复调用结果一致。
+- 战斗结算不进入存档：唯一 `battle_id` + `BattleSession.Status.ENDED` 防止重复结算，且任何战斗期间禁止存档；因此无需新增“结算阶段”持久化字段。
+
+**原因：** 伤兵与俘虏是新增持久化关系，必须在读档时恢复双向一致且可重复清洗。
+
+**影响：** 新存档写入 v7 字段；`save_persistence_test` / `political_hierarchy_test` 的版本断言同步为 7。

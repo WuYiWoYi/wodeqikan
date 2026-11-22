@@ -29,6 +29,9 @@ func _run() -> void:
 	_context.name = "BattleSceneTestContext"
 	add_child(_context)
 	_check(WorldInitializer.create_new_world(_context), "初始化世界")
+	# 本测试聚焦战斗场景与死亡清理；阶段 13 的负伤概率由专门测试覆盖，
+	# 这里关闭负伤以保持“阵亡=永久移除”的原始断言。
+	_context.battle_manager.set_wounded_config(null)
 	var player := _context.get_player_party()
 	var enemy := _find_party_by_name(WorldInitializer.TEST_ENEMY_PARTY_NAME)
 	_check(player != null and enemy != null, "双方部队存在")

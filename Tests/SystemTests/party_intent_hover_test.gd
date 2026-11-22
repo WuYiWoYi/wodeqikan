@@ -241,7 +241,8 @@ func _detail_labels() -> Array[String]:
 			continue
 		var label := child as Label
 		if label.name == "PartyHoverName" or label.name == "PartyHoverActivity" \
-				or label.name == "PartyHoverPolitics":
+				or label.name == "PartyHoverPolitics" \
+				or label.name == "PartyHoverSpeed":
 			continue
 		result.append(label.text)
 	return result

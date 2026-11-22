@@ -35,6 +35,8 @@ func _run() -> void:
 	_context.name = "BattleSideResultContext"
 	add_child(_context)
 	_check(WorldInitializer.create_new_world(_context), "初始化世界")
+	# 本测试验证“阵亡人数”，关闭阶段 13 的随机负伤以免伤兵影响统计。
+	_context.battle_manager.set_wounded_config(null)
 
 	_player = _context.get_player_party()
 	_enemy = _find_party_by_name(WorldInitializer.BANDIT_PARTY_NAME)

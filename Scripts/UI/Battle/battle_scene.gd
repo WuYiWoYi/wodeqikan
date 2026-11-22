@@ -117,6 +117,10 @@ var _result_exp_label: Label = null
 var _result_reward_label: Label = null
 var _return_button: Button = null
 
+## 阶段 13：战斗结果确认后、返回大地图前的俘虏选择界面。
+var _prisoner_panel: PrisonerSelectionPanel = null
+var _prisoner_pending: bool = false
+
 var _control_dim: ColorRect = null
 var _control_panel: PanelContainer = null
 var _control_list: VBoxContainer = null
@@ -885,6 +889,16 @@ func _build_ui() -> void:
 	column.add_child(_return_button)
 
 	_build_control_transfer_ui()
+	_build_prisoner_selection_ui()
+
+
+func _build_prisoner_selection_ui() -> void:
+	_prisoner_panel = PrisonerSelectionPanel.new()
+	_prisoner_panel.name = "PrisonerSelectionPanel"
+	_prisoner_panel.visible = false
+	_set_full_rect(_prisoner_panel)
+	_prisoner_panel.committed.connect(_on_prisoners_committed)
+	_ui_root.add_child(_prisoner_panel)
 
 
 func _build_control_transfer_ui() -> void:
@@ -1651,16 +1665,60 @@ func _side_display_names(side_index: int) -> String:
 
 
 func _on_return_pressed() -> void:
-	if _returned:
+	if _returned or _prisoner_pending:
 		return
 	_returned = true
 	_return_button.disabled = true
+	# 先隐藏结果面板：俘虏流程排在现有结果信息之后。
+	_result_dim.visible = false
+	_result_panel.visible = false
 
 	if _battle_manager != null and _session != null \
 			and _battle_manager.current_battle == _session:
 		if not _battle_manager.finish_battle(_session.battle_id, int(_result)):
 			push_error("战斗结算失败")
 
+	# 只有玩家参与的胜利方且分到俘虏时才进入选择界面；失败方不显示。
+	if _show_prisoner_selection():
+		return
+	_change_to_world_map()
+
+
+## 显示战后俘虏选择；没有待接收俘虏时返回 false。
+func _show_prisoner_selection() -> bool:
+	if _battle_manager == null or _session == null or _context == null:
+		return false
+	if not _battle_manager.has_pending_prisoner_selection(_session.battle_id):
+		return false
+	var allocated: Array[String] = \
+		_battle_manager.get_pending_player_prisoners(_session.battle_id)
+	if allocated.is_empty():
+		return false
+
+	var existing: Array[String] = []
+	if not _context.player_party_id.is_empty():
+		existing = _context.party_manager.get_prisoner_ids(_context.player_party_id)
+
+	_prisoner_pending = true
+	# 选择期间暂停世界，避免结算后大地图在后台继续推进。
+	TimeManager.push_pause(&"prisoner_selection")
+	_prisoner_panel.setup(_context.unit_manager, allocated, existing)
+	_prisoner_panel.visible = true
+	return true
+
+
+func _on_prisoners_committed(accepted_unit_ids: Array) -> void:
+	if _battle_manager != null and _session != null:
+		if not _battle_manager.commit_player_prisoners(
+			_session.battle_id, accepted_unit_ids
+		):
+			push_error("俘虏接收提交失败")
+	_prisoner_pending = false
+	TimeManager.pop_pause(&"prisoner_selection")
+	_change_to_world_map()
+
+
+func _change_to_world_map() -> void:
 	var error: Error = SceneManager.change_scene(SceneManager.WORLD_MAP_SCENE)
 	if error != OK:
 		push_error("无法返回大地图（错误码 %s）" % error)

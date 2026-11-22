@@ -3,7 +3,7 @@
 **核心数据：** `Scripts/Entities/Unit/unit_data.gd`、`Scripts/Config/unit_config.gd`
 **核心逻辑：** `Scripts/Core/World/unit_manager.gd`、`Scripts/Core/Gameplay/stat_calculator.gd`
 **战斗表现：** `Scripts/Systems/Combat/unit_actor.gd`、`unit_controller.gd`
-**状态：** 数据层、三级兵种与工资、等级成长、消耗物品晋升、武器攻击距离、马匹骑乘状态、部队查看 UI 待机动画、克制步兵步态、跃马式马腿动画、自由攻击、360°攻击、长矛前后摇与攻击后保持、实体碰撞、左右手武器独立层级、人物头部/头盔分离、满血隐藏生命条、临时部件美术、玩家家族外观与三级玩家角色完成；装备获取、正式头盔/盾牌美术与复杂状态机未实现
+**状态：** 数据层、三级兵种与工资、等级成长、消耗物品晋升、武器攻击距离、马匹骑乘状态、伤兵/俘虏/售出状态、部队查看 UI 待机动画、克制步兵步态、跃马式马腿动画、自由攻击、360°攻击、长矛前后摇与攻击后保持、实体碰撞、左右手武器独立层级、人物头部/头盔分离、满血隐藏生命条、临时部件美术、玩家家族外观与三级玩家角色完成；装备获取、正式头盔/盾牌美术与复杂状态机未实现
 
 ---
 
@@ -33,7 +33,10 @@
 | `projectile_speed` | float | 箭矢飞行速度（像素/秒） | 装备配置 |
 | `projectile_arc_height` | float | 箭矢抛物线视觉高度 | 装备配置 |
 | `faction_id` | String | 所属阵营 | `UnitManager` |
+| `status` | `Status` | `ACTIVE` / `WOUNDED` / `DEAD`；伤兵仍保留成员身份 | `BattleManager` / `UnitManager` |
 | `current_party_id` | String | 当前所属部队 | `PartyManager` |
+| `prisoner_owner_party_id` | String | 俘虏归属部队；非空表示被该部队关押 | `PartyManager` |
+| `sold_to_settlement_id` | String | 已出售给的地点；非空表示退出玩家控制 | `PrisonerTradeManager` |
 | `equipment` | Dictionary | 槽位字符串（`WEAPON` 等）→ 装备 ID | `UnitManager.equip_item()` / `unequip_slot()` |
 | `is_mounted` | bool | 是否处于骑乘状态；由 `equipment` 是否存在 `MOUNT` 派生，不是独立兵种 | `UnitManager`（装备/重算时同步） |
 | `is_player_character` | bool | 玩家角色身份（持久化）；与控制权无关 | 配置 / `UnitManager` |
@@ -600,6 +603,8 @@ Idle
 | 弓表现与箭矢 | 已实现：弓默认朝左、方向旋转；箭矢独立飞行、抛物线视觉高度、地面投影参与 Y 排序 |
 | 远程 AI / 玩家射箭 | 已实现：AI 接近/站定/后撤/换目标；玩家鼠标世界坐标、固定终点、独立 3 秒冷却 |
 | 初始世界/招募生成士兵 | 已用临时测试兵力打通；玩家部队共 15 人（含 3 名弓箭手），其中 4 名骑乘职业步兵；招募系统 TODO |
+| 伤兵状态 | 已实现：`Status.WOUNDED`、HP=0、保留身份/装备/经验；治愈后恢复 `ACTIVE` |
+| 俘虏/售出状态 | 已实现：`prisoner_owner_party_id`、`sold_to_settlement_id`，与成员身份互斥 |
 
 ## 9. 待确认
 
@@ -676,3 +681,39 @@ Idle
 - 旧单位没有 `family_id` / `appearance` 时保持原有阵营外观，不自动补随机头盔或家族服装。
 - 新游戏创建的士兵（包括玩家起始部队）在 `WorldInitializer` 统一生成外观。
 - 外观资源缺失时 `PartVisual` 只跳过对应部件并记录一次警告，不阻止单位生成。
+
+## 11. 伤兵、俘虏与售出状态（阶段 13 新增）
+
+### 11.1 状态枚举
+
+```gdscript
+enum Status { ACTIVE, WOUNDED, DEAD }
+```
+
+- `ACTIVE`：正常单位，可战斗、移动、被招募/分配。
+- `WOUNDED`：HP=0 的伤兵，仍属于原部队成员列表，保留等级、经验、装备与全部身份数据；不能参战、移动或攻击。
+- `DEAD`：永久死亡，由结算清理；不再存在于部队成员列表，通常随后从 `UnitManager` 删除。
+
+### 11.2 状态转换
+
+| 入口 | 结果 |
+|---|---|
+| 战斗结算 HP≤0 且负伤判定成功 | `mark_wounded()` → `WOUNDED`，HP=0，保留 `current_party_id` |
+| 战斗结算 HP≤0 且负伤判定失败 | `mark_dead()` → `DEAD`，经 `PartyManager` 移除成员并删除 UnitData |
+| 玩家角色 HP≤0 | 永久死亡，不参与负伤判定 |
+| 治疗使 HP>0 | `clamp_hp()` 将 `WOUNDED` 恢复为 `ACTIVE` |
+| `mark_prisoner(owner)` | 清除 `current_party_id`，`ACTIVE` → `WOUNDED`，写入 `prisoner_owner_party_id` |
+| `mark_sold(settlement_id)` | 清除俘虏归属与成员归属，写入 `sold_to_settlement_id` |
+
+### 11.3 互斥约束
+
+- 一个 Unit 不能同时是某部队成员与俘虏：`PartyManager.add_member()` 拒绝 `is_prisoner()` 或已售出单位，`add_prisoner()` 拒绝任何部队成员。
+- 俘虏同一时间只能属于一个关押部队；转移必须先移除旧归属。
+- `sold_to_settlement_id` 非空后，单位退出玩家控制与俘虏列表，不再参与战斗、治疗或工资。
+- 读档时 `PartyManager.sanitize_prisoner_ownership()` 以成员身份优先，去重并清理悬空归属。
+
+### 11.4 表现与查询
+
+- 成员列表通过 `is_wounded()` / `status` 区分伤兵，不删除条目；伤兵仍计入部队人数与工资。
+- 伤兵不生成可战斗的 `UnitController`；战斗开始只取 `ACTIVE` 成员。
+- 详细治疗与俘虏流程见 [Wounded_Prisoner_System.md](Wounded_Prisoner_System.md)。

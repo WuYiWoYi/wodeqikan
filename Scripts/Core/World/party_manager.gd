@@ -74,6 +74,9 @@ func remove_party(party_id: String) -> bool:
 		for unit: UnitData in _unit_manager.get_all_units():
 			if unit.current_party_id == party_id:
 				unit.current_party_id = ""
+			if unit.prisoner_owner_party_id == party_id:
+				# 部队解散后俘虏不再属于任何部队，保留 Unit 数据供后续处理。
+				unit.clear_prisoner_ownership()
 
 	_parties.erase(party_id)
 	return true
@@ -92,6 +95,12 @@ func add_member(party_id: String, unit_id: String) -> bool:
 	var unit := _unit_manager.get_unit(unit_id)
 	if unit == null:
 		push_warning("PartyManager.add_member: 单位不存在 %s" % unit_id)
+		return false
+	if unit.is_prisoner() or not unit.sold_to_settlement_id.is_empty():
+		push_warning(
+			"PartyManager.add_member: 单位 %s 已处于俘虏/出售状态，不能直接加入部队"
+			% unit_id
+		)
 		return false
 	if unit.faction_id != party.faction_id:
 		push_warning(
@@ -165,6 +174,125 @@ func get_units_of_party(party_id: String) -> Array[UnitData]:
 	if party == null or _unit_manager == null:
 		return result
 	return _unit_manager.get_units_of_party(party)
+
+
+# ---------------------------------------------------------------------------
+# 俘虏归属（阶段 13）
+# ---------------------------------------------------------------------------
+# 俘虏与成员互斥：加入俘虏列表前必须先从原部队移除成员关系。
+# 归属由 UnitData.prisoner_owner_party_id 与 PartyData.prisoner_unit_ids
+# 双向维护；敌方单位允许加入胜利方俘虏列表，不受阵营一致性限制。
+
+
+## 返回部队持有的俘虏 ID 副本。
+func get_prisoner_ids(party_id: String) -> Array[String]:
+	var party := get_party(party_id)
+	if party == null:
+		return []
+	return party.prisoner_unit_ids.duplicate()
+
+
+func get_prisoner_units(party_id: String) -> Array[UnitData]:
+	var result: Array[UnitData] = []
+	if _unit_manager == null:
+		return result
+	for unit_id: String in get_prisoner_ids(party_id):
+		var unit := _unit_manager.get_unit(unit_id)
+		if unit != null:
+			result.append(unit)
+	return result
+
+
+func get_prisoner_owner_party_id(unit_id: String) -> String:
+	if _unit_manager == null:
+		return ""
+	var unit := _unit_manager.get_unit(unit_id)
+	return unit.prisoner_owner_party_id if unit != null else ""
+
+
+func is_prisoner(unit_id: String) -> bool:
+	return not get_prisoner_owner_party_id(unit_id).is_empty()
+
+
+## 将单位加入部队俘虏列表。单位必须存在、不是任何部队成员、
+## 且尚未被其他部队关押。所有校验通过后才修改数据。
+func add_prisoner(party_id: String, unit_id: String) -> bool:
+	var party := get_party(party_id)
+	if party == null:
+		push_warning("PartyManager.add_prisoner: 部队不存在 %s" % party_id)
+		return false
+	if _unit_manager == null:
+		push_error("PartyManager 尚未装配 UnitManager")
+		return false
+	var unit := _unit_manager.get_unit(unit_id)
+	if unit == null:
+		push_warning("PartyManager.add_prisoner: 单位不存在 %s" % unit_id)
+		return false
+	if party.prisoner_unit_ids.has(unit_id):
+		return false
+	if not unit.current_party_id.is_empty() or _is_member_of_any_party(unit_id):
+		push_warning(
+			"PartyManager.add_prisoner: 单位 %s 仍是部队成员，不能成为俘虏" % unit_id
+		)
+		return false
+	if not unit.prisoner_owner_party_id.is_empty():
+		push_warning(
+			"PartyManager.add_prisoner: 单位 %s 已被部队 %s 关押"
+			% [unit_id, unit.prisoner_owner_party_id]
+		)
+		return false
+	if unit.status == UnitData.Status.DEAD:
+		return false
+
+	party.prisoner_unit_ids.append(unit_id)
+	unit.mark_prisoner(party_id)
+	return true
+
+
+## 在部队之间转移俘虏；任一校验失败时不修改数据。
+func transfer_prisoner(unit_id: String, target_party_id: String) -> bool:
+	var target := get_party(target_party_id)
+	if target == null or _unit_manager == null:
+		return false
+	var unit := _unit_manager.get_unit(unit_id)
+	if unit == null:
+		return false
+	if target.prisoner_unit_ids.has(unit_id):
+		return true
+	if not unit.current_party_id.is_empty() or _is_member_of_any_party(unit_id):
+		return false
+	var old_owner := unit.prisoner_owner_party_id
+	if not old_owner.is_empty() and not remove_prisoner(old_owner, unit_id):
+		return false
+	return add_prisoner(target_party_id, unit_id)
+
+
+## 从部队俘虏列表移除并清空归属；Unit 数据保留。
+func remove_prisoner(party_id: String, unit_id: String) -> bool:
+	var party := get_party(party_id)
+	if party == null or not party.prisoner_unit_ids.has(unit_id):
+		return false
+	_remove_all_occurrences(party.prisoner_unit_ids, unit_id)
+	if _unit_manager != null:
+		var unit := _unit_manager.get_unit(unit_id)
+		if unit != null and unit.prisoner_owner_party_id == party_id:
+			unit.clear_prisoner_ownership()
+	return true
+
+
+## 按单位 ID 释放俘虏（找到当前关押部队后移除）。
+func release_prisoner(unit_id: String) -> bool:
+	var owner_id: String = get_prisoner_owner_party_id(unit_id)
+	if owner_id.is_empty():
+		return false
+	return remove_prisoner(owner_id, unit_id)
+
+
+func _is_member_of_any_party(unit_id: String) -> bool:
+	for party: PartyData in get_all_parties():
+		if party.member_unit_ids.has(unit_id):
+			return true
+	return false
 
 
 ## 当前部队所有成员的每日工资总额。无效成员引用会被跳过。
@@ -244,7 +372,98 @@ func validate_membership_consistency() -> Array[String]:
 				"单位 %s 的 current_party_id=%s，但不在该部队成员列表中"
 				% [unit.unit_id, unit.current_party_id]
 			)
+
+	# 阶段 13：俘虏与成员互斥，且俘虏双向归属必须一致。
+	var prisoner_to_party: Dictionary = {}
+	for party: PartyData in get_all_parties():
+		var local_seen: Dictionary = {}
+		for unit_id: String in party.prisoner_unit_ids:
+			if local_seen.has(unit_id):
+				errors.append("部队 %s 的俘虏列表重复包含单位 %s" % [party.party_id, unit_id])
+				continue
+			local_seen[unit_id] = true
+			if unit_to_party.has(unit_id):
+				errors.append(
+					"单位 %s 同时是部队 %s 的成员和部队 %s 的俘虏"
+					% [unit_id, unit_to_party[unit_id], party.party_id]
+				)
+				continue
+			if prisoner_to_party.has(unit_id):
+				errors.append(
+					"单位 %s 同时被部队 %s 和 %s 关押"
+					% [unit_id, prisoner_to_party[unit_id], party.party_id]
+				)
+				continue
+			prisoner_to_party[unit_id] = party.party_id
+			var unit := _unit_manager.get_unit(unit_id)
+			if unit == null:
+				errors.append("部队 %s 的俘虏 %s 不存在" % [party.party_id, unit_id])
+			elif unit.prisoner_owner_party_id != party.party_id:
+				errors.append(
+					"单位 %s 的俘虏归属=%s 与部队 %s 的俘虏列表不一致"
+					% [unit_id, unit.prisoner_owner_party_id, party.party_id]
+				)
+
+	for unit: UnitData in _unit_manager.get_all_units():
+		if unit.prisoner_owner_party_id.is_empty():
+			continue
+		if not prisoner_to_party.has(unit.unit_id):
+			errors.append(
+				"单位 %s 的俘虏归属=%s，但不在该部队俘虏列表中"
+				% [unit.unit_id, unit.prisoner_owner_party_id]
+			)
 	return errors
+
+
+## 读档后校正俘虏双向归属；幂等，只修复明显不一致的数据。
+## 成员身份优先：同一单位同时出现在两处时保留成员关系并解除俘虏归属。
+func sanitize_prisoner_ownership() -> Array[String]:
+	var notes: Array[String] = []
+	if _unit_manager == null:
+		return notes
+
+	var member_ids: Dictionary = {}
+	for party: PartyData in get_all_parties():
+		for unit_id: String in party.member_unit_ids:
+			member_ids[unit_id] = true
+
+	var claimed: Dictionary = {}
+	for party: PartyData in get_all_parties():
+		var cleaned: Array[String] = []
+		for unit_id: String in party.prisoner_unit_ids:
+			var unit := _unit_manager.get_unit(unit_id)
+			if unit == null:
+				notes.append("移除不存在单位 %s 的俘虏记录" % unit_id)
+				continue
+			if member_ids.has(unit_id):
+				notes.append("单位 %s 仍是成员，解除俘虏记录" % unit_id)
+				unit.clear_prisoner_ownership()
+				continue
+			if claimed.has(unit_id):
+				notes.append(
+					"单位 %s 重复出现在多支部队俘虏列表，保留 %s"
+					% [unit_id, claimed[unit_id]]
+				)
+				continue
+			claimed[unit_id] = party.party_id
+			cleaned.append(unit_id)
+		if cleaned.size() != party.prisoner_unit_ids.size():
+			party.prisoner_unit_ids.clear()
+			party.prisoner_unit_ids.append_array(cleaned)
+
+	# 以俘虏列表为准修复 Unit 归属；列表外的归属一律清空。
+	for unit: UnitData in _unit_manager.get_all_units():
+		if member_ids.has(unit.unit_id):
+			if not unit.prisoner_owner_party_id.is_empty():
+				unit.clear_prisoner_ownership()
+			continue
+		if claimed.has(unit.unit_id):
+			unit.prisoner_owner_party_id = str(claimed[unit.unit_id])
+			unit.current_party_id = ""
+		elif not unit.prisoner_owner_party_id.is_empty():
+			notes.append("清除单位 %s 的悬空俘虏归属" % unit.unit_id)
+			unit.clear_prisoner_ownership()
+	return notes
 
 
 func to_dict() -> Dictionary:
