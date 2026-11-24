@@ -115,7 +115,7 @@ party.member_unit_ids.has(unit.unit_id)
 | `validate_membership_consistency() -> Array[String]` | 双向归属校验（含俘虏冲突），空列表表示通过 |
 | `get_prisoner_ids(party_id)` / `get_prisoner_units(party_id)` | 获取俘虏 ID / 数据 |
 | `is_prisoner(unit_id)` / `get_prisoner_owner_party_id(unit_id)` | 查询俘虏归属 |
-| `add_prisoner(party_id, unit_id) -> bool` | 加入俘虏；校验部队/单位存在、非任何部队成员、未被其他部队关押、非死亡 |
+| `add_prisoner(party_id, unit_id) -> bool` | 加入俘虏；校验部队/单位存在、非任何部队成员、未被其他部队关押、非死亡、未出售 |
 | `transfer_prisoner(unit_id, target_party_id) -> bool` | 俘虏转押，保持双向一致 |
 | `remove_prisoner(party_id, unit_id) -> bool` | 从指定部队的俘虏列表移除并清空归属；Unit 保留 |
 | `release_prisoner(unit_id) -> bool` | 按当前归属释放俘虏 |
@@ -446,6 +446,7 @@ FiefRecruitmentManager / AdventurerRecruitmentManager
 - 俘虏是独立 `UnitData`：唯一 ID、不可堆叠、保留等级/装备/属性；不是背包物品，也不进入 `member_unit_ids`。
 - 加入/转移/移除只能通过 `PartyManager` 的俘虏 API，禁止 UI 或其他系统直接改数组。
 - 俘虏不能战斗、移动、攻击、被治疗或领取工资；`remove_party()` 只清空归属，不删除 Unit。
+- `sold_to_settlement_id` 非空的单位已离开玩家控制，`add_prisoner()` 拒绝再次关押；NPC 领主只能由 [Lord_Ransom_System.md](Lord_Ransom_System.md) 通过 `mark_ransomed()` 恢复后重回世界。
 - 战斗结算由 `BattleManager` 调用 `add_prisoner()` 写入非玩家胜利方份额；玩家份额在确认后写入。
 - 读档流程：
   1. 恢复 `UnitData` 与 `PartyData`；

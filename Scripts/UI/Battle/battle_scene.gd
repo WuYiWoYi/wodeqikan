@@ -1362,10 +1362,18 @@ func _create_unit_controller(
 	var controller := UnitController.new()
 	controller.setup(unit, state, player_side, actor, Rect2(Vector2.ZERO, BATTLEFIELD_SIZE))
 	controller.side_index = side_index
+	# 近战与箭矢共用同一经验回调；经验结算仍由 BattleManager/UnitManager 完成。
+	controller.experience_callback = _on_unit_combat_experience
 
 	_actors[unit_id] = actor
 	_controllers[unit_id] = controller
 	return controller
+
+
+## UnitController 实际造成伤害/击杀后的经验回调。
+func _on_unit_combat_experience(unit_id: String, amount: int) -> void:
+	if _battle_manager != null:
+		_battle_manager.grant_combat_experience(unit_id, amount)
 
 
 ## 为 UnitVisual 提供当前装备槽位的视觉配置；缺失配置时保持默认长矛/头部。

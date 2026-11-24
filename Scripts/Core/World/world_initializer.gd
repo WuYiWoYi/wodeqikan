@@ -609,6 +609,10 @@ static func create_new_world(context: WorldContext) -> bool:
 	if not create_test_battle_forces(context):
 		push_error("初始测试兵力生成失败")
 		return false
+	# 部队领袖单位与贵族身份使用稳定 ID 绑定，俘虏售价/赎回都依赖它。
+	if not bind_lord_unit_identities(context):
+		push_error("部队领袖与贵族身份绑定失败")
+		return false
 	if not initialize_fief_economy(context):
 		push_error("封地经济初始化失败")
 		return false
@@ -617,6 +621,96 @@ static func create_new_world(context: WorldContext) -> bool:
 		return false
 
 	return context.is_valid_world()
+
+
+## 把每支 NPC 部队的领袖单位与指挥贵族绑定。
+## 只用稳定 ID（party.leader_noble_id / leader_unit_id），不依赖名称或节点。
+static func bind_lord_unit_identities(context: WorldContext) -> bool:
+	if context == null:
+		return false
+	for party: PartyData in context.party_manager.get_all_parties():
+		if party == null or party.is_player_controlled() \
+				or party.leader_noble_id.is_empty():
+			continue
+		var leader := context.unit_manager.get_unit(party.leader_unit_id)
+		if leader == null or leader.is_player_character:
+			continue
+		leader.noble_id = party.leader_noble_id
+		if leader.family_id.is_empty():
+			leader.family_id = party.family_id
+	return true
+
+
+## 赎回后复用原部队：把领主放回领袖位置，并按家族骑士编制补齐士兵。
+## 不删除幸存成员，也不创建第二支同贵族部队；调用方负责重置位置/AI 状态。
+static func restore_lord_party(
+	context: WorldContext,
+	party: PartyData,
+	noble: NobleData,
+	leader_unit: UnitData
+) -> bool:
+	if context == null or party == null or noble == null or leader_unit == null:
+		return false
+	var militia: UnitConfig = load(MILITIA_CONFIG_PATH) as UnitConfig
+	var trained: UnitConfig = load(TRAINED_CONFIG_PATH) as UnitConfig
+	var veteran: UnitConfig = load(VETERAN_CONFIG_PATH) as UnitConfig
+	if militia == null or trained == null or veteran == null:
+		push_error("赎回部队配置加载失败")
+		return false
+
+	# 领主必须重新成为该部队成员，并占据领袖位置。
+	if leader_unit.current_party_id != party.party_id:
+		if not leader_unit.current_party_id.is_empty():
+			context.party_manager.remove_member(
+				leader_unit.current_party_id, leader_unit.unit_id
+			)
+		if not party.member_unit_ids.has(leader_unit.unit_id) \
+				and not context.party_manager.add_member(
+					party.party_id, leader_unit.unit_id
+				):
+			push_error("赎回领主无法重新加入部队: %s" % leader_unit.unit_id)
+			return false
+	leader_unit.noble_id = noble.lord_id
+	party.leader_unit_id = leader_unit.unit_id
+	party.leader_noble_id = noble.lord_id
+	if party.family_id.is_empty():
+		var house := context.house_manager.get_house(noble.house_id)
+		if house != null:
+			party.family_id = house.banner_id
+
+	var family := context.family_registry.get_config(party.family_id)
+	var existing: Dictionary = {}
+	for unit_id: String in party.member_unit_ids:
+		if unit_id == leader_unit.unit_id:
+			continue
+		var unit := context.unit_manager.get_unit(unit_id)
+		if unit == null:
+			continue
+		var key: String = _roster_key(unit.config_id, unit.is_mounted)
+		existing[key] = int(existing.get(key, 0)) + 1
+
+	var roster: Array[Dictionary] = [
+		{"config": veteran, "mounted": true, "count": FAMILY_MOUNTED_SQUIRE_COUNT},
+		{"config": trained, "mounted": true, "count": FAMILY_MOUNTED_SERGEANT_COUNT},
+		{"config": trained, "mounted": false, "count": FAMILY_SERGEANT_COUNT},
+		{"config": militia, "mounted": false, "count": FAMILY_INFANTRY_COUNT},
+	]
+	for entry: Dictionary in roster:
+		var config := entry["config"] as UnitConfig
+		var mounted: bool = bool(entry["mounted"])
+		var key: String = _roster_key(config.config_id, mounted)
+		var have: int = int(existing.get(key, 0))
+		var need: int = maxi(0, int(entry["count"]) - have)
+		for i: int in range(need):
+			if _create_world_unit(
+				context, party, config, family, "", 0, false, mounted
+			) == null:
+				return false
+	return true
+
+
+static func _roster_key(config_id: String, mounted: bool) -> String:
+	return "%s|%d" % [config_id, 1 if mounted else 0]
 
 
 ## 新游戏封地经济：所有村庄获得采邑储备、税收缓存与初始冒险者候选人。

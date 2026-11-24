@@ -149,8 +149,11 @@ func _run() -> void:
 
 func _test_experience(units: UnitManager, unit: UnitData, config: UnitConfig) -> void:
 	_check(config.exp_to_next_level(1) == 100, "1 级升级需要 100 经验")
-	_check(config.exp_to_next_level(2) == 150, "2 级升级需要 150 经验")
-	_check(config.exp_to_next_level(3) == 200, "3 级升级需要 200 经验")
+	_check(config.exp_to_next_level(2) == 300, "2 级升级需要 300 经验")
+	_check(config.exp_to_next_level(3) == 500, "3 级升级需要 500 经验")
+	_check(config.exp_to_next_level(4) == 1000, "4 级升级需要 1000 经验")
+	_check(config.exp_to_next_level(5) == 0, "满级没有下一级经验线")
+	_check(config.max_level == 5, "战斗经验等级上限为 5")
 
 	_check(not units.add_exp(unit.unit_id, 0), "0 经验被拒绝")
 	_check(not units.add_exp(unit.unit_id, -10), "负经验被拒绝")
@@ -161,17 +164,17 @@ func _test_experience(units: UnitManager, unit: UnitData, config: UnitConfig) ->
 
 	_check(units.add_exp(unit.unit_id, 60), "补足经验触发升级")
 	_check(unit.level == 2 and unit.exp == 0, "升级后扣除经验")
-	_check(unit.max_hp == 55 and unit.attack == 11, "升级后属性自动重算")
+	_check(unit.max_hp == 55 and unit.attack == 10, "升级后生命上限提升且攻击不变")
 
 	_check(units.add_exp(unit.unit_id, 450), "一次增加大量经验")
-	_check(unit.level == 4 and unit.exp == 100, "一次经验可连续升多级")
-	_check(unit.max_hp == 65 and unit.attack == 13, "连续升级后属性正确")
+	_check(unit.level == 3 and unit.exp == 150, "溢出经验保留到下一阶段")
+	_check(unit.max_hp == 65 and unit.attack == 10, "连续升级后生命上限正确")
 
 	_check(units.add_exp(unit.unit_id, 1000000), "增加足以升满的经验")
-	_check(unit.level == 10 and unit.exp == 0, "达到最高等级并清空经验")
-	_check(unit.max_hp == 95 and unit.attack == 19, "满级属性按上限计算")
+	_check(unit.level == 5 and unit.exp == 0, "达到最高等级并清空经验")
+	_check(unit.max_hp == 100 and unit.attack == 10, "满级累计生命加成 +50")
 	_check(not units.add_exp(unit.unit_id, 100), "满级后不再积累经验")
-	_check(unit.level == 10 and unit.exp == 0, "满级后状态不变")
+	_check(unit.level == 5 and unit.exp == 0, "满级后状态不变")
 
 
 func _test_equipment(

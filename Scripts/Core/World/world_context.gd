@@ -31,6 +31,8 @@ var supply_manager: SupplyManager = SupplyManager.new()
 var wounded_healing_manager: WoundedHealingManager = WoundedHealingManager.new()
 ## 阶段 13：俘虏出售统一业务入口（价格集中配置、原子结算）。
 var prisoner_trade_manager: PrisonerTradeManager = PrisonerTradeManager.new()
+## NPC 领主出售后的家族赎回生命周期（等待 → 请求 → 接受/取消）。
+var lord_ransom_manager: LordRansomManager = LordRansomManager.new()
 ## 事件中心脚本用 preload 引用，避免新增 class_name 尚未进入编辑器缓存时无法解析。
 const EventCenterScript = preload("res://Scripts/Core/World/event_center.gd")
 var party_manager: PartyManager = PartyManager.new()
@@ -262,6 +264,7 @@ func to_save_data() -> SaveData:
 	save.parties = party_manager.to_dict()
 	save.settlements = settlement_manager.to_dict()
 	save.markets = market_manager.to_dict()
+	save.ransoms = lord_ransom_manager.to_dict()
 	save.nobles = noble_manager.to_dict()
 	# v4 兼容字段：旧读取方仍然可以只读 lords，但内容已经是完整贵族数据。
 	save.lords = save.nobles.duplicate(true)
@@ -379,6 +382,10 @@ func load_from_save_data(save: SaveData) -> bool:
 
 	# v4 -> v5：补齐缺失的家族、贵族归属、部队指挥关系与领袖。
 	_migrate_political_data()
+	# 旧存档没有 UnitData.noble_id，但部队领袖关系是稳定的；读档后回填。
+	_backfill_noble_unit_ids()
+	# v8：赎回记录在实体/家族恢复后载入，失效记录不会重新生成事件。
+	lord_ransom_manager.load_from_dict(save.ransoms)
 
 	# 旧存档没有贵族数据时，至少恢复玩家贵族身份；不伪造封地归属。
 	var player_noble: NobleData = noble_manager.get_noble(player_lord_id)
@@ -415,6 +422,8 @@ func load_from_save_data(save: SaveData) -> bool:
 
 	# 读档以当前静态配置、持久化等级与装备为准重算最终属性；
 	# 无效装备引用会在 UnitManager 中报告并清理，不会静默生成错误属性。
+	# 先校正五级制经验/等级，确保旧存档不会卡在无效等级。
+	unit_manager.normalize_combat_progression()
 	var stat_errors: Array[String] = unit_manager.recalculate_all_stats()
 	for message: String in stat_errors:
 		push_error("[WorldContext] %s" % message)
@@ -440,6 +449,21 @@ func load_from_save_data(save: SaveData) -> bool:
 		return false
 
 	return is_valid_world()
+
+
+## 旧存档缺少 UnitData.noble_id 时，按部队领袖关系回填。
+## 玩家部队/玩家角色不参与 NPC 领主身份，避免玩家角色被当作可赎回领主。
+func _backfill_noble_unit_ids() -> void:
+	for party: PartyData in party_manager.get_all_parties():
+		if party == null or party.is_player_controlled():
+			continue
+		var leader := unit_manager.get_unit(party.leader_unit_id)
+		if leader == null or leader.is_player_character:
+			continue
+		if party.leader_noble_id.is_empty() and not leader.noble_id.is_empty():
+			party.leader_noble_id = leader.noble_id
+		elif not party.leader_noble_id.is_empty() and leader.noble_id.is_empty():
+			leader.noble_id = party.leader_noble_id
 
 
 ## v4 -> v5 兼容迁移：旧存档只有领主与 family_id，没有独立家族/贵族层级。
@@ -659,7 +683,21 @@ func _wire_managers() -> void:
 		party_manager, unit_manager, player_profile, player_party_id
 	)
 	wounded_healing_manager.setup(party_manager, unit_manager)
-	prisoner_trade_manager.setup(party_manager, unit_manager, player_profile)
+	# 赎回流程只登记出售后的等待与请求；实际出售仍由 PrisonerTradeManager 原子完成。
+	lord_ransom_manager.setup(
+		self,
+		unit_manager,
+		party_manager,
+		noble_manager,
+		house_manager,
+		settlement_manager,
+		id_generator,
+		player_profile,
+		world_log_manager
+	)
+	prisoner_trade_manager.setup(
+		party_manager, unit_manager, player_profile, null, lord_ransom_manager
+	)
 	# 世界日志在所有管理者装配后接入，避免初始化阶段产生不完整日志。
 	noble_manager.setup_political(house_manager, kingdom_manager, world_log_manager)
 	house_manager.setup_political(kingdom_manager, world_log_manager)
@@ -704,6 +742,7 @@ func _wire_managers() -> void:
 		fief_recruitment_manager,
 		adventurer_recruitment_manager,
 		supply_manager,
-		wounded_healing_manager
+		wounded_healing_manager,
+		lord_ransom_manager
 	)
 	event_center.setup(self)

@@ -9,9 +9,12 @@ extends RefCounted
 ## 阶段 11 增加 markets 字段（可选，缺失时按商品配置初始化），不提升 Schema。
 ## v6（阶段 12）增加独立马匹实例、村庄市场、NPC 背包/资金与每日补给结算日。
 ## v7（阶段 13）增加伤兵状态、部队俘虏列表、俘虏归属与伤兵治疗结算小时。
-## 读取时保留 v1 → v7 的浅迁移入口，缺失字段按安全默认值恢复。
+## v8 增加战斗经验五级制（旧 1–10 级折算）与 NPC 领主赎回记录。
+## 读取时保留 v1 → v8 的浅迁移入口，缺失字段按安全默认值恢复。
 
-const CURRENT_SCHEMA_VERSION: int = 7
+const CURRENT_SCHEMA_VERSION: int = 8
+## 战斗经验等级上限；与 CombatExperience.MAX_LEVEL 保持一致。
+const MAX_COMBAT_LEVEL: int = 5
 
 var schema_version: int = CURRENT_SCHEMA_VERSION
 var project_version: String = "0.2.0"
@@ -51,6 +54,8 @@ var settlements: Dictionary = {}
 ## 村庄/城镇市场库存：{ settlement_id: { stock, mount_instances, initialized_items } }。
 ## 旧存档缺失时由 MarketManager 按当前商品配置初始化一次。
 var markets: Dictionary = {}
+## NPC 领主赎回记录：{ ransom_id: { noble_id, status, due_world_seconds, ... } }。
+var ransoms: Dictionary = {}
 var factions: Dictionary = {}
 var quests: Dictionary = {}
 
@@ -87,6 +92,7 @@ func to_dict() -> Dictionary:
 		"kingdoms": kingdoms.duplicate(true),
 		"settlements": settlements.duplicate(true),
 		"markets": markets.duplicate(true),
+		"ransoms": ransoms.duplicate(true),
 		"factions": factions.duplicate(true),
 		"quests": quests.duplicate(true),
 	}
@@ -136,6 +142,7 @@ static func from_dict(payload: Dictionary) -> SaveData:
 	save.kingdoms = _as_dict(payload.get("kingdoms", {}))
 	save.settlements = _as_dict(payload.get("settlements", {}))
 	save.markets = _as_dict(payload.get("markets", {}))
+	save.ransoms = _as_dict(payload.get("ransoms", {}))
 	save.factions = _as_dict(payload.get("factions", {}))
 	save.quests = _as_dict(payload.get("quests", {}))
 
@@ -146,9 +153,31 @@ static func from_dict(payload: Dictionary) -> SaveData:
 	# 归属双向校正由 PartyManager.sanitize_prisoner_ownership() 幂等完成。
 	if save.schema_version < 7:
 		save.schema_version = 7
+	# v7 -> v8：旧存档的 1–10 级战斗经验折算为 5 级制；
+	# 赎回记录缺失时为空，旧存档不需要伪造历史出售记录。
+	if save.schema_version < 8:
+		_migrate_legacy_unit_levels(save.units)
+		save.schema_version = 8
 	# v4 -> v5：旧存档只有 lords，没有独立 nobles/houses/kingdoms；
 	# 具体政治数据由 WorldContext 在加载后迁移，不在这里伪造实体。
 	return save
+
+
+## 旧存档的 1–10 级战斗经验按 ceil(level / 2) 折算为 5 级；
+## 溢出经验保留，由 UnitManager 在加载后按新阈值补升级。
+## 已经是 5 级内的存档不改变等级，重复调用安全。
+static func _migrate_legacy_unit_levels(units_payload: Dictionary) -> void:
+	for unit_id: Variant in units_payload:
+		var value: Variant = units_payload[unit_id]
+		if not value is Dictionary:
+			continue
+		var data := value as Dictionary
+		var old_level: int = int(data.get("level", 1))
+		if old_level > MAX_COMBAT_LEVEL:
+			var new_level: int = int(ceil(float(old_level) / 2.0))
+			data["level"] = clampi(new_level, 1, MAX_COMBAT_LEVEL)
+		data["exp"] = maxi(0, int(data.get("exp", 0)))
+		units_payload[unit_id] = data
 
 
 static func _as_dict(value: Variant) -> Dictionary:

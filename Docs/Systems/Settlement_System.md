@@ -240,6 +240,6 @@ Milestone 1 只做基础面板；阶段 6 起村庄面板增加进入小场景�
   - “查看雇佣兵信息”：占位界面，明确暂无真实雇佣兵；
   - “离开酒馆”：返回地点面板。
 - 出售界面逐名显示俘虏名称、等级与身份；右侧行操作“卖出”，左侧行操作“撤回”；“重置出售”恢复打开时快照；只有“确认出售”调用 `PrisonerTradeManager.sell_prisoners()` 一次性原子结算。
-- 售价只取 `PrisonerPriceConfig`（默认 1/2/3 级 = 10/20/30 金币），UI 不写死价格，也不按装备/伤势/经验改价。
+- 售价只取 `PrisonerPriceConfig`（按兵种 tier：一级 5、二级 20、三级 60；NPC 领主统一 100），UI 不写死价格，也不按装备、伤势或经验等级改价。
 - 成功出售后金币进入 `PlayerProfile`，Unit 退出玩家控制并写入 `sold_to_settlement_id`；失败不改任何金币或归属。
 - 详细规则见 [Wounded_Prisoner_System.md](Wounded_Prisoner_System.md)。

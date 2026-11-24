@@ -1,7 +1,7 @@
 # 存档系统
 
 **核心脚本：** `Scripts/Autoload/save_manager.gd`、`Scripts/Core/Save/save_data.gd`
-**状态：** 保存/读取闭环、成员关系校验、士兵成长/装备/骑乘/工资恢复、伤兵与俘虏归属、玩家档案与物品数量、地点场景路径、AI/跟随字段兼容、领主/封地/采邑/冒险者、贵族/家族/王国、村庄/城镇市场库存、马匹个体、NPC 背包与金币、补给结算日与治疗结算小时持久化已实现；Schema v7
+**状态：** 保存/读取闭环、成员关系校验、士兵五级战斗经验/等级折算/HP 成长、装备/骑乘/工资恢复、伤兵与俘虏归属、玩家档案与物品数量、地点场景路径、AI/跟随字段兼容、领主/封地/采邑/冒险者、贵族/家族/王国、村庄/城镇市场库存、马匹个体、NPC 背包与金币、补给结算日与治疗结算小时、NPC 领主赎回记录持久化已实现；Schema v8
 
 ---
 
@@ -21,11 +21,11 @@ user://saves/<slot>.json
 
 Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录内。
 
-## 3. Schema v7
+## 3. Schema v8
 
 ```json
 {
-  "schema_version": 7,
+  "schema_version": 8,
   "project_version": "0.2.0",
   "saved_at": "2026-11-22T22:30:00",
   "world": {
@@ -41,7 +41,7 @@ Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录
   },
   "id_counters": {
     "WORLD": 1, "UNIT": 5, "PARTY": 4, "SETTLEMENT": 5,
-    "LORD": 3, "CANDIDATE": 2
+    "LORD": 3, "CANDIDATE": 2, "RANSOM": 1
   },
   "player": {
     "party_id": "PARTY_000001",
@@ -73,6 +73,13 @@ Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录
       "initialized_items": ["bread", "fodder", "mount_horse_01"]
     }
   },
+  "ransoms": {
+    "RANSOM_000001": {
+      "noble_id": "LORD_000002", "noble_unit_id": "UNIT_000010",
+      "house_id": "HOUSE_000001", "sold_settlement_id": "SETTLEMENT_000002",
+      "due_world_seconds": 43200.0, "ransom_gold": 260, "status": 1
+    }
+  },
   "factions": {},
   "quests": {}
 }
@@ -91,6 +98,7 @@ Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录
 | `scene_state` | 局部状态（初期不使用） |
 | `world_log` | 最近 20 条世界日志；缺失时为空历史，超过 20 条时读档立即裁剪 |
 | `markets` | 村庄/城镇市场 `{ settlement_id: { settlement_id, stock, mount_instances, initialized_items } }`；缺失时按商品配置初始化，已有库存/实例不重置 |
+| `ransoms` | NPC 领主赎回记录 `{ ransom_id: { noble_id, noble_unit_id, house_id, sold_settlement_id, due_world_seconds, ransom_gold, status, ... } }`；v8 新增，已结算/已失效记录保留为历史但不再生成事件 |
 | `lords` | 领主表 `{ lord_id: LordData }`；Schema v4 新增，v5 继续保留为兼容副本 |
 | `nobles` | 贵族表 `{ noble_id: NobleData }`；Schema v5 新增 |
 | `houses` | 家族表 `{ house_id: HouseData }`；Schema v5 新增，含 `banner_id` 映射 |
@@ -100,13 +108,14 @@ Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录
 `units` 与 `parties` 以实体 ID 为键；`PartyData.member_unit_ids` 保存成员 ID 列表，`PartyData.prisoner_unit_ids` 保存本部队关押的俘虏 ID 列表（v7）。
 士兵数据层已接入，`units` 可以为空（没有士兵的部队仍然是合法状态），也可以包含任意数量的独立士兵。
 
-士兵持久化字段（沿用 v2，未新增 Schema）：
+士兵持久化字段（v8 只新增 `noble_id`；其余沿用既有字段）：
 
 | 字段 | 说明 |
 |---|---|
 | `unit_id` / `config_id` / `display_name` | 身份与实例名称 |
 | `is_player_character` | 玩家角色身份；旧存档缺失时默认 false |
-| `level` / `exp` | 经验等级与经验 |
+| `level` / `exp` | 战斗经验等级（1–5）与累计经验；v8 起等级可由经验推导，读档会归一化 |
+| `noble_id` | NPC 领主身份（稳定贵族 ID）；玩家单位与普通士兵为空，旧存档由部队 `leader_noble_id` 回填 |
 | `wage` | 每日工资；旧存档缺失时用 -1 哨兵，读档重算按当前兵种等级配置补全 |
 | `equipment` | 槽位字符串 → 装备 ID；`MOUNT` 存在即骑乘 |
 | `is_mounted` | 骑乘状态缓存；读档时由 `equipment` 的 `MOUNT` 槽重新派生，旧存档缺失或没有 MOUNT 时按步兵处理 |
@@ -140,6 +149,9 @@ Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录
 - 伤兵 `status = WOUNDED` 与 HP=0 一起恢复；俘虏的 `prisoner_owner_party_id` 与部队 `prisoner_unit_ids` 双向保存。读档后 `sanitize_prisoner_ownership()` 以成员身份优先、去重并清理悬空归属，反复读档不增殖。
 - 战斗中的 `BattleSession`、`BattleResultData`、控制权、当前 SceneTime 与战后临时状态不进入存档。
 - 战斗经验/奖励在结算时写入 `UnitData.exp` / `PlayerProfile`，随之后的存档保存；不会保存“待领取奖励”。
+- 士兵经验只保存 `exp`，`level` 同时保存但读档时由 `UnitManager.normalize_combat_progression()` 按 `CombatExperience` 阈值校正；HP 加成不写入成长字段，读档重算时由等级推导一次，不会重复叠加。
+- `UnitData.noble_id` 保存为稳定贵族 ID；旧存档缺失时由所属部队的 `leader_noble_id` 回填，不依赖单位名称或节点名。
+- `ransoms` 由 `LordRansomManager.to_dict()` 写入；等待到期时间使用世界累计秒数，已完成/已失效记录保留但不再生成事件。
 - 新增字段均使用安全默认值，未升级 Schema。
 - 不保存场景节点、节点路径、资源实例引用。
 - 存档聚合由 `WorldContext.to_save_data()` 完成。
@@ -200,9 +212,10 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 
 ```text
 1. UnitManager.load_from_dict() 恢复身份、等级、经验、装备、current_hp
-2. WorldContext 调用 recalculate_all_stats()
-3. 按 UnitConfig（当前等级成长）+ EquipmentConfig 重算最终属性
-4. current_hp 只做上限 clamp，不自动回满
+2. UnitManager.normalize_combat_progression() 校正五级经验等级
+3. WorldContext 调用 recalculate_all_stats()
+4. 按 UnitConfig + CombatExperience（等级 HP 加成）+ EquipmentConfig 重算最终属性
+5. current_hp 只做上限 clamp，不自动回满
 ```
 
 - 旧存档缺少 `display_name` / `level` / `exp` / `equipment` 时使用安全默认值；名称缺失时回填兵种模板名称。
@@ -210,6 +223,8 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 - 装备 ID 无效或槽位不匹配时：`push_error` 报告、从装备字典中清理，不参与属性计算；读档继续。
 - 兵种配置未注册时：报告错误，保留存档中的属性缓存作为降级结果，不阻止读档。
 - 等级超过 `max_level` 时按 `max_level` 计算成长。
+- 五级战斗经验只影响 HP；`UnitConfig` 的每级攻击/HP 成长字段保持 0，避免与 `CombatExperience` 重复叠加。
+- 旧存档等级高于 5 时按 `legacy_level_to_combat_level()` 折算，并在迁移时保留溢出经验。
 
 本次未新增持久化字段，因此没有升级 Schema。
 
@@ -237,11 +252,12 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 ## 9. 版本与迁移
 
 - `schema_version` 每次结构不兼容变更时加 1。
-- 当前版本 7；`SaveData.from_dict()` 接受 1..7。
+- 当前版本 8；`SaveData.from_dict()` 接受 1..8。
 - v3 → v4 新增 `lords` 与 `player.player_lord_id` / `player.player_unit_id`；旧存档缺失时由 `WorldContext` 补玩家领主身份，不伪造封地归属。
 - v4 → v5 新增 `nobles` / `houses` / `kingdoms` 与地点 `owner_house_id` / `owner_noble_id`；旧存档缺失时由 `lords`、`family_id` 与 `banner_id` 补建最小政治视图，并通过固定 ID 去重。
 - v5 → v6 新增马匹实例、NPC 背包与金币、市场马匹实例/`initialized_items`、`supply_last_settled_day`；读取 v5 及更早存档时执行一次补给初始化（只补完全没有任何补给记录的部队）与确定性马匹迁移。
 - v6 → v7 新增伤兵状态、俘虏归属与列表、`healing_last_settled_hour`、村庄候选人字段；读取 v6 及更早存档时补安全默认值并执行一次俘虏归属清洗。
+- v7 → v8 新增五级战斗经验（旧 1–10 级折算）、`UnitData.noble_id` 与 `ransoms`；读取 v7 及更早存档时执行一次等级折算、回填领主身份并补空赎回表。
 - 读取旧版本时执行迁移；`SaveData.from_dict()` 已保留 v1 → v2 入口，但完整字段迁移尚未完成。
 - 读取高于当前版本的存档直接拒绝。
 - 迁移逻辑集中在 `SaveData.from_dict()`，禁止散落。
@@ -288,7 +304,7 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 
 | 项 | 状态 |
 |---|---|
-| `SaveData` Schema v7 | 已实现 |
+| `SaveData` Schema v8 | 已实现 |
 | JSON 写入/读取 | 已实现 |
 | 临时文件 + 备份替换 | 已实现 |
 | 槽位列表/删除 | 已实现 |
@@ -298,6 +314,9 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 | 版本检查 | 已实现 |
 | 士兵-部队成员关系校验 | 已实现（D025） |
 | 士兵等级/经验/装备往返 | 已实现（沿用现有字段） |
+| 五级战斗经验与等级折算 | 已实现（v8）：旧 1–10 级按 `ceil(old/2)` 折算，溢出经验保留 |
+| 等级 HP 加成 | 已实现：读档由 `CombatExperience` 重算，不重复叠加 |
+| NPC 领主身份 `noble_id` | 已实现（v8）：旧存档由部队 `leader_noble_id` 回填 |
 | 马匹装备 / 骑乘状态往返 | 已实现：MOUNT 随装备保存，`is_mounted` 读档重算派生；旧存档按步兵兼容 |
 | 玩家物品数量 `inventory_counts` | 已实现：增量字段，旧存档每个条目按 1 件恢复，无 Schema 升级 |
 | 村庄/城镇市场库存 `markets` | 已实现：按地点恢复，含马匹实例与 `initialized_items` |
@@ -307,6 +326,8 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 | 伤兵状态与 HP | 已实现（v7）：`status` / `current_hp` 一并恢复 |
 | 俘虏归属与列表 | 已实现（v7）：`prisoner_owner_party_id` ↔ `prisoner_unit_ids`，读档幂等清洗 |
 | 已售出状态 `sold_to_settlement_id` | 已实现（v7） |
+| 领主赎回记录 `ransoms` | 已实现（v8）：等待到期、已请求、已接受、已失效状态随档保存 |
+| 已完成/已失效赎回事件 | 不重新出现：只有 `REQUESTED` 且当前状态有效时才生成事件 |
 | 治疗结算小时 `healing_last_settled_hour` | 已实现（v7）；读档不补算 |
 | 村庄初始候选人 | 已实现（v7）；随候选数据表保存 |
 | 士兵工资 `wage` | 已实现：增量字段，旧存档缺失时按当前兵种配置补全 |
@@ -533,4 +554,31 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 
 - `BattleSession`、`BattleResultData`、待玩家确认的俘虏挂起记录与结算预览属于运行时状态；任何战斗期间禁止存档（KI533）。
 - `PrisonerSelectionPanel` / `TavernPanel` 的预览选择、UI 层级与暂停原因为运行时状态。
-- `WoundedConfig` / `HealingConfig` / `PrisonerPriceConfig` 是静态 `.tres` 配置，不进入存档。
+- `WoundedConfig` / `HealingConfig` / `PrisonerPriceConfig` / `LordRansomConfig` 是静态 `.tres` 配置，不进入存档。
+
+## 22. Schema v8：五级战斗经验与领主赎回（阶段 13 后续）
+
+### 22.1 新增/扩展字段
+
+| 位置 | 字段 | 说明 |
+|---|---|---|
+| `UnitData` | `level` | 战斗经验等级 1–5；旧存档 1–10 级折算 |
+| `UnitData` | `exp` | 累计战斗经验；达到阈值时提升等级，溢出保留 |
+| `UnitData` | `noble_id` | NPC 领主身份；稳定贵族 ID，不是显示名 |
+| 顶层 | `ransoms` | `{ ransom_id: { noble_id, noble_unit_id, house_id, sold_settlement_id, due_world_seconds, ransom_gold, status, ... } }` |
+| `id_counters` | `RANSOM` | 赎回记录计数器，随存档保存，永不复用 |
+
+### 22.2 读档顺序与兼容
+
+1. `SaveData.from_dict()` 对 `schema_version < 8` 的 `units` 执行一次等级折算：`level > 5` 时取 `ceil(level / 2)`，并 clamp 到 1–5；`exp` 保持非负。
+2. `UnitManager.load_from_dict()` 恢复 `exp` / `level` / `noble_id`；随后 `normalize_combat_progression()` 按阈值补升级、截断最高级多余经验。
+3. `WorldContext._backfill_noble_unit_ids()` 为非玩家部队领袖回填 `UnitData.noble_id`，不覆盖已有值。
+4. `LordRansomManager.load_from_dict(save.ransoms)` 恢复记录并按贵族去重；缺失时为空表。
+5. `sanitize_after_load()` 重新校验单位、贵族、家族、出售状态与据点；已完成/已失效记录不产生事件，异常记录尽量让领主回到世界。
+6. `recalculate_all_stats()` 按五级经验重算 HP，等级加成只应用一次。
+
+### 22.3 不持久化
+
+- 事件中心列表、右侧事件框、详情弹窗与选中项均为派生 UI 状态，不进入存档；读档后由 `ransoms` 与当前世界状态重新生成。
+- 赎回请求的 UI 缓存（旧事件副本、弹窗打开状态、暂停原因）不进入存档。
+- `LordRansomConfig` 是静态 `.tres` 配置，不进入存档。

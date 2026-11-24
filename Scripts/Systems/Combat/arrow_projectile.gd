@@ -142,7 +142,7 @@ func _check_hits() -> void:
 		# 仅地面位置重合不足以命中；箭矢必须处于敌人有效身体高度内。
 		if _height > body_height:
 			continue
-		enemy.apply_damage(_damage)
+		enemy.apply_damage(_damage, _shooter)
 		_hit = true
 		_finish(true)
 		return

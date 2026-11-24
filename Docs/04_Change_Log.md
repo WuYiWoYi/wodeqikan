@@ -6,6 +6,41 @@
 
 ---
 
+## 2026-11-24 · 五级战斗经验、俘虏价格与 NPC 领主赎回
+
+### 新增
+
+- `CombatExperience` 五级制：新兵 / 普通士兵 / 老兵 / 精锐 / 百战精锐，升级阈值 100/300/500/1000，累计最大 HP 加成 +0/+5/+15/+30/+50。
+- 战斗经验来源：近战与远程有效伤害 +1，击杀额外 +10；未命中、0 伤害、目标已死亡不发放。
+- `Scripts/Core/World/lord_ransom_manager.gd`（`LordRansomManager`）：出售登记、世界时间等待、赎回请求、接受/取消、失效恢复、存档。
+- `Scripts/Config/lord_ransom_config.gd` 与 `Data/Lords/lord_ransom_config.tres`：等待 12–48 游戏小时、赎金 150–400 金币。
+- `Scripts/UI/WorldMap/event_feed.gd`（`EventFeed`）与 `event_detail_dialog.gd`（`EventDetailDialog`）：大地图右侧纵向事件框与可操作事件详情。
+- `EventCenter` 增加 `RANSOM` 类型与 `get_actionable_events()` / `get_event()`。
+- `IdGenerator.RANSOM`；`UnitData.noble_id` 与 `mark_ransomed()`；`PartyData.leader_noble_id` 回填。
+- 测试：`combat_experience_award_test`、`lord_ransom_test`、`save_migration_test`。
+
+### 变更
+
+- 俘虏价格改为按兵种 `UnitConfig.tier`：一级 5、二级 20、三级 60；NPC 领主统一 100，不按经验等级。
+- `PrisonerTradeManager` 出售领主后调用 `LordRansomManager.on_lord_sold()`；`PartyManager.add_prisoner()` 拒绝已售出单位。
+- 战斗伤害结算统一在 `UnitController.apply_damage()` 写经验；箭矢经同一回调，击杀经验只发给实际完成击杀者。
+- `StatCalculator` 在最终属性中叠加等级 HP 加成；`UnitConfig` 每级成长归零，避免重复叠加。
+- 存档升级到 Schema v8：`ransoms`、`UnitData.noble_id`、旧 1–10 级按 `ceil(old/2)` 折算并保留溢出经验。
+- 大地图事件中心聚合赎回事件；右侧事件框显示可操作事件，无事件时隐藏；事件框本身不暂停世界。
+
+### 修复
+
+- 同一敌人死亡后继续受到伤害不再重复发放击杀经验。
+- 事件待处理期间领主被再次出售或重新关押时，事件立即失效、弹窗自动关闭且不可领取。
+- 家族或据点消失时，赎回流程终止并尽量让领主回到世界，避免永久停留在已出售状态。
+
+### 验证
+
+- 已运行并通过：`combat_experience_award_test`、`lord_ransom_test`、`save_migration_test`、`combat_experience_test`、`stat_calculator_test`、`unit_manager_test`、`unit_party_serialization_test`、`unit_tier_wage_test`、`stage13_tavern_test`、`save_persistence_test`、`political_hierarchy_test`、`event_center_test`。
+- `unit_visual_test` 的马腿枢轴/贴图可见性断言仍失败，与本次改动无关。
+
+---
+
 ## 2026-11-22 · 主界面信息栏、事件中心与百科重构
 
 ### 新增

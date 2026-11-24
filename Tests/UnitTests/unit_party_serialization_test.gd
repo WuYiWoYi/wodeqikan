@@ -75,7 +75,7 @@ func _run() -> void:
 	var veteran := context.unit_manager.get_unit(militia_ids[1])
 	_check(veteran != null, "取得用于成长测试的民兵")
 	if veteran != null:
-		_check(context.unit_manager.add_exp(veteran.unit_id, 250), "老兵获得 250 经验")
+		_check(context.unit_manager.add_exp(veteran.unit_id, 400), "老兵获得 400 经验")
 		_check(veteran.level == 3 and veteran.exp == 0, "老兵升到 3 级")
 		_check(
 			context.unit_manager.equip_item(veteran.unit_id, "weapon_sword_01"),
@@ -85,7 +85,7 @@ func _run() -> void:
 			context.unit_manager.equip_item(veteran.unit_id, "armor_leather_01"),
 			"老兵装备皮甲"
 		)
-		_check(veteran.max_hp == 68 and veteran.attack == 14, "老兵最终属性正确")
+		_check(veteran.max_hp == 73 and veteran.attack == 12, "老兵最终属性正确")
 		veteran.current_hp = 12
 		_check(veteran.current_hp == 12, "老兵当前生命可低于上限")
 
@@ -161,8 +161,8 @@ func _run() -> void:
 			"恢复老兵护甲"
 		)
 		_check(restored_veteran.current_hp == 12, "恢复老兵当前生命")
-		_check(restored_veteran.max_hp == 68, "读档后按配置与装备重算最大生命")
-		_check(restored_veteran.attack == 14, "读档后按配置与装备重算攻击")
+		_check(restored_veteran.max_hp == 73, "读档后按配置与装备重算最大生命")
+		_check(restored_veteran.attack == 12, "读档后按配置与装备重算攻击")
 		_check(
 			restored_veteran.display_name == veteran.display_name,
 			"恢复老兵独立名称"
@@ -264,7 +264,7 @@ func _check_invalid_equipment_safe(loaded: SaveData, unit_id: String) -> void:
 	if unit != null:
 		_check(unit.equipment.is_empty(), "无效装备引用被清理")
 		_check(unit.level == 3, "等级不因装备清理而改变")
-		_check(unit.max_hp == 60 and unit.attack == 12, "无效装备不参与属性计算")
+		_check(unit.max_hp == 65 and unit.attack == 10, "无效装备不参与属性计算")
 	invalid_context.queue_free()
 
 

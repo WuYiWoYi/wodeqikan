@@ -4,7 +4,7 @@
 **核心逻辑：** `Scripts/Core/World/wounded_healing_manager.gd`、`Scripts/Core/World/party_manager.gd`、`Scripts/Systems/Combat/battle_manager.gd`、`Scripts/Core/World/prisoner_trade_manager.gd`
 **配置：** `Data/Combat/wounded_config.tres`、`Data/Combat/healing_config.tres`、`Data/Settlements/prisoner_price_config.tres`
 **UI：** `Scripts/UI/Battle/prisoner_selection_panel.gd`、`Scripts/UI/WorldMap/tavern_panel.gd`
-**状态：** 战斗负伤判定、WorldTime 顺序治疗、战后俘虏池分配、玩家接收与城镇酒馆出售已实现；药物、俘虏容量/逃跑/招募与买家经济未实现
+**状态：** 战斗负伤判定、WorldTime 顺序治疗、战后俘虏池分配、玩家接收、城镇酒馆出售与按兵种 tier 定价已实现；药物、俘虏容量/逃跑/招募与买家经济未实现
 
 ---
 
@@ -147,15 +147,19 @@ share_i = floor(P * N_i / N)
 
 ### 6.3 价格与结算
 
-- 价格只取 `PrisonerPriceConfig.level_prices`：默认 1/2/3 级 = 10/20/30 金币。
-- 不考虑装备、伤势、经验与身份；超出等级取边界价格。
+- 普通士兵按 **兵种等级 `UnitConfig.tier`** 定价，不按战斗经验 `UnitData.level` 定价：
+  - 一级 5 金币、二级 20 金币、三级 60 金币；超出配置范围取边界价格。
+- 具有 NPC 领主身份（`UnitData.noble_id` 非空）的俘虏统一 100 金币，与其部队人数、家族地位和经验等级无关。
+- 不考虑装备与伤势；经验等级不参与定价。
+- 所有出售入口（酒馆预览、确认结算）都必须通过 `PrisonerTradeManager.get_sell_price()` / `PrisonerPriceConfig`，UI 不得写死价格。
 - `sell_prisoners(party_id, unit_ids, settlement_id)`：
   1. 校验部队与地点存在、地点为城镇；
   2. 校验每个单位存在、由该部队关押、非成员、价格 > 0；
   3. 去重；
   4. 一次性增加金币、`remove_prisoner()` 并 `mark_sold(settlement_id)`；
   5. 失败时不做任何部分结算。
-- 售出单位退出玩家控制与俘虏列表，保留 `sold_to_settlement_id`；不再参与战斗、治疗、工资或后续买卖。
+- 售出单位退出玩家控制与俘虏列表，保留 `sold_to_settlement_id`；普通士兵不再参与战斗、治疗、工资或后续买卖。
+- NPC 领主售出后额外交给 `LordRansomManager.on_lord_sold()` 登记赎回等待；具体生命周期见 [Lord_Ransom_System.md](Lord_Ransom_System.md)。
 
 ## 7. 数据不变量
 
@@ -175,7 +179,7 @@ unit.prisoner_owner_party_id == party.party_id
 
 - 成员与俘虏互斥：`add_member()` 拒绝俘虏/已售出单位，`add_prisoner()` 拒绝成员。
 - 俘虏最多属于一个关押部队；转移保持双向一致。
-- 已售出单位不能重新成为成员或俘虏，除非未来显式实现赎回流程。
+- 已售出单位不能重新成为成员或俘虏；NPC 领主只能通过家族赎回流程恢复活动状态（`mark_ransomed()` 清除出售/俘虏状态后重建部队）。
 - 读档调用 `sanitize_prisoner_ownership()` 幂等清洗，成员身份优先。
 
 ## 8. 配置
@@ -186,7 +190,8 @@ unit.prisoner_owner_party_id == party.party_id
 | `WoundedConfig` | `tier_wounded_chances` | `[0.5, 0.6, 0.8]` |
 | `HealingConfig` | `base_healing_per_hour` | `1` |
 | `HealingConfig` | `medicine_healing_bonus` | `0` |
-| `PrisonerPriceConfig` | `level_prices` | `[10, 20, 30]` |
+| `PrisonerPriceConfig` | `tier_prices` | `[5, 20, 60]`（按兵种 tier） |
+| `PrisonerPriceConfig` | `lord_price` | `100`（NPC 领主统一价） |
 
 配置均为只读 `.tres`，由 `WorldContext` 加载；UI 不得写死概率、治疗量或价格。
 
@@ -201,6 +206,8 @@ unit.prisoner_owner_party_id == party.party_id
 | 俘虏池/最大余数分配 | 已实现 |
 | 玩家战后选择与原子提交 | 已实现 |
 | 城镇酒馆出售 | 已实现（城镇限定、原子结算） |
+| 兵种 tier 定价 | 已实现：5 / 20 / 60 |
+| NPC 领主出售 | 已实现：统一 100 金币并启动赎回等待 |
 | 雇佣兵信息 | 占位 |
 | 药物技能/治疗物品 | 未实现（预留配置） |
 | 俘虏容量/逃跑/守卫/招募 | 未实现 |
@@ -212,5 +219,6 @@ unit.prisoner_owner_party_id == party.party_id
 - [Party_System.md](Party_System.md)：俘虏列表与归属 API。
 - [Combat_System.md](Combat_System.md)：结算顺序与负伤判定。
 - [Settlement_System.md](Settlement_System.md)：城镇酒馆入口。
-- [Save_System.md](Save_System.md)：Schema v7 字段与迁移。
+- [Save_System.md](Save_System.md)：Schema v8 字段与迁移。
+- [Lord_Ransom_System.md](Lord_Ransom_System.md)：NPC 领主出售后的赎回流程。
 - [Time_System.md](Time_System.md)：WorldTime 与游戏小时。

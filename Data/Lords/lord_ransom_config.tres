@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="LordRansomConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/lord_ransom_config.gd" id="1_lordransom"]
+
+[resource]
+script = ExtResource("1_lordransom")
+enabled = true
+wait_hours_min = 12
+wait_hours_max = 48
+ransom_gold_min = 150
+ransom_gold_max = 400

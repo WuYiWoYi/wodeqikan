@@ -51,15 +51,18 @@ enum UnitClass {
 @export var promotion_target_config_id: String = ""
 
 @export_category("Progression")
-## 等级从 1 开始，最高不超过 max_level。
-@export var max_level: int = 10
+## 战斗经验等级从 1 开始，最高为 CombatExperience.MAX_LEVEL（当前 5）。
+## 经验门槛由 CombatExperience 集中维护（100/300/500/1000），不再按配置递增。
+@export var max_level: int = 5
+## 旧字段保留用于兼容旧 .tres 与校验；实际升级门槛以 CombatExperience 为准。
 @export var base_exp_to_next_level: int = 100
-@export var exp_growth_per_level: int = 50
+@export var exp_growth_per_level: int = 0
 
 @export_category("Level Growth")
-## 每升一级增加的属性；最终属性统一由 StatCalculator 计算，不写回本配置。
-@export var hp_per_level: int = 5
-@export var attack_per_level: int = 1
+## 经验等级带来的额外成长；当前只由 CombatExperience 提供生命值加成，
+## 因此这些字段默认 0，避免同一等级同时叠加两套生命值成长。
+@export var hp_per_level: int = 0
+@export var attack_per_level: int = 0
 @export var move_speed_per_level: float = 0.0
 @export var attack_range_per_level: float = 0.0
 
@@ -70,11 +73,13 @@ enum UnitClass {
 
 
 ## 从当前等级升到下一级所需经验。
-## 达到最高等级后返回值不再参与升级，调用方应自行停止升级。
+## 门槛统一由 CombatExperience 提供；达到最高等级后返回 0。
+## base_exp_to_next_level / exp_growth_per_level 仅为旧资源兼容保留。
 func exp_to_next_level(current_level: int) -> int:
 	var level: int = clampi(current_level, 1, maxi(max_level, 1))
-	var required: int = base_exp_to_next_level + (level - 1) * exp_growth_per_level
-	return maxi(1, required)
+	if level >= maxi(max_level, 1):
+		return 0
+	return CombatExperience.exp_to_next_level(level)
 
 
 func get_class_display_name() -> String:

@@ -16,6 +16,8 @@ var _adventurer_recruitment_manager: AdventurerRecruitmentManager = null
 var _supply_manager: SupplyManager = null
 ## 阶段 13：伤兵治疗由 WorldTime 整小时边界结算，暂停时不会推进。
 var _wounded_healing_manager: WoundedHealingManager = null
+## 阶段 13：领主赎回等待只按 WorldTime 推进，暂停时不会提前生成请求。
+var _lord_ransom_manager: LordRansomManager = null
 
 
 func bind(
@@ -28,7 +30,8 @@ func bind(
 	fief_recruitment_manager: FiefRecruitmentManager = null,
 	adventurer_recruitment_manager: AdventurerRecruitmentManager = null,
 	supply_manager: SupplyManager = null,
-	wounded_healing_manager: WoundedHealingManager = null
+	wounded_healing_manager: WoundedHealingManager = null,
+	lord_ransom_manager: LordRansomManager = null
 ) -> void:
 	_unit_manager = unit_manager
 	_party_manager = party_manager
@@ -40,6 +43,7 @@ func bind(
 	_adventurer_recruitment_manager = adventurer_recruitment_manager
 	_supply_manager = supply_manager
 	_wounded_healing_manager = wounded_healing_manager
+	_lord_ransom_manager = lord_ransom_manager
 
 
 func on_world_tick(fixed_delta: float) -> void:
@@ -59,6 +63,10 @@ func on_world_tick(fixed_delta: float) -> void:
 		_fief_recruitment_manager.tick(fixed_delta)
 	if _adventurer_recruitment_manager != null:
 		_adventurer_recruitment_manager.tick(fixed_delta)
+
+	# 赎回等待到点后生成家族请求；事件本身由 EventCenter 只读聚合。
+	if _lord_ransom_manager != null:
+		_lord_ransom_manager.tick()
 
 	# 补给只在 WorldTime 跨日时结算；暂停不调用 tick，2 倍速也只会按日推进。
 	# 放在 AI 之前，保证 NPC 决策看到的是当天结算后的补给状态。

@@ -4,4 +4,5 @@
 
 [resource]
 script = ExtResource("1_prisonerprice")
-level_prices = [10, 20, 30]
+tier_prices = [5, 20, 60]
+lord_price = 100

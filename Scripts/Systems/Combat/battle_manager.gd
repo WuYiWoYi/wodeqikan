@@ -21,6 +21,13 @@ const POST_BATTLE_ENGAGEMENT_COOLDOWN: float = 30.0
 ## 战斗经验与奖励集中配置。
 const EXP_SURVIVAL_BASE: int = 10
 const EXP_WIN_BONUS: int = 20
+
+## 实时战斗中的伤害/击杀经验入口。UnitController 由 BattleScene 注入本回调；
+## 经验最终仍由 UnitManager.add_exp 统一结算，不另建一套经验数据。
+func grant_combat_experience(unit_id: String, amount: int) -> void:
+	if _unit_manager == null or amount <= 0:
+		return
+	_unit_manager.add_exp(unit_id, amount)
 const VICTORY_GOLD_BASE: int = 50
 const GOLD_PER_ENEMY_CASUALTY: int = 5
 const MAX_LOOT_ITEMS: int = 3

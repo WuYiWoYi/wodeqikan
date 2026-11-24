@@ -12,6 +12,8 @@ const TYPE_FIEF: String = "FIEF"
 const TYPE_SUPPLY: String = "SUPPLY"
 const TYPE_WOUNDED: String = "WOUNDED"
 const TYPE_ADVENTURER: String = "ADVENTURER"
+## 可由玩家直接处理的赎回请求；由 LordRansomManager 的当前状态推导。
+const TYPE_RANSOM: String = "RANSOM"
 
 const TYPE_TEXT: Dictionary = {
 	TYPE_QUEST: "任务",
@@ -19,6 +21,7 @@ const TYPE_TEXT: Dictionary = {
 	TYPE_SUPPLY: "补给",
 	TYPE_WOUNDED: "伤兵",
 	TYPE_ADVENTURER: "冒险者",
+	TYPE_RANSOM: "赎回",
 }
 
 ## 只读访问 WorldContext；不声明具体类型以避免 WorldContext ↔ EventCenter 循环引用。
@@ -39,7 +42,24 @@ func get_events() -> Array[Dictionary]:
 	events.append_array(_collect_supply_events())
 	events.append_array(_collect_wounded_events())
 	events.append_array(_collect_adventurer_events())
+	events.append_array(_collect_ransom_events())
 	return events
+
+
+## 右侧事件框只展示玩家可直接操作的事件；普通提示仍留在事件中心。
+func get_actionable_events() -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	for event: Dictionary in get_events():
+		if bool(event.get("actionable", false)):
+			result.append(event)
+	return result
+
+
+func get_event(event_id: String) -> Dictionary:
+	for event: Dictionary in get_events():
+		if str(event.get("event_id", "")) == event_id:
+			return event
+	return {}
 
 
 func get_events_of_type(type: String) -> Array[Dictionary]:
@@ -157,6 +177,20 @@ func _collect_wounded_events() -> Array[Dictionary]:
 			+ "按部队成员顺序依次治疗。\n保持世界时间运行即可继续恢复。"
 		) % [wounded_count, healing],
 	}]
+
+
+## 家族赎回事件：只聚合 LordRansomManager 中当前仍有效、可操作的请求。
+## 已接受/已失效的记录在管理器侧立即失效，本方法不会返回旧副本。
+func _collect_ransom_events() -> Array[Dictionary]:
+	var events: Array[Dictionary] = []
+	if _context == null or _context.lord_ransom_manager == null:
+		return events
+	for raw: Dictionary in _context.lord_ransom_manager.get_active_events():
+		var event: Dictionary = raw.duplicate(true)
+		event["type"] = TYPE_RANSOM
+		event["type_text"] = get_type_text(TYPE_RANSOM)
+		events.append(event)
+	return events
 
 
 ## 每个仍有可用候选人的村庄产生一条事件，避免为同一候选人重复生成条目。

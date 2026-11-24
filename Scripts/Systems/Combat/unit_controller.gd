@@ -47,6 +47,11 @@ const BATTLE_MOUNTED_MOVE_SPEED_MULTIPLIER: float = 0.84
 ## 局部避让（Separation）仍负责主动移动调整。
 const MIN_BODY_DISTANCE: float = 28.0
 
+## 战斗经验：每次对敌方造成有效伤害 +1，完成击杀额外 +10。
+## 按“有效伤害事件”计数，不按伤害数值；0 伤害/未命中不发放。
+const EXP_PER_DAMAGE: int = 1
+const EXP_PER_KILL: int = 10
+
 ## 使用 preload 常量而不是全局类名，保证新脚本首次导入前也能通过编译。
 const CombatRulesScript = preload("res://Scripts/Systems/Combat/combat_rules.gd")
 
@@ -75,6 +80,9 @@ var nearby_controllers: Array[UnitController] = []
 var target_claim_counts: Dictionary = {}
 ## 由 BattleScene 注入；远程单位发射箭矢的唯一入口。
 var _projectile_manager: Variant = null
+## 由 BattleScene 注入：(attacker_unit_id, exp_amount) -> void。
+## 未注入时不发放经验（纯数据测试/无世界上下文场景）。
+var experience_callback: Callable = Callable()
 
 var _attack_cooldown: float = 0.0
 var _retarget_timer: float = 0.0
@@ -418,12 +426,28 @@ func player_attack_at(
 	return true
 
 
-func apply_damage(amount: int) -> void:
+## 结算一次伤害。source 是实际攻击者，用于发放战斗经验；
+## 目标已经死亡时不再重复扣血或重复判定击杀。
+func apply_damage(amount: int, source: UnitController = null) -> void:
 	if not is_alive():
 		return
-	state.battle_hp = maxi(0, state.battle_hp - maxi(0, amount))
-	if state.battle_hp <= 0:
+	var applied: int = maxi(0, amount)
+	if applied <= 0:
+		return
+	state.battle_hp = maxi(0, state.battle_hp - applied)
+	var killed: bool = state.battle_hp <= 0
+	if source != null and source != self:
+		source._grant_damage_experience(killed)
+	if killed:
 		_die()
+
+
+## 给攻击者发放伤害/击杀经验；同一目标的死亡只会在 HP 首次归零时判定一次。
+func _grant_damage_experience(killed: bool) -> void:
+	if not experience_callback.is_valid():
+		return
+	var amount: int = EXP_PER_DAMAGE + (EXP_PER_KILL if killed else 0)
+	experience_callback.call(unit_id, amount)
 
 
 func _die() -> void:
@@ -480,7 +504,7 @@ func _execute_attack(target: UnitController, direction: Vector2 = Vector2.ZERO) 
 		return false
 
 	_face_attack_direction(attack_direction)
-	target.apply_damage(get_attack_damage())
+	target.apply_damage(get_attack_damage(), self)
 	_attack_cooldown = maxf(0.05, unit_data.attack_interval)
 	_last_attack_direction = attack_direction
 	_last_attack_target_id = target.unit_id

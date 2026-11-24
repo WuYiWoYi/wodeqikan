@@ -276,6 +276,33 @@ func add_exp(unit_id: String, amount: int) -> bool:
 
 
 ## 当前等级升到下一级所需经验；单位或配置无效返回 0。
+## 读档/迁移后把等级与经验校正到当前五级制：
+## - 旧 1–10 级超出上限时按 ceil(level / 2) 折算；
+## - 经验超过当前阈值时补升级，避免存档后“有经验却不升级”；
+## - 满级经验归零，与 add_exp 的规则一致。
+func normalize_combat_progression() -> void:
+	for unit: UnitData in get_all_units():
+		if unit == null:
+			continue
+		var config := get_unit_config(unit.config_id)
+		if config == null:
+			continue
+		var max_level: int = maxi(config.max_level, 1)
+		unit.level = maxi(1, unit.level)
+		unit.exp = maxi(0, unit.exp)
+		if unit.level > max_level:
+			unit.level = CombatExperience.legacy_level_to_combat_level(unit.level)
+			unit.level = clampi(unit.level, 1, max_level)
+		while unit.level < max_level:
+			var required: int = config.exp_to_next_level(unit.level)
+			if required <= 0 or unit.exp < required:
+				break
+			unit.exp -= required
+			unit.level += 1
+		if unit.level >= max_level:
+			unit.exp = 0
+
+
 func get_exp_to_next_level(unit_id: String) -> int:
 	var unit := get_unit(unit_id)
 	if unit == null:

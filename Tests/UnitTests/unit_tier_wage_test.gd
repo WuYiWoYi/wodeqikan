@@ -164,7 +164,7 @@ func _test_promotion(context: WorldContext) -> void:
 	unit.level = 3
 	unit.exp = 42
 	_check(context.unit_manager.recalculate_stats(unit.unit_id), "设置 3 级属性")
-	_check(unit.max_hp == 60 and unit.attack == 12, "3 级民兵属性 60 / 12")
+	_check(unit.max_hp == 65 and unit.attack == 10, "3 级民兵属性 65 / 10")
 	var level_before: int = unit.level
 	var exp_before: int = unit.exp
 	var equipment_before: Dictionary = unit.equipment.duplicate(true)
@@ -179,7 +179,7 @@ func _test_promotion(context: WorldContext) -> void:
 	_check(unit.level == level_before and unit.exp == exp_before, "晋升保留等级与经验")
 	_check(unit.equipment == equipment_before, "晋升保留装备")
 	_check(unit.wage == 5, "晋升后工资切换为二级工资")
-	_check(unit.max_hp == 116 and unit.attack == 24, "二级 3 级属性按新成长曲线重算")
+	_check(unit.max_hp == 115 and unit.attack == 20, "二级 3 级属性按新成长曲线重算")
 	_check(
 		context.player_profile.get_item_count(TOKEN_ID) == tokens_before - 1,
 		"晋升消耗 1 个凭证"
@@ -196,7 +196,7 @@ func _test_promotion(context: WorldContext) -> void:
 	)
 	_check(unit.config_id == "infantry_veteran", "晋升后切换到三级兵种配置")
 	_check(unit.wage == 10, "晋升后工资切换为三级工资")
-	_check(unit.max_hp == 200 and unit.attack == 31, "三级 3 级属性 200 / 31")
+	_check(unit.max_hp == 195 and unit.attack == 25, "三级 3 级属性 195 / 25")
 	_check(
 		context.player_profile.get_item_count(TOKEN_ID) == tokens_left - 1,
 		"第二次晋升再消耗 1 个凭证"

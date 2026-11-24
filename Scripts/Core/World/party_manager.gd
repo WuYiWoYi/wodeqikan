@@ -241,6 +241,13 @@ func add_prisoner(party_id: String, unit_id: String) -> bool:
 			% [unit_id, unit.prisoner_owner_party_id]
 		)
 		return false
+	# 已出售/等待赎回的单位不得重新成为俘虏，否则会出现同一领主重复出售。
+	if not unit.sold_to_settlement_id.is_empty():
+		push_warning(
+			"PartyManager.add_prisoner: 单位 %s 已离开玩家控制，不能再次成为俘虏"
+			% unit_id
+		)
+		return false
 	if unit.status == UnitData.Status.DEAD:
 		return false
 

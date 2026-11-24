@@ -7,6 +7,8 @@ extends Node2D
 const TextureRegion = preload("res://Scripts/Core/World/texture_region_utils.gd")
 const MoveTargetGuideScript = preload("res://Scripts/Systems/WorldMap/move_target_guide.gd")
 const EventCenterPanelScript = preload("res://Scripts/UI/WorldMap/event_center_panel.gd")
+const EventFeedScript = preload("res://Scripts/UI/WorldMap/event_feed.gd")
+const EventDetailDialogScript = preload("res://Scripts/UI/WorldMap/event_detail_dialog.gd")
 
 const PARTY_INTERACTION_RADIUS: float = 40.0
 const PARTY_INTERACTION_EXIT_RADIUS: float = 64.0
@@ -90,6 +92,11 @@ var _top_info_signature: String = ""
 ## 主界面事件中心：只读聚合任务/待处理事项。
 var _event_center_panel = null
 var _event_center_pause_active: bool = false
+
+## 右侧可操作事件框与详情弹窗；只展示 EventCenter 当前有效事件。
+var _event_feed = null
+var _event_detail_dialog = null
+var _event_dialog_pause_active: bool = false
 
 var _settlement_panel: PanelContainer = null
 ## 地点面板内部的两种内容视图：城镇信息与酒馆内容在同一窗口内切换。
@@ -311,6 +318,9 @@ func _exit_tree() -> void:
 	if _event_center_pause_active:
 		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
 		_event_center_pause_active = false
+	if _event_dialog_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_event_dialog_pause_active = false
 	if _context != null:
 		_context.encounter_manager.clear_pending_player_encounter()
 		_context.encounter_manager.clear_pending_battle_interaction()
@@ -336,6 +346,7 @@ func _process(delta: float) -> void:
 	_update_party_hover()
 	_refresh_encyclopedia_if_needed()
 	_refresh_event_center_if_needed()
+	_refresh_event_feed_if_needed()
 	_last_player_position = _player_party.world_position
 
 
@@ -911,9 +922,12 @@ func _build_ui() -> void:
 	_build_save_panel()
 	_build_encyclopedia_panel()
 	_build_event_center_panel()
+	_build_event_feed()
 	# 市场是覆盖层，最后加入以保证显示在地点/背包面板之上。
 	_build_market_panel()
 	_build_tavern_panel()
+	# 详情弹窗必须位于所有普通面板之上。
+	_build_event_detail_dialog()
 	# 顶部悬浮提示必须位于所有面板之上，避免被覆盖层遮住。
 	_build_top_info_tooltip()
 
@@ -1085,6 +1099,68 @@ func _refresh_event_center_if_needed() -> void:
 
 func get_event_center_panel():
 	return _event_center_panel
+
+
+# ---------------------------------------------------------------------------
+# 右侧可操作事件框与详情弹窗
+# ---------------------------------------------------------------------------
+
+
+func _build_event_feed() -> void:
+	_event_feed = EventFeedScript.new()
+	_event_feed.name = "EventFeed"
+	_event_feed.visible = false
+	_event_feed.event_selected.connect(_on_event_feed_selected)
+	_ui_root.add_child(_event_feed)
+	_event_feed.setup(_context)
+
+
+func _build_event_detail_dialog() -> void:
+	_event_detail_dialog = EventDetailDialogScript.new()
+	_event_detail_dialog.name = "EventDetailOverlay"
+	_event_detail_dialog.visible = false
+	_event_detail_dialog.closed.connect(_on_event_detail_closed)
+	_ui_root.add_child(_event_detail_dialog)
+	_event_detail_dialog.setup(_context)
+
+
+func get_event_feed():
+	return _event_feed
+
+
+func get_event_detail_dialog():
+	return _event_detail_dialog
+
+
+func _on_event_feed_selected(event_id: String) -> void:
+	if _context == null or _event_detail_dialog == null:
+		return
+	if _battle_transition_started or _has_open_modal(true):
+		return
+	if not _event_detail_dialog.open(event_id):
+		return
+	if not _event_dialog_pause_active:
+		TimeManager.push_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_event_dialog_pause_active = true
+	_set_time_buttons_enabled(false)
+	_update_time_ui()
+
+
+func _on_event_detail_closed() -> void:
+	if _event_dialog_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_event_dialog_pause_active = false
+	_refresh_time_buttons()
+	_update_time_ui()
+	if _event_feed != null:
+		_event_feed.refresh(true)
+
+
+func _refresh_event_feed_if_needed() -> void:
+	if _event_feed != null:
+		_event_feed.refresh_if_needed()
+	if _event_detail_dialog != null:
+		_event_detail_dialog.refresh_if_needed()
 
 
 func _build_bottom_bar() -> void:
@@ -4712,6 +4788,7 @@ func _has_open_modal(ignore_settlement: bool = false) -> bool:
 		or (_inventory_panel != null and _inventory_panel.visible)
 		or (_market_panel != null and _market_panel.visible)
 		or (_event_center_panel != null and _event_center_panel.visible)
+		or (_event_detail_dialog != null and _event_detail_dialog.visible)
 	)
 
 

@@ -1,33 +1,41 @@
 class_name CombatExperience
 extends RefCounted
-## 战斗经验等级：把 UnitData.level（1..max_level）映射为五个文本级别。
+## 战斗经验等级：把 UnitData.level（1..MAX_LEVEL）映射为五个经验等级。
 ##
 ## 注意：这里的“战斗经验”不是兵种等级（UnitConfig.tier），也不是职业或装备等级。
-## 名称、等级区间与属性加成统一在本类维护；UI 只读取名称，不各自维护文本。
-## 底层经验积累（UnitData.exp）与逐级成长机制保持不变。
+## 名称、经验门槛与属性加成统一在本类维护；UI 只读取名称，不各自维护文本。
+##
+## 经验按“当前等级阶段”累计：
+##   新兵 100 → 普通士兵 300 → 老兵 500 → 精锐 1000 → 百战精锐（上限）
+## 晋升后保留超出当前门槛的经验，不会因升级丢失多余经验。
 
-## 从低到高五个战斗经验级别。
-const TIER_NAMES: Array[String] = ["新兵", "一般士兵", "老兵", "精锐", "百战精锐"]
-## 每个级别的起始等级（1-based），与 TIER_NAMES 一一对应：
-## 新兵 1-2 / 一般士兵 3-4 / 老兵 5-6 / 精锐 7-8 / 百战精锐 9+。
-const TIER_MIN_LEVELS: Array[int] = [1, 3, 5, 7, 9]
+const MAX_LEVEL: int = 5
 
-## 预留：每个战斗经验级别对最终属性的加成。
-## 键使用 StatCalculator 的最终属性键（如 "max_hp" / "attack"），后续在
-## StatCalculator 中增加新属性时，只要在加成表填写同名键即可自动生效，
-## 不需要修改 UnitData 或任何 UI。
-## 当前五个级别均为空字典：加成数值尚未确认，本次不加入具体平衡数值。
-const TIER_STAT_BONUSES: Array[Dictionary] = [{}, {}, {}, {}, {}]
+## 从低到高五个战斗经验等级。
+const TIER_NAMES: Array[String] = ["新兵", "普通士兵", "老兵", "精锐", "百战精锐"]
+## 每个级别的起始等级（1-based），与 TIER_NAMES 一一对应。
+const TIER_MIN_LEVELS: Array[int] = [1, 2, 3, 4, 5]
+
+## 下标 = 当前等级 - 1；值为升到下一等级所需经验。
+## 最高等级没有下一级，查询时返回 0。四段之和为 1900，与升级链路一致。
+const EXP_TO_NEXT_LEVEL: Array[int] = [100, 300, 500, 1000]
+
+## 每个经验等级的最大生命值“累计”加成（相对新兵）：
+## 新兵 +0 / 普通士兵 +5 / 老兵 +15 / 精锐 +30 / 百战精锐 +50。
+## 由 StatCalculator 在最终属性计算时统一调用，永远按等级派生，
+## 不累计写入存档，因此读档或重复刷新不会重复叠加。
+const TIER_STAT_BONUSES: Array[Dictionary] = [
+	{"max_hp": 0},
+	{"max_hp": 5},
+	{"max_hp": 15},
+	{"max_hp": 30},
+	{"max_hp": 50},
+]
 
 
-## 等级对应的 1-based 战斗经验级别；非法等级按 1 级处理。
+## 等级对应的 1-based 战斗经验级别；非法等级按边界处理。
 static func tier_for_level(level: int) -> int:
-	var clamped_level: int = maxi(level, 1)
-	var tier: int = 1
-	for index: int in range(TIER_MIN_LEVELS.size()):
-		if clamped_level >= TIER_MIN_LEVELS[index]:
-			tier = index + 1
-	return tier
+	return clampi(level, 1, MAX_LEVEL)
 
 
 ## 等级对应的战斗经验名称，供详情面板与士兵列表共用。
@@ -38,6 +46,29 @@ static func tier_name_for_level(level: int) -> String:
 static func tier_name_for_tier(tier: int) -> String:
 	var index: int = clampi(tier - 1, 0, TIER_NAMES.size() - 1)
 	return TIER_NAMES[index]
+
+
+## 当前等级升到下一等级所需经验。已达到最高等级时返回 0。
+static func exp_to_next_level(level: int) -> int:
+	var index: int = level - 1
+	if index < 0 or index >= EXP_TO_NEXT_LEVEL.size():
+		return 0
+	return maxi(1, EXP_TO_NEXT_LEVEL[index])
+
+
+## 当前等级的生命值累计加成。等级超界时按五级上限处理。
+static func max_hp_bonus_for_level(level: int) -> int:
+	var bonuses := stat_bonuses_for_level(level)
+	return int(bonuses.get("max_hp", 0))
+
+
+## 旧存档的 10 级战斗经验 → v8 的五级经验。
+## 旧显示规则为 1–2 新兵、3–4 一般士兵、5–6 老兵、7–8 精锐、9+ 百战精锐，
+## 因此两级合并为一级，保持玩家看到的等级名称不变。
+static func legacy_level_to_combat_level(old_level: int) -> int:
+	if old_level <= 1:
+		return 1
+	return clampi(ceili(float(old_level) / 2.0), 1, MAX_LEVEL)
 
 
 ## 当前等级的属性加成；尚未配置时返回空字典。

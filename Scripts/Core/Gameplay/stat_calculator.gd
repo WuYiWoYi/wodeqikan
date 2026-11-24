@@ -113,7 +113,7 @@ static func compute_final_stats(
 		"projectile_arc_height": projectile_arc_height,
 	}
 	# 战斗经验加成与兵种基础属性、等级成长、装备加成保持独立；
-	# 加成表由 CombatExperience 统一维护，当前为空，不改变现有数值。
+	# 加成表由 CombatExperience 统一维护，当前按等级追加最大 HP。
 	return CombatExperience.apply_stat_bonuses(final_stats, level)
 
 

@@ -43,6 +43,9 @@ var projectile_arc_height: float = 70.0
 var faction_id: String = ""
 ## 家族身份（持久化）。空字符串表示无家族，使用阵营色/默认外观。
 var family_id: String = ""
+## NPC 领主身份（持久化，NobleData.lord_id）。仅家族领袖单位在创建时写入；
+## 空字符串表示普通士兵。俘虏售价与家族赎回都通过该稳定 ID 关联，不依赖名称。
+var noble_id: String = ""
 var current_party_id: String = ""
 ## 阶段 13：俘虏归属。非空表示该单位被对应部队关押，不能同时作为成员。
 ## 只有 PartyManager 的俘虏接口可以修改该字段。
@@ -84,6 +87,21 @@ func is_dead() -> bool:
 ## 是否为某支部队持有的俘虏。
 func is_prisoner() -> bool:
 	return not prisoner_owner_party_id.is_empty()
+
+
+## 是否具有 NPC 领主身份（家族领袖单位）。
+func is_noble_lord() -> bool:
+	return not noble_id.is_empty()
+
+
+## 家族赎回成功：清空俘虏/出售状态，恢复为可正常活动的单位。
+## 这是赎回流程释放领主的唯一写入入口；调用方随后负责重建部队。
+func mark_ransomed() -> void:
+	prisoner_owner_party_id = ""
+	current_party_id = ""
+	sold_to_settlement_id = ""
+	status = Status.ACTIVE
+	current_hp = maxi(1, max_hp)
 
 
 ## 标记为俘虏。归属填写部队 ID；空字符串表示战后待分配俘虏。
@@ -164,6 +182,7 @@ func to_dict() -> Dictionary:
 		"projectile_arc_height": projectile_arc_height,
 		"faction_id": faction_id,
 		"family_id": family_id,
+		"noble_id": noble_id,
 		"current_party_id": current_party_id,
 		"prisoner_owner_party_id": prisoner_owner_party_id,
 		"sold_to_settlement_id": sold_to_settlement_id,
@@ -210,6 +229,8 @@ static func from_dict(data: Dictionary) -> UnitData:
 	)
 	unit.faction_id = str(data.get("faction_id", ""))
 	unit.family_id = str(data.get("family_id", ""))
+	# 旧存档没有领主身份；读档后由 WorldContext 按部队领袖关系回填。
+	unit.noble_id = str(data.get("noble_id", ""))
 	unit.current_party_id = str(data.get("current_party_id", ""))
 	# 阶段 13：旧存档没有俘虏/出售字段，默认普通归属。
 	unit.prisoner_owner_party_id = str(data.get("prisoner_owner_party_id", ""))

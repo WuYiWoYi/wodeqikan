@@ -48,26 +48,26 @@ func _run() -> void:
 	_check(is_equal_approx(float(trained_stats["attack_interval"]), 1.0), "职业步兵 attack_interval = 1.0")
 	_check(is_equal_approx(float(trained_stats["move_speed"]), 55.0), "职业步兵 move_speed = 55")
 
-	# 等级成长：民兵每级 +5 HP / +1 攻击。
+	# 战斗经验等级只提供累计生命加成：新兵 0 / 普通 5 / 老兵 15 / 精锐 30 / 百战 50。
 	var level_unit := UnitData.new()
 	level_unit.level = 3
 	var level_stats := StatCalculator.compute_final_stats(level_unit, militia)
-	_check(int(level_stats["max_hp"]) == 60, "3 级民兵 max_hp = 60")
-	_check(int(level_stats["attack"]) == 12, "3 级民兵 attack = 12")
+	_check(int(level_stats["max_hp"]) == 65, "3 级民兵 max_hp = 65")
+	_check(int(level_stats["attack"]) == 10, "3 级民兵 attack 不随经验成长")
 	_check(is_equal_approx(float(level_stats["attack_interval"]), 1.2), "等级不改变攻击间隔")
 
 	var trained_level_unit := UnitData.new()
 	trained_level_unit.level = 3
 	var trained_level_stats := StatCalculator.compute_final_stats(trained_level_unit, trained)
-	_check(int(trained_level_stats["max_hp"]) == 116, "3 级职业步兵 max_hp = 116")
-	_check(int(trained_level_stats["attack"]) == 24, "3 级职业步兵 attack = 24")
+	_check(int(trained_level_stats["max_hp"]) == 115, "3 级职业步兵 max_hp = 115")
+	_check(int(trained_level_stats["attack"]) == 20, "3 级职业步兵 attack 保持基础值")
 
-	# 超过等级上限时成长被钳制在 max_level。
+	# 超过等级上限时成长被钳制在 max_level（5 级，累计 +50 HP）。
 	var capped_unit := UnitData.new()
 	capped_unit.level = 99
 	var capped_stats := StatCalculator.compute_final_stats(capped_unit, militia)
-	_check(int(capped_stats["max_hp"]) == 95, "超过上限按 10 级计算 max_hp")
-	_check(int(capped_stats["attack"]) == 19, "超过上限按 10 级计算 attack")
+	_check(int(capped_stats["max_hp"]) == 100, "超过上限按 5 级计算 max_hp")
+	_check(int(capped_stats["attack"]) == 10, "超过上限不增加 attack")
 
 	# 装备加成。
 	var sword := _make_equipment("sword", "铁剑", EquipmentConfig.Slot.WEAPON)
@@ -96,7 +96,7 @@ func _run() -> void:
 		gear_unit, militia, equipment_configs
 	)
 	_check(int(stacked_stats["max_hp"]) == 60, "等级与多件装备生命叠加")
-	_check(int(stacked_stats["attack"]) == 14, "等级与多件装备攻击叠加")
+	_check(int(stacked_stats["attack"]) == 13, "等级不增加攻击，仅装备叠加")
 	_check(is_equal_approx(float(stacked_stats["move_speed"]), 65.0), "坐骑提供移速加成")
 	_check(is_equal_approx(float(stacked_stats["attack_range"]), 22.0), "坐骑提供射程加成")
 

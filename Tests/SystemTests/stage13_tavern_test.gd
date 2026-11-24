@@ -6,9 +6,13 @@ extends Node
 ##     res://Tests/SystemTests/stage13_tavern_test.tscn
 
 const MILITIA_PATH: String = "res://Data/Units/infantry_militia.tres"
+const TRAINED_PATH: String = "res://Data/Units/infantry_trained.tres"
+const VETERAN_PATH: String = "res://Data/Units/infantry_veteran.tres"
 
 var _failed: bool = false
 var _militia: UnitConfig = null
+var _trained: UnitConfig = null
+var _veteran: UnitConfig = null
 var _context: WorldContext = null
 var _map: Node = null
 var _player: PartyData = null
@@ -39,8 +43,10 @@ func _run_async() -> void:
 	TimeManager.clear_pauses()
 	TimeManager.set_base_world_speed(TimeManager.SPEED_PAUSED)
 	_militia = load(MILITIA_PATH) as UnitConfig
-	_check(_militia != null, "加载兵种配置")
-	if _militia == null:
+	_trained = load(TRAINED_PATH) as UnitConfig
+	_veteran = load(VETERAN_PATH) as UnitConfig
+	_check(_militia != null and _trained != null and _veteran != null, "加载三个兵种配置")
+	if _militia == null or _trained == null or _veteran == null:
 		return
 
 	_test_price_config()
@@ -60,11 +66,12 @@ func _test_price_config() -> void:
 	_check(config != null, "加载俘虏价格配置")
 	if config == null:
 		return
-	_check(config.get_price_for_level(1) == 10, "1 级俘虏 10 金币")
-	_check(config.get_price_for_level(2) == 20, "2 级俘虏 20 金币")
-	_check(config.get_price_for_level(3) == 30, "3 级俘虏 30 金币")
-	_check(config.get_price_for_level(9) == 30, "高等级取边界价格")
-	_check(config.get_price_for_level(0) == 10, "非法等级回退到 1 级价格")
+	_check(config.get_price_for_tier(1) == 5, "一级兵种俘虏 5 金币")
+	_check(config.get_price_for_tier(2) == 20, "二级兵种俘虏 20 金币")
+	_check(config.get_price_for_tier(3) == 60, "三级兵种俘虏 60 金币")
+	_check(config.get_price_for_tier(9) == 60, "超出配置取最高档价格")
+	_check(config.get_price_for_tier(0) == 5, "非法兵种等级回退到一级价格")
+	_check(config.get_lord_price() == 100, "NPC 领主统一 100 金币")
 
 
 func _setup_world() -> void:
@@ -83,13 +90,17 @@ func _setup_world() -> void:
 	if _player == null or _town == null or _village == null:
 		return
 
-	# 准备 3 名等级不同的玩家俘虏（独立 Unit，不属于成员列表）。
-	for level: int in [1, 2, 3]:
-		var unit := _context.unit_manager.create_unit(_militia, _player.faction_id)
+	# 准备 3 个不同兵种等级的玩家俘虏；战斗经验等级刻意与兵种等级错开，
+	# 用于验证售价只认 UnitConfig.tier，不认 UnitData.level。
+	var prison_configs: Array[UnitConfig] = [_militia, _trained, _veteran]
+	var prison_levels: Array[int] = [3, 1, 2]
+	for index: int in range(prison_configs.size()):
+		var config: UnitConfig = prison_configs[index]
+		var unit := _context.unit_manager.create_unit(config, _player.faction_id)
 		if unit == null:
 			continue
-		unit.level = level
-		unit.display_name = "俘虏%d" % level
+		unit.level = prison_levels[index]
+		unit.display_name = "俘虏%d" % index
 		_check(
 			_context.party_manager.add_member(_player.party_id, unit.unit_id),
 			"俘虏先加入部队"
@@ -107,7 +118,7 @@ func _test_trade_manager_atomicity() -> void:
 	if manager == null:
 		return
 	var gold_before: int = _context.player_profile.gold
-	_check(manager.get_price_for_level(1) == 10, "交易管理器读取统一价格")
+	_check(manager.get_price_for_tier(1) == 5, "交易管理器读取统一兵种价格")
 
 	# 其他部队的俘虏：整体失败，不扣金币、不移除。
 	var other_party := _context.party_manager.create_party(
@@ -136,20 +147,20 @@ func _test_trade_manager_atomicity() -> void:
 	)
 	_check(not bool(result.get("success", false)), "不存在单位导致失败")
 
-	# 成功出售：重复 ID 去重，价格按等级累计。
+	# 成功出售：重复 ID 去重，价格按兵种 tier 累计（一级 5 + 三级 60）。
 	result = manager.sell_prisoners(
 		_player.party_id,
 		[_prisoner_ids[0], _prisoner_ids[0], _prisoner_ids[2]],
 		_town.settlement_id
 	)
 	_check(bool(result.get("success", false)), "合法俘虏可出售")
-	_check(int(result.get("gold", 0)) == 40, "1 级 + 3 级共 40 金币")
+	_check(int(result.get("gold", 0)) == 65, "一级 + 三级兵种共 65 金币")
 	_check(
 		(result.get("sold_unit_ids", []) as Array).size() == 2,
 		"重复 ID 只出售一次"
 	)
 	_check(
-		_context.player_profile.gold == gold_before + 40,
+		_context.player_profile.gold == gold_before + 65,
 		"出售成功后金币正确增加"
 	)
 	var sold_unit := _context.unit_manager.get_unit(_prisoner_ids[2])
@@ -270,13 +281,12 @@ func _test_tavern_menu_and_selling() -> void:
 	# 确认出售。
 	(_tavern.find_child("TavernPlayer_%s" % first_id, true, false) as Button).pressed.emit()
 	(_tavern.find_child("TavernSellConfirmButton", true, false) as Button).pressed.emit()
-	var sold_level: int = _context.unit_manager.get_unit(first_id).level
-	var expected_gold: int = (
-		_context.prisoner_trade_manager.get_price_for_level(sold_level)
+	var expected_gold: int = _context.prisoner_trade_manager.get_sell_price(
+		_context.unit_manager.get_unit(first_id)
 	)
 	_check(
 		_context.player_profile.gold == gold_before + expected_gold,
-		"确认后金币按等级增加"
+		"确认后金币按兵种 tier 增加"
 	)
 	_check(
 		not _context.party_manager.get_prisoner_ids(_player.party_id).has(first_id),
