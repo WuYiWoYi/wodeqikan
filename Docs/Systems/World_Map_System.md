@@ -62,8 +62,12 @@ AI 部队由 `AIManager` 调用同一接口设置目标，不直接改字段：
 - 治安队：120 像素/游戏秒；强盗：100；商队：80。速度关系为治安队 > 强盗 > 商队。
 - 旧存档通过 `PartyData.movement_speed` 保留原速度，读档不会按新常量重置。
 - 顶部数字键 `1` / `2` / `3` 分别暂停 / 1x / 2x；小键盘不响应，echo 不重复触发。
-- UI 面板打开时快捷键和地图点击都被屏蔽。
-- 玩家点击地图成功设置目标后，基础倍率自动切为 1x；不清除任何暂停原因。
+- UI 面板打开时快捷键和地图点击都被屏蔽；地图点击只经 `_unhandled_input`，UI 控件自行消费的点击不会落到地图。
+- 地图左键采用单击/双击判定：第一次点击先等待 `MAP_CLICK_DOUBLE_WINDOW`（0.28 秒）；
+  - 窗口内、`MAP_CLICK_DOUBLE_DISTANCE`（18 像素）内再次点击：视为双击，只下达一次移动/跟随指令，并把基础倍率切为 2x；
+  - 窗口内点击不同位置：先补发第一次单击，再开始新的判定窗口；
+  - 窗口结束仍未双击：按单击执行，成功后基础倍率切为 1x；
+  - 两种操作都不清除任何暂停原因；窗口期间打开面板或进入战斗转换时，待处理单击直接丢弃。
 - 点击地图外区域或部队不可用时，不改变时间倍率。
 
 玩家点击其他部队：
@@ -115,6 +119,20 @@ set_party_follow(follower, target)
 
 到达目标后焦点清除；普通部队对话仍只对主动点击的目标打开，地点面板仍必须由鼠标点击地点打开。
 焦点是运行时字段，不进入存档。
+
+### 3.1.3 玩家到达自动暂停
+
+- `WorldMapManager` 在部队真正到达移动/跟随目标时广播 `EventBus.party_arrived(party_id)`；该信号只表示“到达事实”，不直接修改时间。
+- `WorldMap` 只对玩家部队响应：把基础倍率设为暂停（`SPEED_PAUSED`）。NPC 到达不会暂停世界。
+- 只在到达时暂停，不会在设置目标或移动途中暂停。
+- 重新下达移动/跟随指令后，旧目标不再产生到达事件，因此不会误触发暂停；到达地点后仍按第 5 节打开地点面板。
+- 暂停原因栈中的其他暂停保持不变；玩家从暂停/1x/2x 任一状态出发，到达后都进入暂停。
+
+### 3.1.4 暂停提示
+
+- 顶栏下方居中显示琥珀色（`#D97706`）半粗体 `WorldPausedTip`（文本“已暂停”），带深色描边保证浅色地图可读。
+- 可见性直接读取 `TimeManager.get_effective_world_scale()`：实际有效倍率为 0 时显示，任意暂停原因（基础暂停、UI 面板、遭遇对话、战斗等）都算；恢复 1x/2x 后隐藏。
+- 提示只读，不提供按钮，不改变时间状态。
 
 ### 3.2 推进
 
@@ -230,7 +248,7 @@ WorldSimulation 更新 PartyData.world_position
           ├── 记录 _pending_settlement_interaction_id
           ├── WorldMapManager.set_party_target(玩家, 地点坐标)
           ├── 清除追逐焦点与跟随指令
-          ├── 基础倍率切回 1x
+          ├── 基础倍率按地图点击规则切为 1x / 2x
           └── 不打开面板、不压入 ui_panel
   → 世界继续运行，玩家部队自动移动
   → _process 检测 pending：
@@ -457,7 +475,9 @@ WorldSimulation 更新 PartyData.world_position
 | `battle_started` 自动进入战斗场景 | 已实现（玩家参与时） |
 | 玩家部队跟随目标部队 | 已实现（0.5 世界秒刷新） |
 | 时间快捷键 1/2/3 | 已实现（顶部主键区） |
+| 地图单击 / 双击 | 已实现（单击 1x、双击 2x，双击只下达一次指令） |
 | 点击地图后切 1x | 已实现（不清除暂停原因） |
+| 玩家到达自动暂停 / 已暂停提示 | 已实现（只响应玩家到达；提示读取有效倍率） |
 | 表现层图标 | 已实现（程序绘制） |
 | 摄像机跟随/平移/缩放 | 已实现 |
 | 地点交互 | 已实现（点击设置移动目标，到达后打开；路过不触发） |
@@ -698,7 +718,8 @@ WorldSimulation 更新 PartyData.world_position
 ### 16.4 城镇酒馆与独立出售界面（阶段 13 后续）
 
 - 酒馆菜单嵌入原 `SettlementPanel` 的 `SettlementTavernHost`，切换时只改变 `SettlementInfoView` 与酒馆内容的可见性；窗口位置、尺寸与 `ui_panel` 暂停原因保持不变。
-- 嵌入的 `TavernPanel` 只负责菜单与雇佣兵占位；点击“出售俘虏”只发出 `sell_requested`，不在城镇面板内部展开出售视图。
+- 嵌入的 `TavernPanel` 只负责菜单与意图转发；点击“招募雇佣兵”发出 `mercenary_recruit_requested`，点击“出售俘虏”发出 `sell_requested`，都不在城镇面板内部展开子视图。
+- `WorldMap` 收到雇佣兵请求后隐藏城镇面板，打开独立的 `MercenaryRecruitPanel`（列表 + 真实 `UnitVisual` 预览）；关闭后恢复城镇信息面板，不重新嵌入酒馆。
 - `WorldMap` 收到请求后隐藏城镇面板，打开独立的 `PrisonerSalePanel`（`TavernPanel` 的独立窗口 + 遮罩，`open_sale()` 直接进入出售视图）。
 - 独立界面复用同一套俘虏列表、价格和 `PrisonerTradeManager` 结算；关闭后恢复城镇信息面板并刷新金币/背包显示，世界保持暂停。
 - 关闭地点、进入村庄或切换地点时调用两个面板的 `reset()` 清理出售预览与选中状态；`reset()` 不广播 `closed`，避免收尾阶段误切视图。
@@ -717,7 +738,7 @@ WorldSimulation 更新 PartyData.world_position
 
 - 顶栏内容分为 `TopBarLeft`、`TopBarCenter`、`TopBarRight` 三个锚定区域。
 - `WorldTimeLabel` 位于 `TopBarCenter` 并保持屏幕水平居中；左右区域新增内容不会推离中心。
-- 左侧显示三个“图标 + 数值”条目：`MoneyLabel`（金币）、`PartySpeedLabel`（部队移速）、`PartySizeLabel`（部队人数）；右侧保留暂停/1x/2x/事件/部队/家族/背包/百科/保存/主菜单。
+- 左侧显示三个“图标 + 数值”条目：`MoneyLabel`（金币）、`PartySpeedLabel`（部队移速）、`PartySizeLabel`（部队人数），以及纯文本 `PlayerHpLabel`（当前控制角色的 `current_hp/max_hp`）；右侧保留暂停/1x/2x/事件/部队/家族/背包/百科/保存/主菜单。
 - 每个条目由 `<标签名>Entry` 容器、`<标签名>Icon` 与 `<标签名>` 数值标签组成，图标统一 20×20、字号 15、条目间距 12、图标与数值间距 4。
 - 数值不再带“金币：/部队移速：/部队人数：”文字前缀，只显示数量。
 - 顶栏入口使用紧凑尺寸（52×30、字号 13），在 1280 宽度下不与中间时间区域重叠。
@@ -728,7 +749,8 @@ WorldSimulation 更新 PartyData.world_position
 - 金币每帧读取 `PlayerProfile.gold`；购买、征召、工资与税收变化后下一帧更新。
 - 移速每帧调用 `WorldMapManager.get_effective_movement_speed(party)`，与其他悬浮/移动结算共用同一入口。
 - 部队人数每帧统计玩家部队成员：`可战斗`（`UnitData.is_alive()`）+ `伤员`（`UnitData.is_wounded()`）；永久死亡与俘虏不计入。
-- 使用图标：`UI_金币.png`、`UI_移速.png`、`UI_人数.png`，路径集中在 `world_map.gd` 顶部常量。
+- 生命值每帧读取 `WorldContext.get_player_unit()` 的真实 `UnitData`，显示 `生命 <current>/<max>`；被俘恢复与逃脱后同一帧刷新，不读取 UI 缓存或占位值。
+- 使用图标：`UI_金币.png`、`UI_移速.png`、`UI_人数.png`，路径集中在 `world_map.gd` 顶部常量；HP 使用同字号纯文本。
 
 ### 18.3 悬浮提示与 ALT 明细
 
@@ -787,3 +809,25 @@ WorldSimulation 更新 PartyData.world_position
 - 封地页：按村庄/城镇/城堡分组，数据来自 `SettlementData.owner_house_id` 与家族成员的 `owner_noble_id`；不包含其他家族或盟友的封地，所有权变更后下一帧刷新。
 - 点击封地条目调用 `focus_settlement_on_map()`：进入自由镜头并对准该地点，同时关闭面板；不修改地点数据。
 - 面板只读实时实体状态，不在 UI 内缓存成员或封地列表；详细字段来源见 [Political_Hierarchy_System.md](Political_Hierarchy_System.md)。
+
+## 19. 玩家被俘状态与镜头（2026-11-25）
+
+### 19.1 左侧被俘面板
+
+- 节点：`CaptiveStatusPanel`（PanelContainer），包含 `CaptiveTitleLabel`、`CaptiveCaptorLabel`、`CaptiveHpLabel` 与提示文本。
+- 可见性只读取 `WorldContext.captivity_manager.is_player_captive()`；普通状态隐藏，不占地图空间。
+- 押送部队名称来自 `captivity_manager.get_captor_party_id()` → `PartyManager.get_party()`；HP 来自真实玩家 `UnitData`。
+- 面板不是模态窗口，不压入暂停原因；被俘期间暂停/1x/2x 仍可切换。
+
+### 19.2 镜头与地图表现
+
+- 被俘期间 `_update_camera()` 强制跟随押送部队，忽略自由镜头；逃脱后 `is_player_captive()` 为 false，镜头自动回到玩家部队。
+- 玩家部队战斗图标在被俘期间隐藏；押送部队正常显示。
+- 玩家部队处于 `DISABLED`，但 `open_party_panel()` 允许在被俘时查看，面板只读，不能重新获得控制权。
+- `_update_player_info()` 在玩家状态栏显示“被俘中”。
+
+### 19.3 输入与 UI 权限
+
+- 被俘时玩家不能在大地图下达移动/攻击指令；`_has_open_modal()` 不因被俘面板而阻塞普通入口。
+- 部队/家族/背包/百科/事件中心等普通入口保持可用；时间按钮只在真正的模态面板打开时禁用。
+- 所有显示只读取 `CaptivityManager` 与实体数据，不在 UI 内结算恢复或逃脱。

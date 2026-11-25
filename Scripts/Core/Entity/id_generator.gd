@@ -16,6 +16,8 @@ const FACTION: String = "FACTION"
 const QUEST: String = "QUEST"
 const BATTLE: String = "BATTLE"
 const CANDIDATE: String = "CANDIDATE"
+## 酒馆雇佣兵世界记录；招募后记录删除，ID 永不复用。
+const MERCENARY: String = "MERCENARY"
 ## NPC 领主家族赎回记录；一个记录对应一次出售→等待→请求的生命周期。
 const RANSOM: String = "RANSOM"
 

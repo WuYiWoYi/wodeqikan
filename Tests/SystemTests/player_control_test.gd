@@ -334,10 +334,21 @@ func _test_spectate_and_defeat() -> void:
 	_check(_session.final_result != null, "战败生成统一 BattleResult")
 	if _session.final_result != null:
 		_check(_session.final_result.player_won == false, "战败不标记玩家获胜")
+		# 伤兵系统启用后，战败方部分减员按“伤兵”统计；
+		# “全员伤亡”应同时覆盖阵亡与伤兵，且不留下存活者。
+		var killed: int = _session.final_result.get_party_casualties(
+			_player.party_id
+		)
+		var wounded: int = _session.final_result.get_party_wounded(
+			_player.party_id
+		)
 		_check(
-			_session.final_result.get_party_casualties(_player.party_id)
-				== WorldInitializer.PLAYER_TOTAL_MEMBER_COUNT,
-			"玩家部队全员伤亡"
+			killed + wounded == WorldInitializer.PLAYER_TOTAL_MEMBER_COUNT,
+			"玩家部队全员伤亡（阵亡 + 伤兵）"
+		)
+		_check(
+			_session.final_result.get_party_survivors(_player.party_id) == 0,
+			"玩家部队没有存活者"
 		)
 		_check(_session.final_result.reward_gold == 0, "战败没有金币奖励")
 

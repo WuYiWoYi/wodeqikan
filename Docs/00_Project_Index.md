@@ -21,7 +21,7 @@
 | 攻击朝向 | 武器攻击判定支持 360°；人物贴图仍左右镜像，默认朝左 |
 | 静态配置 | Godot `Resource`（`Data/**/*.tres`） |
 | 运行时实体 | `RefCounted` 纯数据类（`UnitData`、`PartyData` 等） |
-| 存档 | JSON，带 `schema_version`（当前 v8），只保存持久化数据 |
+| 存档 | JSON，带 `schema_version`（当前 v10），只保存持久化数据 |
 | 世界时间 | 固定步长 0.1 秒，由 `TimeManager` 统一推进 |
 | 全局单例 | 仅 5 个 Autoload：`EventBus`、`TimeManager`、`SaveManager`、`SceneManager`、`GameManager` |
 | 代码规范 | 静态类型 GDScript；标识符英文，注释与文档中文 |
@@ -64,8 +64,8 @@ WorldContext（一局游戏，跨场景常驻；持有全部世界管理器）
 | 领域 | 文档 |
 |---|---|
 | 世界、时间、场景 | [World_Map_System.md](Systems/World_Map_System.md)、[Time_System.md](Systems/Time_System.md)、[Scene_System.md](Systems/Scene_System.md) |
-| 单位、部队 | [Unit_System.md](Systems/Unit_System.md)、[Party_System.md](Systems/Party_System.md) |
-| 战斗、伤兵/俘虏、领主赎回 | [Combat_System.md](Systems/Combat_System.md)、[Wounded_Prisoner_System.md](Systems/Wounded_Prisoner_System.md)、[Lord_Ransom_System.md](Systems/Lord_Ransom_System.md) |
+| 单位、部队、雇佣兵 | [Unit_System.md](Systems/Unit_System.md)、[Party_System.md](Systems/Party_System.md)、[Mercenary_System.md](Systems/Mercenary_System.md) |
+| 战斗、伤兵/俘虏、玩家被俘、领主赎回 | [Combat_System.md](Systems/Combat_System.md)、[Wounded_Prisoner_System.md](Systems/Wounded_Prisoner_System.md)、[Captivity_System.md](Systems/Captivity_System.md)、[Lord_Ransom_System.md](Systems/Lord_Ransom_System.md) |
 | AI、政治层级、领主 | [AI_System.md](Systems/AI_System.md)、[Political_Hierarchy_System.md](Systems/Political_Hierarchy_System.md)、[Lord_System.md](Systems/Lord_System.md) |
 | 地点、村庄、封地、冒险者 | [Settlement_System.md](Systems/Settlement_System.md)、[Village_System.md](Systems/Village_System.md)、[Fief_Recruitment_System.md](Systems/Fief_Recruitment_System.md)、[Adventurer_Recruitment_System.md](Systems/Adventurer_Recruitment_System.md) |
 | 经济、马匹、补给 | [Inventory_Economy_System.md](Systems/Inventory_Economy_System.md)、[Mount_System.md](Systems/Mount_System.md)、[Supply_System.md](Systems/Supply_System.md) |
@@ -95,7 +95,7 @@ WorldContext（一局游戏，跨场景常驻；持有全部世界管理器）
 
 ## 6. 当前状态
 
-- 当前阶段：阶段 13 及后续经验/价格/赎回已完成；存档 Schema v8。
+- 当前阶段：阶段 13 及后续地图操作/雇佣兵美术与独立招募/装备管理/招募经济/战败清理/玩家被俘与逃脱已完成；存档 Schema v10。
 - 已实现能力、明确未做项、当前风险与测试状态的**唯一权威位置**是 [Development/Current_Status.md](Development/Current_Status.md)；本索引不维护状态快照，避免与状态文档失同步。
 
 ## 7. 文档权威性

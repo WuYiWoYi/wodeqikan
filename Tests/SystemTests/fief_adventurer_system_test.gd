@@ -35,6 +35,7 @@ func _run() -> void:
 	_test_ownership()
 	_test_fief_recruitment()
 	_test_adventurer_recruitment()
+	_test_noble_adventurer_recruitment()
 	_test_candidate_refresh()
 	_test_ai_lord_recruitment()
 	_test_save_roundtrip()
@@ -191,9 +192,9 @@ func _test_adventurer_recruitment() -> void:
 		_context.adventurer_recruitment_manager.recruit_candidate(
 			village.settlement_id, candidate.candidate_id, _context.player_profile
 		),
-		"支付 1 金币招募候选人"
+		"支付 5 金币招募候选人"
 	)
-	_check(_context.player_profile.gold == 9, "招募只扣除 1 金币")
+	_check(_context.player_profile.gold == 5, "普通 Tier1 招募只扣除 5 金币")
 	_check(
 		party.member_unit_ids.size() == members_before + 1
 		and _context.unit_manager.get_all_units().size() == units_before + 1,
@@ -255,6 +256,58 @@ func _test_adventurer_recruitment() -> void:
 		) == 0,
 		"重复清理是幂等的"
 	)
+
+
+## 普通 Tier3 招募：价格 400、日薪 7、初始战斗经验 2 级，且不是雇佣兵。
+func _test_noble_adventurer_recruitment() -> void:
+	var village := _player_village()
+	var player_lord := _context.get_player_lord()
+	if village == null or player_lord == null:
+		_check(false, "贵族冒险者测试需要玩家村庄与领主")
+		return
+	_context.adventurer_recruitment_manager.initialize_settlement(village, false)
+	var candidate: AdventurerCandidateData = village.noble_adventurer_candidate
+	_check(
+		candidate != null and candidate.is_available(),
+		"玩家村庄存在可招募的贵族冒险者"
+	)
+	if candidate == null:
+		return
+	var party := _context.get_player_party()
+	var members_before: int = party.member_unit_ids.size()
+	_context.player_profile.gold = 399
+	_check(
+		not _context.adventurer_recruitment_manager.recruit_candidate(
+			village.settlement_id,
+			candidate.candidate_id,
+			_context.player_profile,
+			player_lord.lord_id
+		),
+		"金币不足 400 时无法招募 Tier3"
+	)
+	_check(_context.player_profile.gold == 399, "失败不扣金币")
+	_check(candidate.is_available(), "失败保留候选人")
+
+	_context.player_profile.gold = 500
+	_check(
+		_context.adventurer_recruitment_manager.recruit_candidate(
+			village.settlement_id,
+			candidate.candidate_id,
+			_context.player_profile,
+			player_lord.lord_id
+		),
+		"支付 400 金币招募 Tier3"
+	)
+	_check(_context.player_profile.gold == 100, "Tier3 招募扣除 400 金币")
+	_check(party.member_unit_ids.size() == members_before + 1, "Tier3 加入玩家部队")
+	var unit := _context.unit_manager.get_unit(candidate.unit_id)
+	_check(unit != null, "Tier3 生成真实单位")
+	if unit == null:
+		return
+	_check(unit.level == 2, "Tier3 初始战斗经验为普通士兵（2 级）")
+	_check(unit.wage == 7, "Tier3 日薪为 7")
+	_check(not unit.is_mercenary, "普通招募的 Tier3 不是雇佣兵")
+	_check(unit.can_manage_equipment(), "普通招募的 Tier3 允许管理装备")
 
 
 func _test_candidate_refresh() -> void:

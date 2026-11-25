@@ -26,6 +26,8 @@ const NOBLE_CANDIDATE_POSITION: Vector2 = Vector2(1000.0, 600.0)
 const NOBLE_MOUNT_VISUAL_OFFSET: Vector2 = Vector2(-110.0, 4.0)
 
 const RECRUIT_SOURCE: String = "adventurer_recruitment"
+## 三级普通招募（贵族冒险者）初始战斗经验等级。
+const NOBLE_INITIAL_LEVEL: int = 2
 
 var player_party_id: String = ""
 var last_error: String = ""
@@ -35,6 +37,8 @@ var _party_manager: PartyManager = null
 var _settlement_manager: SettlementManager = null
 var _family_registry: FamilyRegistry = null
 var _economy_config: SettlementEconomyConfig = null
+## 普通/贵族招募价格的唯一来源；不在这里维护第二套价格数值。
+var _recruitment_config: RecruitmentConfig = null
 var _appearance_config: AppearanceConfig = null
 var _id_generator: IdGenerator = null
 ## 封地所有权判断的唯一复用入口；贵族冒险者权限不另写一套规则。
@@ -49,7 +53,8 @@ func setup(
 	id_generator: IdGenerator,
 	family_registry: FamilyRegistry = null,
 	economy_config: SettlementEconomyConfig = null,
-	fief_recruitment_manager: FiefRecruitmentManager = null
+	fief_recruitment_manager: FiefRecruitmentManager = null,
+	recruitment_config: RecruitmentConfig = null
 ) -> void:
 	_unit_manager = unit_manager
 	_party_manager = party_manager
@@ -59,6 +64,9 @@ func setup(
 	_economy_config = economy_config if economy_config != null \
 		else SettlementEconomyConfig.new()
 	_economy_config.sanitize()
+	_recruitment_config = recruitment_config if recruitment_config != null \
+		else RecruitmentConfig.new()
+	_recruitment_config.sanitize()
 	_fief_recruitment_manager = fief_recruitment_manager
 	_rng.randomize()
 
@@ -69,6 +77,23 @@ func set_appearance_config(config: AppearanceConfig) -> void:
 
 func get_economy_config() -> SettlementEconomyConfig:
 	return _economy_config
+
+
+## AI 判断能否招募普通候选人时使用的统一价格。
+func get_normal_recruit_cost() -> int:
+	return _recruitment_config.get_civilian_recruit_cost(1)
+
+
+## 候选人价格按真实兵种等级计算：Tier 1 = 5，Tier 3 = 400。
+func get_candidate_recruit_cost(candidate: AdventurerCandidateData) -> int:
+	if candidate == null:
+		return 0
+	var config := _unit_manager.get_unit_config(candidate.unit_config_id) \
+		if _unit_manager != null else null
+	var tier: int = config.tier if config != null else (
+		3 if candidate.is_noble else 1
+	)
+	return _recruitment_config.get_civilian_recruit_cost(tier)
 
 
 ## 新游戏/读档后补齐单个村庄的候选人与刷新计时。
@@ -126,6 +151,10 @@ func _ensure_candidate_identity(
 		var snapshot_id: String = str(candidate.unit_data.get("unit_id", ""))
 		if candidate.unit_id.is_empty():
 			candidate.unit_id = snapshot_id
+		# 旧存档的三级候选人可能是 1 级；普通招募规则要求初始 2 级。
+		if candidate.is_noble \
+				and int(candidate.unit_data.get("level", 1)) < NOBLE_INITIAL_LEVEL:
+			candidate.unit_data["level"] = NOBLE_INITIAL_LEVEL
 		return 0
 
 	var config_id: String = candidate.unit_config_id
@@ -135,8 +164,9 @@ func _ensure_candidate_identity(
 	if config == null:
 		push_error("冒险者兵种配置不存在: %s" % config_id)
 		return 0
+	var initial_level: int = NOBLE_INITIAL_LEVEL if candidate.is_noble else 0
 	var unit: UnitData = _unit_manager.create_detached_unit(
-		config, "", candidate.display_name
+		config, "", candidate.display_name, initial_level
 	)
 	if unit == null:
 		return 0
@@ -201,7 +231,7 @@ func _build_noble_candidate(
 	candidate.status = AdventurerCandidateData.Status.AVAILABLE
 
 	var unit: UnitData = _unit_manager.create_detached_unit(
-		config, "", candidate.display_name
+		config, "", candidate.display_name, NOBLE_INITIAL_LEVEL
 	)
 	if unit == null:
 		push_error("无法为贵族冒险者创建独立单位身份")
@@ -321,7 +351,7 @@ func recruit_candidate(
 			and not is_noble_recruit_authorized(settlement, recruiter_lord_id):
 		last_error = "只有村庄拥有者可以招募贵族冒险者。"
 		return false
-	var cost: int = _economy_config.adventurer_recruit_cost
+	var cost: int = get_candidate_recruit_cost(candidate)
 	if not profile.can_afford(cost):
 		last_error = "金币不足，招募需要 %d 金币。" % cost
 		return false
@@ -382,7 +412,7 @@ func recruit_normal_candidates_for_party(
 	for candidate: AdventurerCandidateData in candidates:
 		if candidate == null or candidate.is_noble:
 			continue
-		if not party.can_afford(_economy_config.adventurer_recruit_cost):
+		if not party.can_afford(get_candidate_recruit_cost(candidate)):
 			break
 		var unit := _recruit_candidate_into_party(
 			settlement, candidate, party, party, false
@@ -425,17 +455,16 @@ func _recruit_candidate_into_party(
 	if not party.is_available_for_world():
 		last_error = "部队当前无法接受新成员。"
 		return null
-	var cost: int = _economy_config.adventurer_recruit_cost
-	if not bool(payer.can_afford(cost)):
-		last_error = "金币不足，招募需要 %d 金币。" % cost
-		return null
-
 	var config_id: String = candidate.unit_config_id
 	if config_id.is_empty():
 		config_id = _default_config_id(candidate)
 	var config := _unit_manager.get_unit_config(config_id)
 	if config == null:
 		last_error = "冒险者兵种配置不存在: %s" % config_id
+		return null
+	var cost: int = get_candidate_recruit_cost(candidate)
+	if not bool(payer.can_afford(cost)):
+		last_error = "金币不足，招募需要 %d 金币。" % cost
 		return null
 
 	# 优先使用候选人已有的独立 Unit 身份；旧存档缺失身份时才新建。
@@ -518,6 +547,8 @@ func _materialize_candidate_unit(
 		restored.faction_id = party.faction_id
 		restored.current_party_id = ""
 		restored.display_name = candidate.display_name
+		if candidate.is_noble and restored.level < NOBLE_INITIAL_LEVEL:
+			restored.level = NOBLE_INITIAL_LEVEL
 		if not candidate.appearance.is_empty():
 			restored.appearance = candidate.appearance.duplicate(true)
 			restored.family_id = str(candidate.appearance.get("family_id", ""))
@@ -530,8 +561,9 @@ func _materialize_candidate_unit(
 		return restored
 
 	# 旧档路径同样先构造未注册单位，补齐外观/坐骑后再由 UnitManager 注册。
+	var initial_level: int = NOBLE_INITIAL_LEVEL if candidate.is_noble else 0
 	var created := _unit_manager.create_detached_unit(
-		config, party.faction_id, candidate.display_name
+		config, party.faction_id, candidate.display_name, initial_level
 	)
 	if created == null:
 		return null

@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="CaptivityConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/captivity_config.gd" id="1_captivityconfig"]
+
+[resource]
+script = ExtResource("1_captivityconfig")
+prisoner_healing_per_hour = 5
+escape_check_interval_hours = 1.0
+escape_chance = 0.35
+escape_protection_hours = 2.0

@@ -54,6 +54,10 @@ const STATIONED_PARTY_RADIUS: float = 26.0
 ## 停留部队旗帜条与建筑美术之间的屏幕间距。
 const STATIONED_BAR_GAP: float = 8.0
 
+## 地图单击/双击判定窗口与位置容差；双击只下达一次移动指令并直接切 2 倍速。
+const MAP_CLICK_DOUBLE_WINDOW: float = 0.28
+const MAP_CLICK_DOUBLE_DISTANCE: float = 18.0
+
 ## 顶栏金币/移速/部队人数使用同一套图标 + 数值表现。
 const TOP_INFO_ICON_GOLD_PATH: String = \
 	"res://art/我的骑砍临时美术/正式美术_其他/UI美术/UI_金币.png"
@@ -84,9 +88,14 @@ var _last_player_position := Vector2.ZERO
 var _settlement_latch_id: String = ""
 ## 玩家主动点击、正在前往的地点；仅大地图运行时状态，不进入存档。
 var _pending_settlement_interaction_id: String = ""
+## 地图左键双击判定：第一次点击先等待窗口结束，再按单击执行。
+var _pending_map_click_timer: float = -1.0
+var _pending_map_click_position: Vector2 = Vector2.ZERO
 
 var _ui_root: Control = null
 var _world_time_label: Label = null
+## 世界时间为 0（基础暂停或任意 UI 暂停）时显示的琥珀色提示。
+var _pause_tip_label: Label = null
 var _money_label: Label = null
 var _party_speed_label: Label = null
 ## 顶栏部队人数；与底部部队对话面板的 `_party_troop_label` 相互独立。
@@ -166,6 +175,14 @@ var _inventory_pause_active: bool = false
 var _market_panel: MarketPanel = null
 ## 阶段 13：城镇酒馆二级界面。
 var _tavern_panel: TavernPanel = null
+## 独立的雇佣兵招募界面（酒馆入口发起意图后由大地图打开）。
+var _mercenary_recruit_panel: MercenaryRecruitPanel = null
+## 玩家被俘状态栏与顶栏生命值；只读取 CaptivityManager 与真实 UnitData。
+var _captive_panel: PanelContainer = null
+var _captive_title_label: Label = null
+var _captive_captor_label: Label = null
+var _captive_hp_label: Label = null
+var _player_hp_label: Label = null
 
 var _encounter_panel: PanelContainer = null
 var _encounter_portrait: EncounterPortrait = null
@@ -297,6 +314,8 @@ func _ready() -> void:
 		EventBus.adventurers_recruited.connect(_on_adventurers_recruited)
 	if not EventBus.npc_supply_purchased.is_connected(_on_npc_supply_purchased):
 		EventBus.npc_supply_purchased.connect(_on_npc_supply_purchased)
+	if not EventBus.party_arrived.is_connected(_on_party_arrived):
+		EventBus.party_arrived.connect(_on_party_arrived)
 
 	camera.position = _player_party.world_position
 	_set_camera_zoom(CAMERA_DEFAULT_ZOOM)
@@ -357,6 +376,7 @@ func _process(delta: float) -> void:
 	if _player_party == null:
 		return
 
+	_update_pending_map_click(delta)
 	_update_camera(delta)
 	_update_move_target_guide()
 	_update_settlement_name_tags()
@@ -364,6 +384,7 @@ func _process(delta: float) -> void:
 	_update_stationed_parties()
 	_update_player_info()
 	_update_top_info()
+	_update_captive_ui()
 	_update_battle_display()
 	_update_focus_state()
 	_validate_battle_interaction()
@@ -421,7 +442,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mouse_event := event as InputEventMouseButton
 		if mouse_event.pressed and mouse_event.button_index == MOUSE_BUTTON_LEFT:
-			handle_left_click(get_global_mouse_position())
+			_queue_map_click(get_global_mouse_position())
 			get_viewport().set_input_as_handled()
 			return
 
@@ -436,9 +457,47 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 
 
+## 鼠标左键输入入口：第一次点击延迟到双击窗口结束后按单击执行；
+## 窗口内同位置再次点击视为双击，只下达一次移动并直接切 2 倍速。
+func _queue_map_click(world_position: Vector2) -> void:
+	if _pending_map_click_timer > 0.0:
+		if _pending_map_click_position.distance_to(world_position) \
+				<= MAP_CLICK_DOUBLE_DISTANCE:
+			_pending_map_click_timer = -1.0
+			_execute_map_click(world_position, TimeManager.SPEED_DOUBLE)
+			return
+		# 第二次点击位置不同：先补发第一次单击，再开始新的判定窗口。
+		var first_position := _pending_map_click_position
+		_pending_map_click_timer = -1.0
+		_execute_map_click(first_position, TimeManager.SPEED_NORMAL)
+	_pending_map_click_position = world_position
+	_pending_map_click_timer = MAP_CLICK_DOUBLE_WINDOW
+
+
+func _execute_map_click(world_position: Vector2, speed: float) -> void:
+	handle_left_click(world_position, speed)
+
+
+## 双击窗口结束时才把第一次点击按单击执行；期间打开面板则直接丢弃。
+func _update_pending_map_click(delta: float) -> void:
+	if _pending_map_click_timer < 0.0:
+		return
+	_pending_map_click_timer -= delta
+	if _pending_map_click_timer >= 0.0:
+		return
+	var click_position := _pending_map_click_position
+	_pending_map_click_timer = -1.0
+	if _is_input_blocked() or _battle_transition_started:
+		return
+	_execute_map_click(click_position, TimeManager.SPEED_NORMAL)
+
+
 ## 鼠标左键统一入口：点击地点表示“前往该地点”，到达后才打开面板。
 ## 地点面板不会由普通移动、追逐或路径经过自动打开。
-func handle_left_click(world_position: Vector2) -> bool:
+## speed_override < 0 时保持旧行为（移动成功切 1x），供测试直接调用。
+func handle_left_click(
+	world_position: Vector2, speed_override: float = -1.0
+) -> bool:
 	if _context == null or _player_party == null \
 			or _battle_transition_started or _is_input_blocked():
 		return false
@@ -456,19 +515,23 @@ func handle_left_click(world_position: Vector2) -> bool:
 				and clicked_party.party_id != _context.player_party_id:
 			party_distance = world_position.distance_to(clicked_party.world_position)
 		if party_distance >= settlement_distance:
-			if _request_settlement_interaction(clicked_settlement):
+			if _request_settlement_interaction(
+				clicked_settlement, speed_override
+			):
 				return true
 
 	if clicked_party != null \
 			and clicked_party.party_id != _context.player_party_id \
-			and request_party_command(clicked_party.party_id):
+			and request_party_command(clicked_party.party_id, speed_override):
 		return true
-	return request_player_move(world_position)
+	return request_player_move(world_position, speed_override)
 
 
 ## 点击地点：已在交互半径内则直接打开；否则记录待交互地点并开始移动。
 ## 移动途中绝不打开面板或压入 ui_panel 暂停。
-func _request_settlement_interaction(settlement: SettlementData) -> bool:
+func _request_settlement_interaction(
+	settlement: SettlementData, speed_override: float = -1.0
+) -> bool:
 	if _context == null or _player_party == null or settlement == null:
 		return false
 	if _battle_transition_started or _is_input_blocked():
@@ -489,15 +552,26 @@ func _request_settlement_interaction(settlement: SettlementData) -> bool:
 		return false
 	# 点击另一个地点时直接替换待交互目标，不留下空档状态。
 	_pending_settlement_interaction_id = ""
-	if not request_player_move(target.world_position):
+	if not request_player_move(target.world_position, speed_override):
 		return false
 	_pending_settlement_interaction_id = target.settlement_id
 	return true
 
 
+## 地图点击速度：未指定时保持旧的单机 1x 行为；双击显式传 2x。
+func _resolve_click_speed(speed_override: float) -> float:
+	if is_equal_approx(speed_override, TimeManager.SPEED_PAUSED) \
+			or is_equal_approx(speed_override, TimeManager.SPEED_NORMAL) \
+			or is_equal_approx(speed_override, TimeManager.SPEED_DOUBLE):
+		return speed_override
+	return TimeManager.SPEED_NORMAL
+
+
 ## 设置玩家移动目标；成功时把基础倍率切回 1x。
 ## 只改基础倍率，不清除任何暂停原因；失败时完全不改变时间状态。
-func request_player_move(target: Vector2) -> bool:
+func request_player_move(
+	target: Vector2, speed_override: float = -1.0
+) -> bool:
 	if _context == null or _player_party == null \
 			or _battle_transition_started or _is_input_blocked():
 		return false
@@ -511,12 +585,14 @@ func request_player_move(target: Vector2) -> bool:
 	_pending_settlement_interaction_id = ""
 	# 玩家重新下达地图移动指令后，镜头恢复跟随玩家部队。
 	_camera_mode = CameraMode.FOLLOW_PLAYER
-	_set_world_speed(TimeManager.SPEED_NORMAL)
+	_set_world_speed(_resolve_click_speed(speed_override))
 	return true
 
 
 ## 让玩家部队持续跟随目标部队；失败时不改变当前指令。
-func request_player_follow(target_party_id: String) -> bool:
+func request_player_follow(
+	target_party_id: String, speed_override: float = -1.0
+) -> bool:
 	if _context == null or _player_party == null \
 			or _battle_transition_started or _is_input_blocked():
 		return false
@@ -529,14 +605,16 @@ func request_player_follow(target_party_id: String) -> bool:
 	_pending_settlement_interaction_id = ""
 	# 点击部队开始跟随时同样退出自由镜头，重新跟随玩家部队。
 	_camera_mode = CameraMode.FOLLOW_PLAYER
-	_set_world_speed(TimeManager.SPEED_NORMAL)
+	_set_world_speed(_resolve_click_speed(speed_override))
 	return true
 
 
 ## 点击部队时：有效部队一律进入主动跟随。
 ## 静止部队也可能在玩家接近途中开始巡逻，只记录当前位置会让追击丢失目标；
 ## 跟随同时覆盖远距离点击（目标不在视野内）的情况。
-func request_party_command(target_party_id: String) -> bool:
+func request_party_command(
+	target_party_id: String, speed_override: float = -1.0
+) -> bool:
 	if _context == null or _player_party == null or target_party_id.is_empty():
 		return false
 	if target_party_id == _context.player_party_id:
@@ -549,9 +627,9 @@ func request_party_command(target_party_id: String) -> bool:
 		target.is_available_for_world()
 		and not target.member_unit_ids.is_empty()
 	)
-	if can_follow and request_player_follow(target_party_id):
+	if can_follow and request_player_follow(target_party_id, speed_override):
 		return true
-	if request_player_move(target.world_position):
+	if request_player_move(target.world_position, speed_override):
 		# 战斗中/失效部队无法跟随，只前往其当前位置。
 		_player_party.focus_party_id = target_party_id
 		return true
@@ -935,7 +1013,9 @@ func _build_ui() -> void:
 	canvas.add_child(_ui_root)
 
 	_build_top_bar()
+	_build_pause_tip()
 	_build_bottom_bar()
+	_build_captive_panel()
 	_build_settlement_panel()
 	_build_party_dialogue_panel()
 	_build_attack_confirm_panel()
@@ -959,6 +1039,31 @@ func _build_ui() -> void:
 	_build_event_detail_dialog()
 	# 顶部悬浮提示必须位于所有面板之上，避免被覆盖层遮住。
 	_build_top_info_tooltip()
+
+
+## 暂停提示只读取 TimeManager 的实际有效倍率；基础暂停与 UI 暂停都会显示。
+func _build_pause_tip() -> void:
+	_pause_tip_label = _make_label("已暂停", 18)
+	_pause_tip_label.name = "WorldPausedTip"
+	_pause_tip_label.anchor_left = 0.5
+	_pause_tip_label.anchor_right = 0.5
+	_pause_tip_label.offset_left = -140.0
+	_pause_tip_label.offset_right = 140.0
+	_pause_tip_label.offset_top = 52.0
+	_pause_tip_label.offset_bottom = 82.0
+	_pause_tip_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_pause_tip_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# 琥珀色 #D97706，加描边保证浅色地图上仍清晰可读。
+	_pause_tip_label.add_theme_color_override("font_color", Color("#D97706"))
+	_pause_tip_label.add_theme_color_override("font_outline_color", Color(0.16, 0.10, 0.02, 0.9))
+	_pause_tip_label.add_theme_constant_override("outline_size", 4)
+	# 系统字体无独立粗体字重，用 FontVariation 加粗到半粗体。
+	var semibold := FontVariation.new()
+	semibold.base_font = UiTheme.create().default_font
+	semibold.variation_embolden = 0.6
+	_pause_tip_label.add_theme_font_override("font", semibold)
+	_pause_tip_label.visible = false
+	_ui_root.add_child(_pause_tip_label)
 
 
 func _build_top_bar() -> void:
@@ -1000,6 +1105,13 @@ func _build_top_bar() -> void:
 	_top_party_troop_label = _add_top_info_entry(
 		left, TOP_INFO_ICON_TROOP_PATH, "PartySizeLabel", "0"
 	)
+	# 生命值没有专属图标：使用同一字体/行高的纯文本条目，
+	# 数值始终来自当前玩家角色的真实 UnitData。
+	_player_hp_label = _make_label("0/0", 15)
+	_player_hp_label.name = "PlayerHpLabel"
+	_player_hp_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_player_hp_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	left.add_child(_player_hp_label)
 
 	var center := HBoxContainer.new()
 	center.name = "TopBarCenter"
@@ -1322,6 +1434,56 @@ func _build_bottom_bar() -> void:
 
 	_player_info_label = _make_label("玩家部队", 14)
 	margin.add_child(_player_info_label)
+
+
+## 左侧被俘状态栏：只展示 CaptivityManager/UnitData 的只读状态。
+## 不属于模态面板，不暂停世界，时间倍率切换仍然可用。
+func _build_captive_panel() -> void:
+	_captive_panel = PanelContainer.new()
+	_captive_panel.name = "CaptiveStatusPanel"
+	_captive_panel.visible = false
+	_captive_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_captive_panel.anchor_top = 0.5
+	_captive_panel.anchor_bottom = 0.5
+	_captive_panel.offset_left = 20.0
+	_captive_panel.offset_top = -120.0
+	_captive_panel.offset_right = 360.0
+	_captive_panel.offset_bottom = 120.0
+	_ui_root.add_child(_captive_panel)
+
+	var margin := MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_theme_constant_override("margin_left", 18)
+	margin.add_theme_constant_override("margin_right", 18)
+	margin.add_theme_constant_override("margin_top", 16)
+	margin.add_theme_constant_override("margin_bottom", 16)
+	_captive_panel.add_child(margin)
+
+	var column := VBoxContainer.new()
+	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_theme_constant_override("separation", 8)
+	margin.add_child(column)
+
+	_captive_title_label = _make_label("被俘", 22)
+	_captive_title_label.name = "CaptiveTitleLabel"
+	_captive_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(_captive_title_label)
+
+	column.add_child(HSeparator.new())
+
+	_captive_captor_label = _make_label("", 14)
+	_captive_captor_label.name = "CaptiveCaptorLabel"
+	_captive_captor_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	column.add_child(_captive_captor_label)
+
+	_captive_hp_label = _make_label("", 14)
+	_captive_hp_label.name = "CaptiveHpLabel"
+	column.add_child(_captive_hp_label)
+
+	var tip := _make_label("生命值按世界时间恢复；满血后将定期尝试逃脱。", 12)
+	tip.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tip.modulate = Color(1.0, 0.86, 0.55)
+	column.add_child(tip)
 
 
 func _build_settlement_panel() -> void:
@@ -1917,7 +2079,9 @@ func open_party_panel() -> bool:
 	# 地点面板打开时仍允许查看部队；世界时间控制仍由独立权限关闭。
 	if _has_open_modal(true):
 		return false
-	if not _player_party.is_available_for_world():
+	# 被俘期间允许只读查看部队面板，但面板不具备夺取/恢复控制的能力。
+	var captive: bool = _context.captivity_manager.is_player_captive()
+	if not _player_party.is_available_for_world() and not captive:
 		push_warning("当前部队状态不可用，无法打开部队面板")
 		return false
 
@@ -2027,6 +2191,9 @@ func _build_tavern_panel() -> void:
 	_tavern_panel.visible = false
 	_tavern_panel.closed.connect(_on_tavern_closed)
 	_tavern_panel.sell_requested.connect(_on_tavern_sell_requested)
+	_tavern_panel.mercenary_recruit_requested.connect(
+		_on_tavern_mercenary_recruit_requested
+	)
 	_settlement_tavern_host.add_child(_tavern_panel)
 	# 嵌入城镇信息面板；不创建遮罩或独立二级窗口。
 	_tavern_panel.setup(_context, true)
@@ -2040,6 +2207,14 @@ func _build_tavern_panel() -> void:
 	_ui_root.add_child(_prisoner_sale_panel)
 	_prisoner_sale_panel.setup(_context, false)
 
+	# 独立雇佣兵招募界面：列表、详情与 UnitVisual 预览都来自真实数据。
+	_mercenary_recruit_panel = MercenaryRecruitPanel.new()
+	_mercenary_recruit_panel.name = "MercenaryRecruitPanel"
+	_mercenary_recruit_panel.visible = false
+	_mercenary_recruit_panel.closed.connect(_on_mercenary_recruit_closed)
+	_ui_root.add_child(_mercenary_recruit_panel)
+	_mercenary_recruit_panel.setup(_context)
+
 
 func get_tavern_panel() -> TavernPanel:
 	return _tavern_panel
@@ -2047,6 +2222,48 @@ func get_tavern_panel() -> TavernPanel:
 
 func get_prisoner_sale_panel() -> TavernPanel:
 	return _prisoner_sale_panel
+
+
+func get_mercenary_recruit_panel() -> MercenaryRecruitPanel:
+	return _mercenary_recruit_panel
+
+
+## 嵌入酒馆的雇佣兵入口只发起意图：隐藏城镇面板并打开独立招募界面，
+## 暂停原因仍由地点面板持有。
+func _on_tavern_mercenary_recruit_requested(settlement_id: String) -> void:
+	if _context == null or _mercenary_recruit_panel == null:
+		return
+	var settlement := _context.settlement_manager.get_settlement(settlement_id)
+	if settlement == null:
+		return
+	if _tavern_panel != null:
+		_tavern_panel.reset()
+	_show_settlement_info_view()
+	_settlement_panel.visible = false
+	if not _mercenary_recruit_panel.open(settlement):
+		_settlement_panel.visible = true
+		_show_settlement_info_view()
+		return
+	_set_time_buttons_enabled(false)
+	_update_time_ui()
+
+
+func _on_mercenary_recruit_closed() -> void:
+	if _context == null:
+		return
+	var settlement := _context.settlement_manager.get_settlement(_settlement_latch_id)
+	if settlement == null:
+		if _settlement_pause_active:
+			TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
+			_settlement_pause_active = false
+		_refresh_time_buttons()
+		_update_time_ui()
+		return
+	_show_settlement_info_view()
+	_settlement_panel.visible = true
+	_refresh_settlement_info(settlement)
+	_set_time_buttons_enabled(false)
+	_update_time_ui()
 
 
 ## 嵌入酒馆只负责发起意图：隐藏城镇面板并打开独立出售界面。
@@ -2666,6 +2883,11 @@ func _update_battle_participant_icons(battles: Array[BattleSession]) -> void:
 		if _context.party_manager.get_party(party_id) == null:
 			_party_icons.erase(party_id)
 			icon.queue_free()
+			continue
+		# 被俘期间玩家原部队不在地图上显示；逃脱后位置更新并自动恢复。
+		if party_id == _context.player_party_id \
+				and _context.captivity_manager.is_player_captive():
+			icon.visible = false
 			continue
 		var involved_in_battle: bool = false
 		for battle: BattleSession in battles:
@@ -3696,12 +3918,23 @@ func _update_camera(delta: float) -> void:
 	# WASD / 方向键：自由平移。UI 打开或战斗切换期间不响应。
 	_apply_camera_input(delta, _read_camera_pan_input())
 
-	if _camera_mode != CameraMode.FOLLOW_PLAYER:
+	var captive: bool = _context != null \
+		and _context.captivity_manager.is_player_captive()
+	# 被俘期间镜头必须跟随押送部队，不允许停留在自由视角。
+	if _camera_mode != CameraMode.FOLLOW_PLAYER and not captive:
 		# 自由镜头保持当前位置，只受地图边界限制；玩家部队继续移动也不会拉回。
 		camera.position = _clamp_camera_position(camera.position)
 		return
 
-	var desired := _clamp_camera_position(_player_party.world_position)
+	var focus_position: Vector2 = _player_party.world_position
+	if captive:
+		# 被俘期间镜头跟随押送部队；逃脱后这里自动回到玩家部队。
+		var captor := _context.party_manager.get_party(
+			_context.captivity_manager.get_captor_party_id()
+		)
+		if captor != null:
+			focus_position = captor.world_position
+	var desired := _clamp_camera_position(focus_position)
 	var weight: float = 1.0 - exp(-CAMERA_FOLLOW_SPEED * delta)
 	camera.position = camera.position.lerp(desired, weight)
 
@@ -3804,6 +4037,8 @@ func _open_settlement(settlement: SettlementData) -> void:
 		_tavern_panel.reset()
 	if _prisoner_sale_panel != null and _prisoner_sale_panel.visible:
 		_prisoner_sale_panel.reset()
+	if _mercenary_recruit_panel != null and _mercenary_recruit_panel.visible:
+		_mercenary_recruit_panel.reset()
 	_show_settlement_info_view()
 	_refresh_settlement_info(settlement)
 	_settlement_recruit_status_label.text = ""
@@ -3913,6 +4148,8 @@ func _on_settlement_leave_pressed() -> void:
 		_tavern_panel.reset()
 	if _prisoner_sale_panel != null and _prisoner_sale_panel.visible:
 		_prisoner_sale_panel.reset()
+	if _mercenary_recruit_panel != null and _mercenary_recruit_panel.visible:
+		_mercenary_recruit_panel.reset()
 	_show_settlement_info_view()
 	_settlement_panel.visible = false
 	if _settlement_pause_active:
@@ -3956,6 +4193,8 @@ func enter_village(settlement_id: String) -> bool:
 		_tavern_panel.reset()
 	if _prisoner_sale_panel != null and _prisoner_sale_panel.visible:
 		_prisoner_sale_panel.reset()
+	if _mercenary_recruit_panel != null and _mercenary_recruit_panel.visible:
+		_mercenary_recruit_panel.reset()
 	_show_settlement_info_view()
 	_settlement_panel.visible = false
 	if _settlement_pause_active:
@@ -4733,6 +4972,17 @@ func _on_world_time_changed(_total_seconds: float) -> void:
 	_update_time_ui()
 
 
+## 只有玩家部队真正到达当前移动/跟随目标时自动暂停；NPC 到达不触发。
+## 重新下达指令后旧目标不会产生 party_arrived，因此无需额外失效判断。
+func _on_party_arrived(party_id: String) -> void:
+	if _context == null or _player_party == null \
+			or party_id != _context.player_party_id:
+		return
+	if _battle_transition_started:
+		return
+	_set_world_speed(TimeManager.SPEED_PAUSED)
+
+
 func _update_time_ui() -> void:
 	if _world_time_label == null:
 		return
@@ -4745,11 +4995,17 @@ func _update_time_ui() -> void:
 
 	# 窄窗口下缩小居中时间字号，避免与右侧紧凑入口重叠；
 	# 时间与倍率文本保持完整，按钮仍显示当前状态。
-	var wide_layout: bool = get_viewport_rect().size.x >= 1400.0
+	# 场景退出时仍可能收到速度变化信号，此时没有可用 viewport。
+	var wide_layout: bool = true
+	if is_inside_tree():
+		wide_layout = get_viewport_rect().size.x >= 1400.0
 	_world_time_label.add_theme_font_size_override("font_size", 15 if wide_layout else 11)
 	_world_time_label.text = "世界时间：%s    倍率：%s" % [
 		TimeManager.get_world_time_text(), speed_text
 	]
+
+	if _pause_tip_label != null:
+		_pause_tip_label.visible = is_zero_approx(effective)
 
 	if _pause_button != null:
 		_pause_button.button_pressed = is_zero_approx(effective)
@@ -4769,7 +5025,9 @@ func _update_player_info() -> void:
 	if _player_info_label == null or _player_party == null:
 		return
 	var state_text: String = "待命"
-	if _player_party.current_order == PartyData.OrderType.FOLLOW_PARTY:
+	if _context.captivity_manager.is_player_captive():
+		state_text = "被俘中"
+	elif _player_party.current_order == PartyData.OrderType.FOLLOW_PARTY:
 		var target := _context.party_manager.get_party(_player_party.current_target_id)
 		state_text = "跟随中：%s" % (target.party_name if target != null else "目标消失")
 	elif _player_party.movement_state == PartyData.MovementState.MOVING:
@@ -4791,6 +5049,28 @@ func _update_player_info() -> void:
 		state_text,
 		identity_text,
 	]
+
+
+## 左侧被俘栏只展示状态：押送部队、玩家角色 HP 与恢复说明。
+## 数据全部来自 CaptivityManager/UnitData，UI 不参与治疗或逃脱结算。
+func _update_captive_ui() -> void:
+	if _captive_panel == null or _context == null:
+		return
+	var captive: bool = _context.captivity_manager.is_player_captive()
+	_captive_panel.visible = captive
+	if not captive:
+		return
+	var captor := _context.party_manager.get_party(
+		_context.captivity_manager.get_captor_party_id()
+	)
+	_captive_captor_label.text = "押送部队：%s" % (
+		captor.party_name if captor != null else "未知"
+	)
+	var unit := _context.get_player_unit()
+	if unit != null:
+		_captive_hp_label.text = "生命：%d / %d" % [unit.current_hp, unit.max_hp]
+	else:
+		_captive_hp_label.text = "生命：未知"
 
 
 # ---------------------------------------------------------------------------
@@ -4884,6 +5164,13 @@ func _update_top_info() -> void:
 		_party_speed_label.text = "%.1f" % _get_party_speed(_player_party)
 	if _top_party_troop_label != null:
 		_top_party_troop_label.text = str(_get_party_troop_counts()["total"])
+	if _player_hp_label != null:
+		# 顶栏生命值始终读取“当前玩家角色”的真实 UnitData；
+		# 被俘治疗与逃脱后都会在下一帧自动反映。
+		var unit := _context.get_player_unit()
+		_player_hp_label.text = "生命 %d/%d" % [
+			unit.current_hp, unit.max_hp
+		] if unit != null else "生命 —"
 	if _top_info_hover_kind.is_empty():
 		return
 	_refresh_top_info_tooltip()
@@ -5094,6 +5381,7 @@ func _has_open_modal(ignore_settlement: bool = false) -> bool:
 		or (_event_center_panel != null and _event_center_panel.visible)
 		or (_family_panel != null and _family_panel.visible)
 		or (_prisoner_sale_panel != null and _prisoner_sale_panel.visible)
+		or (_mercenary_recruit_panel != null and _mercenary_recruit_panel.visible)
 		or (_event_detail_dialog != null and _event_detail_dialog.visible)
 	)
 

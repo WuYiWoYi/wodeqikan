@@ -71,9 +71,20 @@ var recruit_source: String = ""
 var recruit_settlement_id: String = ""
 var origin_faction_id: String = ""
 
+## 酒馆雇佣兵身份（持久化）。这是装备/坐骑管理权限的唯一判定依据，
+## 不通过兵种名称或 tier 推断。旧存档缺失时由 recruit_source 回填。
+const MERCENARY_RECRUIT_SOURCE: String = "tavern_mercenary"
+var is_mercenary: bool = false
+
 
 func is_alive() -> bool:
 	return status != Status.DEAD and current_hp > 0
+
+
+## 是否允许玩家在士兵详情中更换装备/马匹。
+## 雇佣兵由契约固定装备，不允许个体化更换；普通招募与采邑征召允许。
+func can_manage_equipment() -> bool:
+	return not is_mercenary
 
 
 func is_wounded() -> bool:
@@ -195,6 +206,7 @@ func to_dict() -> Dictionary:
 		"recruit_source": recruit_source,
 		"recruit_settlement_id": recruit_settlement_id,
 		"origin_faction_id": origin_faction_id,
+		"is_mercenary": is_mercenary,
 	}
 
 
@@ -245,6 +257,10 @@ static func from_dict(data: Dictionary) -> UnitData:
 	unit.recruit_source = str(data.get("recruit_source", ""))
 	unit.recruit_settlement_id = str(data.get("recruit_settlement_id", ""))
 	unit.origin_faction_id = str(data.get("origin_faction_id", ""))
+	# 旧存档没有独立雇佣兵标记：按持久化的招募来源回填，避免权限丢失。
+	unit.is_mercenary = bool(data.get(
+		"is_mercenary", unit.recruit_source == MERCENARY_RECRUIT_SOURCE
+	))
 
 	var equipment_value: Variant = data.get("equipment", {})
 	if equipment_value is Dictionary:

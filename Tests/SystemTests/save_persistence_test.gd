@@ -35,7 +35,7 @@ func _run() -> void:
 	_check(WorldInitializer.create_new_world(context), "初始化世界")
 	if not context.is_valid_world():
 		return
-	_check(SaveData.CURRENT_SCHEMA_VERSION == 8, "存档 Schema 版本为 8")
+	_check(SaveData.CURRENT_SCHEMA_VERSION == 10, "存档 Schema 版本为 10")
 
 	var player := context.get_player_party()
 	var bandit := _find_party_by_ai(context, PartyData.PartyAIType.BANDIT)
@@ -171,7 +171,7 @@ func _run() -> void:
 	_check(loaded != null, "读取成功")
 	if loaded == null:
 		return
-	_check(loaded.schema_version == 8, "读回的 Schema 为 8")
+	_check(loaded.schema_version == 10, "读回的 Schema 为 10")
 
 	var restored := WorldContext.new()
 	restored.name = "SavePersistenceRestoredContext"
@@ -291,12 +291,7 @@ func _run() -> void:
 		)
 
 	var restored_bandit := restored.party_manager.get_party(bandit.party_id)
-	_check(restored_bandit != null, "恢复被消灭部队记录")
-	if restored_bandit != null:
-		_check(
-			restored_bandit.battle_state == PartyData.BattleState.DISABLED,
-			"全灭部队读档后为 DISABLED"
-		)
+	_check(restored_bandit == null, "被消灭部队不进入存档")
 
 	for party: PartyData in restored.party_manager.get_all_parties():
 		_check(

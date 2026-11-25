@@ -107,7 +107,7 @@
 
 - 每个 `AdventurerCandidateData` 在村庄生成一个运行时 NPC 表现，位置来自 `candidate.world_position`，外观来自持久化 `appearance`。
 - 候选 NPC 与头人共用 `UnitVisual` 和距离规则：点击半径 46 像素、玩家距离 <= 130 像素。
-- 点击后打开底部对话，选项 action 为 `recruit_adventurer`；显示候选人姓名与 1 金币费用。
+- 点击后打开底部对话，选项 action 为 `recruit_adventurer`；显示候选人姓名与按 tier 计算的费用（Tier1 = 5，Tier3 = 400）。
 - 招募成功后关闭对话、刷新“已招募”标签；已招募候选人在玩家离开村庄前仍保留。
 - 已招募候选人再次对话不再提供招募选项；离开村庄时清理候选人记录，真实单位保留。
 - 候选 NPC 是表现节点，不进入 UnitManager / PartyManager；候选人自身保存独立 Unit 身份快照，但招募前不属于任何部队。
@@ -194,7 +194,7 @@
 | 屏幕下方数据驱动对话 | 已实现（单选项） |
 | 越界 5 秒倒计时/取消/返回 | 已实现 |
 | 摄像机跟随 / 自由视角 / 边界 | 已实现（与战斗共用 `SceneCameraRig`） |
-| 冒险者候选人 NPC 与 1 金币招募 | 已实现（阶段 7） |
+| 冒险者候选人 NPC 与按 tier 定价招募 | 已实现（阶段 7；价格统一到 `RecruitmentConfig`） |
 | 玩家自有封地采邑征召对话 | 已实现（与大地图共用 `FiefRecruitmentManager`） |
 | 村庄右上角共享世界日志面板 | 已实现 |
 | 村庄商店、普通兵员招募、任务、好感度 | 未实现 |
@@ -214,7 +214,7 @@
   → 读取 SettlementData.adventurer_candidates 生成 NPC
   → 点击候选人 → 对话（recruit_adventurer）
   → AdventurerRecruitmentManager.recruit_candidate()
-  → 创建真实 UnitData + PartyManager.add_member + 扣 1 金币
+  → 创建真实 UnitData + PartyManager.add_member + 按候选人 tier 扣金币
   → 候选人状态 RECRUITED_PENDING_DEPARTURE（仍在场景中标记“已招募”）
   → 离开村庄 _request_exit()
   → cleanup_departed_candidates() 移除候选人记录

@@ -48,6 +48,8 @@ const PATROL_POINTS: Array[Vector2] = [
 
 var player_party_id: String = ""
 
+## 逃脱保护期查询入口；为 null 时视为没有保护期。
+var _captivity_manager: CaptivityManager = null
 var _unit_manager: UnitManager = null
 var _party_manager: PartyManager = null
 var _world_map_manager: WorldMapManager = null
@@ -97,6 +99,20 @@ func setup(
 	_supply_manager = supply_manager
 	_market_manager = market_manager
 	_adventurer_recruitment_manager = adventurer_recruitment_manager
+
+
+func set_captivity_manager(captivity_manager: CaptivityManager) -> void:
+	_captivity_manager = captivity_manager
+
+
+## 逃脱保护期内，AI 不得把玩家部队选为主动攻击/追击目标。
+func _is_protected_player(party: PartyData) -> bool:
+	if party == null or _captivity_manager == null:
+		return false
+	if not _captivity_manager.is_player_protected():
+		return false
+	return party.party_id == player_party_id \
+		or (party.is_player_controlled() and player_party_id.is_empty())
 
 
 func tick(world_delta: float) -> void:
@@ -204,6 +220,8 @@ func _update_guard_party(party: PartyData) -> void:
 		target = _resolve_chase_target(party)
 	if target == null and _vision_manager != null:
 		target = _vision_manager.get_nearest_visible_hostile(party.party_id)
+	if _is_protected_player(target):
+		target = null
 
 	if target != null:
 		_chase_target(party, target)
@@ -221,7 +239,8 @@ func _resolve_chase_target(party: PartyData) -> PartyData:
 	if _vision_manager == null or party.current_target_id.is_empty():
 		return null
 	var target := _party_manager.get_party(party.current_target_id)
-	if target == null or not _vision_manager.can_see(party.party_id, target.party_id):
+	if target == null or not _vision_manager.can_see(party.party_id, target.party_id) \
+			or _is_protected_player(target):
 		party.current_target_id = ""
 		party.attack_intent = false
 		return null
@@ -235,6 +254,8 @@ func _select_bandit_target(party: PartyData) -> PartyData:
 	var best: PartyData = null
 	var best_score: float = -INF
 	for candidate: PartyData in candidates:
+		if _is_protected_player(candidate):
+			continue
 		var score := _score_bandit_target(party, candidate)
 		if score > best_score:
 			best_score = score
@@ -258,6 +279,8 @@ func _choose_bandit_target(
 
 
 func _score_bandit_target(party: PartyData, target: PartyData) -> float:
+	if _is_protected_player(target):
+		return -INF
 	var base_score: float = BANDIT_TARGET_SCORE_OTHER
 	if _faction_manager != null:
 		match target.faction_id:
@@ -762,8 +785,9 @@ func _find_owned_adventurer_settlement(
 ) -> SettlementData:
 	if _settlement_manager == null or _adventurer_recruitment_manager == null:
 		return null
-	if _economy_config == null \
-			or not party.can_afford(_economy_config.adventurer_recruit_cost):
+	if not party.can_afford(
+		_adventurer_recruitment_manager.get_normal_recruit_cost()
+	):
 		return null
 	var nearest: SettlementData = null
 	var nearest_distance: float = INF

@@ -1,0 +1,36 @@
+[gd_resource type="Resource" script_class="UnitConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/unit_config.gd" id="1_unitconfig"]
+
+[resource]
+script = ExtResource("1_unitconfig")
+config_id = "mercenary_rogue_knight"
+display_name = "无赖骑士"
+description = "酒馆雇佣的三级步兵。没有战马，因此不产生骑马价格加成；装备与坐骑由契约固定。"
+unit_class = 0
+is_mounted = false
+tier = 3
+base_level = 1
+base_max_hp = 180
+base_attack = 25
+attack_interval = 1.0
+attack_range = 20.0
+move_speed = 55.0
+body_height = 48.0
+daily_wage = 9
+promotion_item_id = ""
+promotion_item_cost = 1
+promotion_target_config_id = ""
+max_level = 5
+base_exp_to_next_level = 100
+exp_growth_per_level = 0
+hp_per_level = 0
+attack_per_level = 0
+move_speed_per_level = 0.0
+attack_range_per_level = 0.0
+visual_scene_path = ""
+recruit_cost = 0
+default_equipment = {
+"WEAPON": "weapon_sword_01",
+"OFFHAND": "shield_wood_01"
+}

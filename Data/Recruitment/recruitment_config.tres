@@ -1,0 +1,28 @@
+[gd_resource type="Resource" script_class="RecruitmentConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/recruitment_config.gd" id="1_recruitmentconfig"]
+
+[resource]
+script = ExtResource("1_recruitmentconfig")
+civilian_tier1_recruit_cost = 5
+civilian_tier3_recruit_cost = 400
+mercenary_tier2_base_cost = 35
+mercenary_tier3_base_cost = 80
+mercenary_experience_levels = [2, 3, 4]
+mercenary_experience_cost_bonuses = [0, 10, 30]
+mercenary_experience_weights = [0.55, 0.3, 0.15]
+mercenary_mounted_cost_bonus = 30
+mercenary_initial_count = 10
+mercenary_growth_interval_hours = 12.0
+mercenary_tavern_capacity = 7
+mercenary_flow_interval_hours = 24.0
+mercenary_flow_chance = 0.25
+mercenary_travel_duration_hours = 2.0
+mercenary_type_config_ids = ["mercenary_archer", "mercenary_sergeant", "mercenary_mounted_sergeant", "mercenary_rogue_knight"]
+mercenary_type_weights = [3.0, 3.0, 2.0, 1.0]
+npc_mercenary_recruit_interval_hours = 6.0
+npc_mercenary_recruit_chance = 0.25
+npc_mercenary_recruit_max_per_check = 1
+npc_mercenary_party_size_threshold = 18
+npc_mercenary_gold_reserve = 50
+npc_mercenary_town_radius = 40.0

@@ -2,7 +2,7 @@
 
 **核心数据：** `Scripts/Entities/Party/party_data.gd`
 **核心逻辑：** `Scripts/Core/World/party_manager.gd`
-**状态：** 数据、统一控制类型/部队类型标识、成员管理（含转队与读档校验）、四方阵营初始部队、大地图移动/跟随、底部 NPC 遭遇对话、战斗锁定、AI 行为、部队管理面板（查看/上马/下马/晋升、士兵与俘虏双列列表、战斗经验文本等级）、金币与工资统计、士兵美术预览、采邑/冒险者征召成员接入已实现
+**状态：** 数据、统一控制类型/部队类型标识、成员管理（含转队与读档校验）、四方阵营初始部队、大地图移动/跟随、底部 NPC 遭遇对话、战斗锁定、AI 行为、部队管理面板（查看/上马/下马/晋升/普通士兵换装、士兵与俘虏双列列表、战斗经验文本等级）、金币与工资统计、士兵美术预览、采邑/冒险者/雇佣兵招募成员接入、雇佣兵装备锁定已实现
 
 ---
 
@@ -237,10 +237,13 @@ Milestone 1 使用简单固定值：
 - 打开面板时刷新一次；点击不同士兵时只更新详情区域。
 - 默认选中第一名有效成员；选中项有明显高亮。
 - 不提供招募、解雇、转队写操作；所有数据修改仍走管理器接口。
-- 阶段 6 起提供两类有限写操作：
+- 阶段 6 起提供有限写操作：
   - 坐骑：从背包马匹中选择并装备，或卸下返还背包（`UnitManager.equip_mount/unequip_mount`）；
-  - 晋升：消耗晋升凭证提升兵种 tier（`UnitManager.promote_tier`）。
-- 士兵详情显示 tier、每日工资、金币与武器/装备槽位；完整装备更换 UI 仍未实现（KI327）。
+  - 晋升：消耗晋升凭证提升兵种 tier（`UnitManager.promote_tier`）；
+  - 装备：普通士兵可在“装备管理”中按槽位从玩家背包更换/卸下（`equip_item_from_holder` / `unequip_slot_to_holder`）。
+- 士兵详情显示 tier、每日工资、金币与武器/装备槽位。
+- 雇佣兵没有装备管理区与坐骑管理区，显示“雇佣兵装备与坐骑由契约固定，无法更换。”；数据层写入接口同样拒绝。
+- 俘虏详情只读，隐藏装备、晋升与招募管理区。
 - 士兵详情以“战斗经验：新兵”形式显示五个文本等级之一，不显示数值等级、`x / y` 经验进度、进度条或内部 ID；底层经验数据不变。
 - 面板整体尺寸为 1280×660；横向优先扩大，为双列条目留出空间，不整体放大字体或其他控件。
 - 士兵列表与俘虏列表均使用每行两个条目的 `GridContainer`，条目宽度自动均分；数量不足两个时最后一行允许只有一个条目。
@@ -285,6 +288,14 @@ Milestone 1 使用简单固定值：
 
 状态由 `BattleManager` 写入，其他系统只读。
 
+### 8.1 战败部队清理
+
+- 战斗结束并完成成员/俘虏结算后，`WorldContext._cleanup_defeated_parties()` 检查所有非玩家部队。
+- **成员为空**的部队从 `PartyManager` 移除，并清理其他部队对它的 `current_target_id`、`attack_intent`、跟随目标、移动目标与 `focus_party_id`；它不再出现在大地图、遭遇、追击或 AI 目标中。
+- 仍有成员的部队保留，包括“只剩伤兵”的部队；这类部队按既有治疗规则恢复，不因战败被删除。
+- 玩家部队永远不参与此清理，作为玩家身份锚点保留；玩家角色被俘时由 `CaptivityManager` 禁用并负责后续逃脱/获释。
+- 已在战败结算前完成的战斗记录、经验与俘虏分配不受清理影响；胜利方部队不删除。
+
 ## 9. 扩展方向
 
 - 部队拆分/合并。
@@ -309,7 +320,8 @@ Milestone 1 使用简单固定值：
 | 非跨阵营成员规则 | 已实现；跨阵营流程未实现（KI119） |
 | 大地图部队遭遇对话 | 已实现 |
 | 战斗锁定 / 解锁 | 已实现 |
-| 阵亡成员结算 | 已实现（移除归属并删除 UnitData；全员阵亡→DISABLED） |
+| 阵亡成员结算 | 已实现（移除归属并删除 UnitData；全员阵亡→DISABLED；结算后空部队从世界移除） |
+| 玩家被俘/逃脱 | 已实现：玩家部队作为身份锚点保留，`CaptivityManager` 禁用/重建控制（见 [Captivity_System.md](Captivity_System.md)） |
 | 初始测试兵力 | 玩家 5 民兵 + 6 职业步兵（4 名骑乘）+ 3 弓箭手 + 1 玩家角色（15 人）；其余三方各 3 民兵 + 2 职业步兵 |
 | 玩家角色 Unit | 已实现：属于玩家部队、普通 UnitData、可参与战斗 |
 | 骑乘成员 | 已实现：普通职业步兵装备马匹；成员关系不变，控制权转移列表显示“骑乘” |
@@ -322,6 +334,8 @@ Milestone 1 使用简单固定值：
 | NPC 撤退 / 士气 / 长期情报 | 未实现 |
 | 部队管理 UI | 已实现查看（扩大面板、士兵/俘虏双列列表、条目仅头像/姓名/战斗经验/生命值、士兵详情、tier/工资、装备槽位、放大且无标题的 SubViewport 美术预览） |
 | 坐骑 UI | 已实现：背包马匹下拉、装备/卸下，库存与装备双向一致 |
+| 装备管理 UI | 已实现：普通士兵逐槽位从玩家背包更换/卸下；雇佣兵显示锁定提示并隐藏管理区 |
+| 雇佣兵身份与限制 | 已实现：`UnitData.is_mercenary` 持久化，UI 与 `UnitManager` 双重拒绝换装 |
 | 晋升 UI | 已实现：显示目标 tier、物品数量与消耗按钮 |
 | 工资统计 | 已实现：单兵工资 + 部队每日总额；不自动扣除 |
 | 编队 | TODO(阶段6) |
@@ -413,16 +427,17 @@ Milestone 1 使用简单固定值：
 
 ## 14. 征召成员接入（阶段 7 新增）
 
-采邑与冒险者招募不新增部队类型或成员表，仍统一经过现有成员关系：
+采邑、冒险者与雇佣兵招募不新增部队类型或成员表，仍统一经过现有成员关系：
 
 ```text
-FiefRecruitmentManager / AdventurerRecruitmentManager
+FiefRecruitmentManager / AdventurerRecruitmentManager / MercenaryManager
   → UnitManager.create_unit()
   → UnitAppearance.ensure_random() / 复制候选人外观
   → PartyManager.add_member(party_id, unit_id)
 ```
 
 - 玩家部队成员由 `player_party_id` 决定；采邑进入领主 `party_id` 对应的部队（AI 领主同样）。
+- 雇佣兵额外写入 `is_mercenary = true`，之后所有装备/坐骑变更都会被 `UnitManager` 拒绝；详见 [Mercenary_System.md](Mercenary_System.md)。
 - 加入失败时招募管理器回滚已创建单位，保持 `UnitData` 与 `member_unit_ids` 双向一致。
 - 招募单位写入 `recruit_source`、`recruit_settlement_id`、`origin_faction_id`、`joined_at_game_time`，不改变部队 `control_type`、`ai_type` 或路线。
 - 部队人数上限目前不限制；工资仍只统计不扣除。

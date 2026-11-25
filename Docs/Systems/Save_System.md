@@ -1,7 +1,7 @@
 # 存档系统
 
 **核心脚本：** `Scripts/Autoload/save_manager.gd`、`Scripts/Core/Save/save_data.gd`
-**状态：** 保存/读取闭环、成员关系校验、士兵五级战斗经验/等级折算/HP 成长、装备/骑乘/工资恢复、伤兵与俘虏归属、玩家档案与物品数量、地点场景路径、AI/跟随字段兼容、领主/封地/采邑/冒险者、贵族/家族/王国、村庄/城镇市场库存、马匹个体、NPC 背包与金币、补给结算日与治疗结算小时、NPC 领主赎回/关押期赎买记录持久化已实现；Schema v8
+**状态：** 保存/读取闭环、成员关系校验、士兵五级战斗经验/等级折算/HP 成长、装备/骑乘/工资恢复、伤兵与俘虏归属、玩家档案与物品数量、地点场景路径、AI/跟随字段兼容、领主/封地/采邑/冒险者、贵族/家族/王国、村庄/城镇市场库存、马匹个体、NPC 背包与金币、补给结算日与治疗结算小时、NPC 领主赎回/关押期赎买记录、雇佣兵池/雇佣兵身份/外观快照、玩家被俘与逃脱保护期持久化已实现；Schema v10
 
 ---
 
@@ -21,11 +21,11 @@ user://saves/<slot>.json
 
 Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录内。
 
-## 3. Schema v8
+## 3. 当前 Schema 结构（v10）
 
 ```json
 {
-  "schema_version": 8,
+  "schema_version": 10,
   "project_version": "0.2.0",
   "saved_at": "2026-11-22T22:30:00",
   "world": {
@@ -41,7 +41,7 @@ Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录
   },
   "id_counters": {
     "WORLD": 1, "UNIT": 5, "PARTY": 4, "SETTLEMENT": 5,
-    "LORD": 3, "CANDIDATE": 2, "RANSOM": 1
+    "LORD": 3, "CANDIDATE": 2, "RANSOM": 1, "MERCENARY": 10
   },
   "player": {
     "party_id": "PARTY_000001",
@@ -82,6 +82,32 @@ Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录
       "due_world_seconds": 43200.0, "ransom_gold": 260, "status": 1
     }
   },
+  "mercenaries": {
+    "initialized": true,
+    "growth_elapsed": 12.0,
+    "flow_elapsed": 0.0,
+    "npc_recruit_elapsed": 6.0,
+    "records": [
+      {
+        "mercenary_id": "MERCENARY_000001",
+        "config_id": "mercenary_sergeant",
+        "display_name": "雇佣军士",
+        "tier": 2, "level": 3, "exp": 20,
+        "mounted": false, "state": 1,
+        "settlement_id": "SETTLEMENT_000006",
+        "destination_settlement_id": "",
+        "travel_remaining": 0.0,
+        "spawned_at": 0.0
+      }
+    ]
+  },
+  "captivity": {
+    "is_player_captive": true,
+    "captor_party_id": "PARTY_000004",
+    "prisoner_healing_last_hour": 80,
+    "escape_check_last_hour": 81,
+    "escape_protection_until": 0.0
+  },
   "factions": {},
   "quests": {}
 }
@@ -101,6 +127,8 @@ Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录
 | `world_log` | 最近 20 条世界日志；缺失时为空历史，超过 20 条时读档立即裁剪 |
 | `markets` | 村庄/城镇市场 `{ settlement_id: { settlement_id, stock, mount_instances, initialized_items } }`；缺失时按商品配置初始化，已有库存/实例不重置 |
 | `ransoms` | NPC 领主赎买/赎回记录 `{ ransom_id: { source, noble_id, noble_unit_id, house_id, sold_settlement_id, sold_world_seconds, captured_world_seconds, due_world_seconds, ransom_gold, status, ... } }`；v8 新增，已结算/已失效/已拒绝记录不生成事件；`source` 缺失时按 `SOLD` 兼容 |
+| `mercenaries` | 全局雇佣兵池 `{ initialized, growth_elapsed, flow_elapsed, npc_recruit_elapsed, records }`；v9 新增。`records` 每项含 `mercenary_id`、`config_id`、`tier`、`level`、`exp`、`mounted`、`state`、`settlement_id`、`destination_settlement_id`、`travel_remaining`、`spawned_at`、`appearance`；已招募雇佣兵只存在于 `units`，不回到池中 |
+| `captivity` | 玩家被俘与逃脱状态 `{ is_player_captive, captor_party_id, prisoner_healing_last_hour, escape_check_last_hour, escape_protection_until }`；v10 新增。俘虏归属本身仍以 `UnitData.prisoner_owner_party_id` 为权威，读档后由 `CaptivityManager.validate_after_load()` 校正 |
 | `lords` | 领主表 `{ lord_id: LordData }`；Schema v4 新增，v5 继续保留为兼容副本 |
 | `nobles` | 贵族表 `{ noble_id: NobleData }`；Schema v5 新增 |
 | `houses` | 家族表 `{ house_id: HouseData }`；Schema v5 新增，含 `banner_id` 映射 |
@@ -110,7 +138,7 @@ Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录
 `units` 与 `parties` 以实体 ID 为键；`PartyData.member_unit_ids` 保存成员 ID 列表，`PartyData.prisoner_unit_ids` 保存本部队关押的俘虏 ID 列表（v7）。
 士兵数据层已接入，`units` 可以为空（没有士兵的部队仍然是合法状态），也可以包含任意数量的独立士兵。
 
-士兵持久化字段（v8 只新增 `noble_id`；其余沿用既有字段）：
+士兵持久化字段（v9 只新增 `is_mercenary`；其余沿用既有字段）：
 
 | 字段 | 说明 |
 |---|---|
@@ -118,6 +146,7 @@ Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录
 | `is_player_character` | 玩家角色身份；旧存档缺失时默认 false |
 | `level` / `exp` | 战斗经验等级（1–5）与累计经验；v8 起等级可由经验推导，读档会归一化 |
 | `noble_id` | NPC 领主身份（稳定贵族 ID）；玩家单位与普通士兵为空，旧存档由部队 `leader_noble_id` 回填 |
+| `is_mercenary` | 雇佣兵身份；v9 新增，旧存档缺失时按 `recruit_source == "tavern_mercenary"` 回填 |
 | `wage` | 每日工资；旧存档缺失时用 -1 哨兵，读档重算按当前兵种等级配置补全 |
 | `equipment` | 槽位字符串 → 装备 ID；`MOUNT` 存在即骑乘 |
 | `is_mounted` | 骑乘状态缓存；读档时由 `equipment` 的 `MOUNT` 槽重新派生，旧存档缺失或没有 MOUNT 时按步兵处理 |
@@ -256,12 +285,13 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 ## 9. 版本与迁移
 
 - `schema_version` 每次结构不兼容变更时加 1。
-- 当前版本 8；`SaveData.from_dict()` 接受 1..8。
+- 当前版本 9；`SaveData.from_dict()` 接受 1..9。
 - v3 → v4 新增 `lords` 与 `player.player_lord_id` / `player.player_unit_id`；旧存档缺失时由 `WorldContext` 补玩家领主身份，不伪造封地归属。
 - v4 → v5 新增 `nobles` / `houses` / `kingdoms` 与地点 `owner_house_id` / `owner_noble_id`；旧存档缺失时由 `lords`、`family_id` 与 `banner_id` 补建最小政治视图，并通过固定 ID 去重。
 - v5 → v6 新增马匹实例、NPC 背包与金币、市场马匹实例/`initialized_items`、`supply_last_settled_day`；读取 v5 及更早存档时执行一次补给初始化（只补完全没有任何补给记录的部队）与确定性马匹迁移。
 - v6 → v7 新增伤兵状态、俘虏归属与列表、`healing_last_settled_hour`、村庄候选人字段；读取 v6 及更早存档时补安全默认值并执行一次俘虏归属清洗。
 - v7 → v8 新增五级战斗经验（旧 1–10 级折算）、`UnitData.noble_id` 与 `ransoms`；读取 v7 及更早存档时执行一次等级折算、回填领主身份并补空赎回表。
+- v8 → v9 新增 `mercenaries` 全局池与 `UnitData.is_mercenary`；读取 v8 及更早存档时 `mercenaries` 为空，由 `WorldContext` 执行一次初始雇佣兵生成（之后 `initialized = true`，不会重复补发）；`is_mercenary` 按 `recruit_source` 回填。
 - 读取旧版本时执行迁移；`SaveData.from_dict()` 已保留 v1 → v2 入口，但完整字段迁移尚未完成。
 - 读取高于当前版本的存档直接拒绝。
 - 迁移逻辑集中在 `SaveData.from_dict()`，禁止散落。
@@ -308,7 +338,7 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 
 | 项 | 状态 |
 |---|---|
-| `SaveData` Schema v8 | 已实现 |
+| `SaveData` Schema v10 | 已实现 |
 | JSON 写入/读取 | 已实现 |
 | 临时文件 + 备份替换 | 已实现 |
 | 槽位列表/删除 | 已实现 |
@@ -331,6 +361,10 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 | 俘虏归属与列表 | 已实现（v7）：`prisoner_owner_party_id` ↔ `prisoner_unit_ids`，读档幂等清洗 |
 | 已售出状态 `sold_to_settlement_id` | 已实现（v7） |
 | 领主赎回记录 `ransoms` | 已实现（v8）：等待到期、已请求、已接受、已失效状态随档保存 |
+| 雇佣兵池 `mercenaries` | 已实现（v9）：池记录、状态、旅行计时与增长/流转/NPC 计时往返；旧档初始化一次 |
+| 雇佣兵身份 `UnitData.is_mercenary` | 已实现（v9）：随单位保存，旧档按 `recruit_source` 回填 |
+| 雇佣兵外观快照 `MercenaryData.appearance` | 已实现（v10）：随池记录保存，缺失时按稳定 ID 重建 |
+| 玩家被俘状态 `captivity` | 已实现（v10）：被俘标记、押送部队、恢复/逃脱计时与保护期随档保存 |
 | 已完成/已失效赎回事件 | 不重新出现：只有 `REQUESTED` 且当前状态有效时才生成事件 |
 | 治疗结算小时 `healing_last_settled_hour` | 已实现（v7）；读档不补算 |
 | 村庄初始候选人 | 已实现（v7）；随候选数据表保存 |
@@ -451,7 +485,7 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 | `AdventurerCandidateData` | `is_noble` / `mount_instance` | 贵族类型与自备战马实例字典；普通候选人为 false / 空 |
 | `LordData` | `is_player_lord` / `current_target_settlement_id` | 玩家身份与战略目标 |
 
-- 以上为兼容性新增字段，不改变顶层结构，因此当前仍使用 Schema v8；旧存档按默认值安全恢复。
+- 以上为兼容性新增字段，不改变顶层结构；后续 v9 仅新增雇佣兵相关字段。旧存档按默认值安全恢复。
 
 ### 18.2 读档顺序与兼容
 
@@ -594,3 +628,58 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 - 事件中心列表、右侧事件框、右侧待处理提醒、详情弹窗与选中项均为派生 UI 状态，不进入存档；读档后由 `ransoms` 与当前世界状态重新生成。
 - 赎买/赎回请求的 UI 缓存（旧事件副本、提醒显示状态、弹窗打开状态、暂停原因）不进入存档。
 - `LordRansomConfig` 是静态 `.tres` 配置，不进入存档。
+
+## 23. Schema v9：雇佣兵池与身份（2026-11-25）
+
+### 23.1 新增字段
+
+| 位置 | 字段 | 说明 |
+|---|---|---|
+| 顶层 | `mercenaries` | `{ initialized, growth_elapsed, flow_elapsed, npc_recruit_elapsed, records }` |
+| `mercenaries.records[]` | `mercenary_id` / `config_id` / `display_name` / `tier` / `level` / `exp` / `mounted` | 雇佣兵身份与战斗经验 |
+| `mercenaries.records[]` | `state` / `settlement_id` / `destination_settlement_id` / `travel_remaining` / `spawned_at` | 池状态与旅行进度 |
+| `UnitData` | `is_mercenary` | 已招募雇佣兵的显式身份 |
+| `id_counters` | `MERCENARY` | 池记录 ID 计数器，随存档保存，永不复用 |
+
+### 23.2 读档顺序与兼容
+
+1. `SaveData.from_dict()` 读取 `mercenaries`；缺失或 `schema_version < 9` 时为空载荷。
+2. `UnitData.from_dict()` 读取 `is_mercenary`；缺失且 `recruit_source == "tavern_mercenary"` 时回填 true。
+3. `WorldContext.load_from_save_data()` 先恢复玩家部队 ID，再调用 `MercenaryManager.load_from_dict()`。
+4. `MercenaryManager.load_from_dict()` 去重 `mercenary_id`，恢复计时器；无效配置、无效城镇、超出酒馆容量的记录回退为 `WAITING` 并重新分配。
+5. 若 `initialized == false`（v8 及更早存档或新档），执行一次 `initialize_world(true)`；此后 `initialized = true`，重复读档不会再次生成。
+6. 已招募的雇佣兵只按普通 `UnitData` 恢复，不会回到池中；同一 `mercenary_id` 不会同时出现在池与部队中。
+
+### 23.3 不持久化
+
+- 酒馆 UI 列表、当前查看的城镇标记、招募失败提示与暂停原因为运行时状态。
+- `RecruitmentConfig` 是静态 `.tres` 配置，不进入存档。
+
+## 24. Schema v10：玩家被俘与逃脱保护（2026-11-25）
+
+### 24.1 新增/扩展字段
+
+| 位置 | 字段 | 说明 |
+|---|---|---|
+| 顶层 | `captivity` | `{ is_player_captive, captor_party_id, prisoner_healing_last_hour, escape_check_last_hour, escape_protection_until }` |
+| `mercenaries.records[]` | `appearance` | 雇佣兵入选时生成的外观快照；旧记录缺失时由 `MercenaryManager.get_mercenary_appearance()` 按稳定 `mercenary_id` 重建 |
+
+玩家角色本身仍是普通 `UnitData`：`prisoner_owner_party_id` 记录押送部队，`status` / `current_hp` / `equipment` 按既有字段保存。`captivity` 只保存管理器计时与保护期，不复制角色数据。
+
+### 24.2 读档顺序与兼容
+
+1. `SaveData.from_dict()` 读取 `captivity`；`schema_version < 10` 或缺失时为空字典，按“未被俘”处理。
+2. 恢复 `units` / `parties` 后，`PartyManager.sanitize_prisoner_ownership()` 仍负责俘虏归属双向校正；玩家角色是否被俘以实际 `prisoner_owner_party_id` 为准。
+3. `CaptivityManager.load_from_dict(save.captivity, save.world_elapsed_seconds)` 恢复计时：
+   - `prisoner_healing_last_hour` / `escape_check_last_hour` 缺失或为 -1 时取读档时刻所在游戏小时，不补发离线治疗/判定；
+   - `escape_protection_until` 为绝对世界秒，直接恢复；已过期自然失效。
+4. `CaptivityManager.validate_after_load()` 调用 `sync_player_capture()`：
+   - 玩家角色被有效部队关押 → 进入被俘状态并禁用原部队；
+   - 押送部队不存在或归属已清除 → 视为获释，按当前 HP 重建单成员玩家部队；
+   - 不因读档重复创建玩家部队或复制玩家角色。
+5. 雇佣兵外观快照缺失时按 `mercenary_id` 的稳定种子重建，保证读档前后酒馆预览与已招募单位一致。
+
+### 24.3 不持久化
+
+- 左侧被俘面板、顶栏 HP 文本、镜头跟随目标、事件提醒与速度按钮状态均为派生 UI 状态。
+- `CaptivityConfig` 是静态 `.tres` 配置（治疗速度、逃脱概率/间隔、保护时长），不进入存档。

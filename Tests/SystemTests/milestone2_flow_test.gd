@@ -79,7 +79,23 @@ func _run() -> void:
 	_check(fight_button != null and not fight_button.disabled, "发起战斗按钮可用")
 	if fight_button == null:
 		return
+	# 主动攻击先弹出确认面板，不会直接进入战斗。
 	fight_button.pressed.emit()
+	await get_tree().process_frame
+	var attack_confirm := world_map.find_child(
+		"AttackConfirmPanel", true, false
+	) as PanelContainer
+	_check(
+		attack_confirm != null and attack_confirm.visible,
+		"发起战斗先弹出攻击确认"
+	)
+	var confirm_button := world_map.find_child(
+		"ConfirmAttackButton", true, false
+	) as Button
+	_check(confirm_button != null, "存在确认攻击按钮")
+	if confirm_button == null:
+		return
+	confirm_button.pressed.emit()
 	await get_tree().process_frame
 	await get_tree().process_frame
 	await get_tree().process_frame
@@ -158,6 +174,18 @@ func _run() -> void:
 		return
 	return_button.pressed.emit()
 	await get_tree().process_frame
+	# 胜利后若有待接收俘虏，会先进入俘虏选择界面；本测试不接收任何俘虏。
+	var prisoner_panel := battle_scene.find_child(
+		"PrisonerSelectionPanel", true, false
+	) as Control
+	if prisoner_panel != null and prisoner_panel.visible:
+		var prisoner_confirm := battle_scene.find_child(
+			"PrisonerConfirmButton", true, false
+		) as Button
+		_check(prisoner_confirm != null, "战后俘虏界面可确认")
+		if prisoner_confirm != null:
+			prisoner_confirm.pressed.emit()
+	await get_tree().process_frame
 	await get_tree().process_frame
 	await get_tree().process_frame
 
@@ -167,12 +195,18 @@ func _run() -> void:
 	)
 	_check(context.battle_manager.current_battle == null, "BattleSession 已清理")
 	_check(player.battle_state == PartyData.BattleState.AVAILABLE, "玩家部队已解锁")
-	_check(enemy.battle_state == PartyData.BattleState.DISABLED, "敌方全员阵亡后失效")
+	_check(
+		context.party_manager.get_party(enemy.party_id) == null,
+		"敌方全员阵亡后从大地图移除"
+	)
 	_check(
 		player.member_unit_ids.size() == WorldInitializer.PLAYER_TOTAL_MEMBER_COUNT,
 		"玩家士兵存活并保留成员关系"
 	)
-	_check(enemy.member_unit_ids.is_empty(), "敌方死亡士兵移出部队")
+	_check(
+		player.current_target_id.is_empty() and player.focus_party_id.is_empty(),
+		"玩家不再保留已消灭敌方的目标引用"
+	)
 	_check(
 		context.unit_manager.get_all_units().size() == expected_units_after,
 		"UnitManager 只保留存活士兵"
@@ -207,10 +241,7 @@ func _run() -> void:
 			== WorldInitializer.PLAYER_TOTAL_MEMBER_COUNT,
 		"读档后玩家成员关系正确"
 	)
-	_check(
-		restored_enemy != null and restored_enemy.member_unit_ids.is_empty(),
-		"读档后敌方成员关系正确"
-	)
+	_check(restored_enemy == null, "读档后不恢复已消灭的敌方部队")
 	var restored_unit := restored.unit_manager.get_unit(surviving_id)
 	_check(
 		restored_unit != null and restored_unit.current_hp == 12,

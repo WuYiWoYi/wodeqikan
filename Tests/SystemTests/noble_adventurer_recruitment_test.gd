@@ -209,7 +209,7 @@ func _test_owner_permission_and_recruitment() -> void:
 		)
 		village.owner_noble_id = original_owner_id
 
-	_context.player_profile.gold = 10
+	_context.player_profile.gold = 500
 	var party := _context.get_player_party()
 	var members_before: int = party.member_unit_ids.size()
 
@@ -220,6 +220,10 @@ func _test_owner_permission_and_recruitment() -> void:
 		player_lord.lord_id
 	)
 	_check(recruited, "村庄拥有者可以招募贵族冒险者")
+	_check(
+		_context.player_profile.gold == 100,
+		"Tier3 贵族招募按统一价格扣除 400 金币"
+	)
 	_check(
 		party.member_unit_ids.size() == members_before + 1,
 		"贵族与战马一次招募只新增 1 名士兵"
@@ -311,7 +315,8 @@ func _test_ai_normal_adventurer_recruitment() -> void:
 		return
 	# 清空采邑储备，迫使 AI 走普通冒险者招募分支。
 	bari.fief_recruitment_stock = 0
-	party.gold = 20
+	# 普通 Tier1 招募统一为 5 金币/人；准备足够金币让 AI 招满全部候选人。
+	party.gold = 200
 	var candidates_before: int = bari.get_available_candidates().size()
 	if candidates_before == 0:
 		_context.adventurer_recruitment_manager.initialize_settlement(bari, true)

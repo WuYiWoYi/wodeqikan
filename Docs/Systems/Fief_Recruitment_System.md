@@ -57,6 +57,8 @@ WorldLogManager / WorldMap 浮动提示（只读订阅）
 - 骑乘通过 `UnitManager.equip_item(unit_id, "mount_horse_01")` 写入真实 `MOUNT` 装备，不修改玩家背包，也不新增骑兵 `config_id`。
 - 每名单位写入 `recruit_source = "fief_recruitment"`、`recruit_settlement_id`、`origin_faction_id` 与 `joined_at_game_time`。
 - 外观由 `UnitAppearance.ensure_random()` 按兵种等级与村庄家族生成并写入 `UnitData.appearance`。
+- 采邑征召不消耗金币；工资由 `UnitConfig.daily_wage` 决定，Tier1 / 2 / 3 = 1 / 3 / 7。
+- 征召士兵不是雇佣兵，`is_mercenary = false`，因此可以正常更换装备与坐骑。
 
 ## 4. 征召流程与原子性
 

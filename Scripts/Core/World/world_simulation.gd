@@ -18,6 +18,10 @@ var _supply_manager: SupplyManager = null
 var _wounded_healing_manager: WoundedHealingManager = null
 ## 阶段 13：领主赎回等待只按 WorldTime 推进，暂停时不会提前生成请求。
 var _lord_ransom_manager: LordRansomManager = null
+## 雇佣兵总量增长、酒馆分配与流动只按 WorldTime 推进。
+var _mercenary_manager: MercenaryManager = null
+## 俘虏恢复与玩家逃脱同样只按 WorldTime 推进；不占用伤兵治疗名额。
+var _captivity_manager: CaptivityManager = null
 
 
 func bind(
@@ -31,7 +35,9 @@ func bind(
 	adventurer_recruitment_manager: AdventurerRecruitmentManager = null,
 	supply_manager: SupplyManager = null,
 	wounded_healing_manager: WoundedHealingManager = null,
-	lord_ransom_manager: LordRansomManager = null
+	lord_ransom_manager: LordRansomManager = null,
+	mercenary_manager: MercenaryManager = null,
+	captivity_manager: CaptivityManager = null
 ) -> void:
 	_unit_manager = unit_manager
 	_party_manager = party_manager
@@ -44,6 +50,8 @@ func bind(
 	_supply_manager = supply_manager
 	_wounded_healing_manager = wounded_healing_manager
 	_lord_ransom_manager = lord_ransom_manager
+	_mercenary_manager = mercenary_manager
+	_captivity_manager = captivity_manager
 
 
 func on_world_tick(fixed_delta: float) -> void:
@@ -77,6 +85,15 @@ func on_world_tick(fixed_delta: float) -> void:
 	# 避免同一 tick 内刚产生的伤兵立刻获得整小时治疗。
 	if _wounded_healing_manager != null:
 		_wounded_healing_manager.tick()
+
+	# 俘虏恢复与玩家逃脱在伤兵治疗之后结算：两者使用独立的计时与点数，
+	# 俘虏不会占用伤兵治疗名额。
+	if _captivity_manager != null:
+		_captivity_manager.on_world_tick(fixed_delta)
+
+	# 雇佣兵池增长/流动/NPC 招募只依赖 WorldTime，和补给一样在 AI 前推进。
+	if _mercenary_manager != null:
+		_mercenary_manager.tick(fixed_delta)
 
 	if _encounter_manager != null:
 		_encounter_manager.update_encounters()

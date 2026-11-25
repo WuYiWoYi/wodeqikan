@@ -370,6 +370,8 @@ func equip_item(unit_id: String, equipment_id: String) -> bool:
 	var unit := get_unit(unit_id)
 	if unit == null:
 		return false
+	if _reject_locked_equipment(unit, "装备"):
+		return false
 	var equipment := get_equipment_config(equipment_id)
 	if equipment == null:
 		push_error("装备失败：单位 %s 引用不存在的装备 %s" % [unit_id, equipment_id])
@@ -410,6 +412,8 @@ func unequip_slot(unit_id: String, slot: String) -> bool:
 	var unit := get_unit(unit_id)
 	if unit == null:
 		return false
+	if _reject_locked_equipment(unit, "卸下装备"):
+		return false
 	var slot_key: String = slot.strip_edges().to_upper()
 	if EquipmentConfig.slot_from_string(slot_key) < 0:
 		return false
@@ -427,6 +431,8 @@ func unequip_slot(unit_id: String, slot: String) -> bool:
 func equip_mount_instance(unit_id: String, instance_id: String, holder: Variant) -> bool:
 	var unit := get_unit(unit_id)
 	if unit == null or holder == null or instance_id.is_empty():
+		return false
+	if _reject_locked_equipment(unit, "装备坐骑"):
 		return false
 	var instance: MountInstanceData = holder.get_mount_instance(instance_id)
 	if instance == null:
@@ -486,6 +492,8 @@ func unequip_mount(unit_id: String, holder: Variant) -> bool:
 	var unit := get_unit(unit_id)
 	if unit == null or holder == null:
 		return false
+	if _reject_locked_equipment(unit, "卸下坐骑"):
+		return false
 
 	var slot_key: String = EquipmentConfig.SLOT_NAMES[EquipmentConfig.Slot.MOUNT]
 	if not unit.equipment.has(slot_key):
@@ -505,6 +513,88 @@ func unequip_mount(unit_id: String, holder: Variant) -> bool:
 	unit.mount_instance = previous_instance.to_dict()
 	recalculate_stats(unit_id)
 	return false
+
+
+## 从持有者背包取一件装备换到单位槽位（非 MOUNT）。
+## 旧装备原样返还持有者；任一步失败都不消耗背包物品、不改变装备。
+func equip_item_from_holder(
+	unit_id: String, equipment_id: String, holder: Variant
+) -> bool:
+	var unit := get_unit(unit_id)
+	if unit == null or holder == null or equipment_id.is_empty():
+		return false
+	if _reject_locked_equipment(unit, "更换装备"):
+		return false
+	if not holder.has_method("get_item_count") \
+			or not holder.has_method("remove_item") \
+			or not holder.has_method("add_item"):
+		return false
+	var equipment := get_equipment_config(equipment_id)
+	if equipment == null or equipment.slot == EquipmentConfig.Slot.MOUNT:
+		return false
+	var slot_key: String = equipment.slot_name()
+	if slot_key.is_empty():
+		return false
+	var previous_equipment_id: String = str(unit.equipment.get(slot_key, ""))
+	if previous_equipment_id == equipment_id:
+		return true
+	if int(holder.get_item_count(equipment_id)) <= 0:
+		return false
+	if not bool(holder.remove_item(equipment_id, 1)):
+		return false
+
+	unit.equipment[slot_key] = equipment_id
+	if recalculate_stats(unit_id):
+		if not previous_equipment_id.is_empty():
+			holder.add_item(previous_equipment_id, 1)
+		return true
+
+	# 回滚：恢复原装备并把新装备放回持有者背包。
+	if previous_equipment_id.is_empty():
+		unit.equipment.erase(slot_key)
+	else:
+		unit.equipment[slot_key] = previous_equipment_id
+	recalculate_stats(unit_id)
+	holder.add_item(equipment_id, 1)
+	return false
+
+
+## 把单位某个非 MOUNT 槽位的装备卸回持有者背包。
+## 背包写入失败时回滚，保证装备不会凭空消失。
+func unequip_slot_to_holder(
+	unit_id: String, slot: String, holder: Variant
+) -> bool:
+	var unit := get_unit(unit_id)
+	if unit == null or holder == null:
+		return false
+	if _reject_locked_equipment(unit, "卸下装备"):
+		return false
+	var slot_key: String = slot.strip_edges().to_upper()
+	if slot_key == EquipmentConfig.SLOT_NAMES[EquipmentConfig.Slot.MOUNT]:
+		return unequip_mount(unit_id, holder)
+	if EquipmentConfig.slot_from_string(slot_key) < 0:
+		return false
+	if not holder.has_method("add_item"):
+		return false
+	if not unit.equipment.has(slot_key):
+		return false
+
+	var previous_equipment_id: String = str(unit.equipment[slot_key])
+	unit.equipment.erase(slot_key)
+	if recalculate_stats(unit_id) and bool(holder.add_item(previous_equipment_id, 1)):
+		return true
+
+	unit.equipment[slot_key] = previous_equipment_id
+	recalculate_stats(unit_id)
+	return false
+
+
+## 雇佣兵装备/坐骑由契约固定，所有写入口都经过本检查，避免 UI 绕过。
+func _reject_locked_equipment(unit: UnitData, action: String) -> bool:
+	if unit == null or unit.can_manage_equipment():
+		return false
+	push_warning("雇佣兵不允许%s，单位: %s" % [action, unit.unit_id])
+	return true
 
 
 ## 读取单位当前坐骑实例；旧数据缺失时按单位 ID 生成确定性外观并写回。

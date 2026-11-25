@@ -415,9 +415,10 @@ BattleScene (Node2D)
 
 ### 6.4 防守方全灭后的部队
 
-- 部队本身保留在大地图，但成员为空，`battle_state = DISABLED`。
-- 空部队不再触发交互，也不执行大地图 AI，避免战斗结束后重复弹出对话或继续巡逻。
-- 玩家部队若全员阵亡同样变为 `DISABLED`，目前尚无逃脱/被俘/重开流程（KI122）。
+- 战斗结算先按既有规则得到空部队；随后 `EventBus.battle_finished` 触发 `WorldContext._cleanup_defeated_parties()`。
+- **没有任何成员**的非玩家部队从 `PartyManager` 移除，不再出现在大地图、移动、遭遇、追击或 AI 目标中；其他部队指向它的目标/跟随/战斗响应引用同时清空。
+- 仍有成员（包括只有伤兵）的部队保留，等待伤兵治疗恢复；不为“失败”本身删除部队。
+- 玩家部队不参与此清理，始终作为身份锚点保留；玩家角色被俘时由 [Captivity_System.md](Captivity_System.md) 接管。
 - 撤退单位不会从部队中移除；其 `BattleParticipant.status = WITHDRAWN`，结算后仍为存活成员。
 
 ### 6.5 撤退与结果面板
@@ -750,8 +751,10 @@ can_ranged_attack(a, b)        → 攻击者存活 ∧ 目标存活 ∧ 敌对 �
 
 - `build_battle_result()` 在统计伤亡前调用 `_decide_wounded_outcomes(session)`。
 - 只处理 `wounded_decided == false` 且 `alive == false` 或 `battle_hp <= 0` 的单位。
-- 玩家角色（`is_player_character`）不掷骰，按永久死亡处理。
-- 有 Unit 且配置启用时按 `UnitConfig.tier` 取概率；否则永久死亡。
+- 玩家角色（`is_player_character`）不掷骰：
+  - 玩家所在侧明确战败时标记为伤兵，进入俘虏池并可被胜利方关押（见 [Captivity_System.md](Captivity_System.md)）；
+  - 玩家获胜但角色 HP≤0、撤退/中止/平局或角色已经永久死亡时，遵循既有死亡规则。
+- 其他单位有 Unit 且配置启用时按 `UnitConfig.tier` 取概率；否则永久死亡。
 - 结果写回 `BattleUnitState.wounded`；预览与最终结算共享，不会二次随机。
 
 ### 16.3 写回与后续
@@ -770,7 +773,7 @@ can_ranged_attack(a, b)        → 攻击者存活 ∧ 目标存活 ∧ 敌对 �
 
 - 仅在胜利成立（非中止/撤退/平局）时构建。
 - 池 = 战败侧所有 `BattleUnitState.wounded == true` 的单位，按稳定顺序（side/party/unit ID）排序。
-- 永久死亡单位不进入池；玩家角色不会成为俘虏。
+- 永久死亡单位不进入池；玩家侧战败时玩家角色会进入池，并被胜利方作为真实俘虏关押。
 
 ### 17.2 分配算法
 
@@ -795,4 +798,5 @@ share_i = floor(P * N_i / N)
   5. 写入 `player_prisoners_committed = true` 并移除挂起记录；重复提交返回 false。
 - `PrisonerSelectionPanel` 只维护预览：左侧为可分俘虏，右侧为玩家已有俘虏；支持转移、撤回与重置，确认只发出信号，由 `BattleScene` 调用管理器提交。
 - 失败方、无俘虏或玩家无份额时不显示选择界面，直接返回大地图。
+- 玩家角色被胜利方接收后，`CaptivityManager.sync_player_capture()` 进入被俘状态：原部队禁用但保留，镜头跟随押送部队，后续按俘虏恢复/逃脱规则处理。详见 [Captivity_System.md](Captivity_System.md)。
 - 详细数据关系见 [Party_System.md](Party_System.md) 第 16 节与 [Wounded_Prisoner_System.md](Wounded_Prisoner_System.md)。

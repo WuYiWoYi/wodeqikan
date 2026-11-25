@@ -2,15 +2,18 @@ class_name TavernPanel
 extends Control
 ## 城镇酒馆二级界面（阶段 13 Step 6）。
 ##
-## 三个入口：出售俘虏、查看雇佣兵信息（占位）、离开酒馆。
+## 三个入口：出售俘虏、招募雇佣兵、离开酒馆。
 ## 出售俘虏采用与市场一致的“临时预览 → 确认提交”：
 ## 左栏＝本次准备卖给城镇的俘虏，右栏＝玩家当前俘虏。
 ## 未确认前金币与真实归属不变；确认由 PrisonerTradeManager 原子结算。
+## 雇佣兵列表只读取 MercenaryManager 的驻留记录，招募由其统一原子结算。
 
 signal closed
 ## 嵌入城镇面板时，点击“出售俘虏”请求大地图打开独立出售界面。
 ## 嵌入视图本身不再展示出售操作，避免形成城镇面板内的多级嵌套。
 signal sell_requested(settlement_id: String)
+## 嵌入城镇面板时，点击“查看雇佣兵信息”请求大地图打开独立招募界面。
+signal mercenary_recruit_requested(settlement_id: String)
 ## 出售成功后广播结果，供大地图刷新金币/背包等只读显示。
 signal prisoners_sold(result: Dictionary)
 
@@ -32,6 +35,9 @@ var _feedback_text: String = ""
 var _menu_view: VBoxContainer = null
 var _sell_view: VBoxContainer = null
 var _merc_view: VBoxContainer = null
+var _merc_list: VBoxContainer = null
+var _merc_empty: Label = null
+var _merc_feedback_label: Label = null
 var _title_label: Label = null
 var _gold_label: Label = null
 var _buyer_list: VBoxContainer = null
@@ -66,6 +72,7 @@ func open(settlement: SettlementData) -> bool:
 	visible = true
 	_show_menu()
 	_refresh_gold()
+	_sync_player_viewing_tavern()
 	return true
 
 
@@ -82,6 +89,7 @@ func open_sale(settlement: SettlementData) -> bool:
 	_feedback_text = ""
 	visible = true
 	_show_sell_view()
+	_sync_player_viewing_tavern()
 	return true
 
 
@@ -91,6 +99,7 @@ func close() -> void:
 	_settlement = null
 	_sell_ids.clear()
 	_initial_prisoner_ids.clear()
+	_sync_player_viewing_tavern()
 	closed.emit()
 
 
@@ -103,6 +112,7 @@ func reset() -> void:
 	_sell_ids.clear()
 	_initial_prisoner_ids.clear()
 	_feedback_text = ""
+	_sync_player_viewing_tavern()
 	if _menu_view != null:
 		_show_menu()
 
@@ -223,7 +233,11 @@ func _build_menu_view() -> void:
 
 	var merc_button := _make_button("查看雇佣兵信息", "TavernMercenariesButton")
 	merc_button.custom_minimum_size = Vector2(260.0, 44.0)
-	merc_button.pressed.connect(_show_mercenary_view)
+	if _embedded:
+		# 嵌入酒馆只发起“打开独立招募界面”的意图，不在城镇面板内嵌套列表。
+		merc_button.pressed.connect(_on_mercenary_recruit_requested)
+	else:
+		merc_button.pressed.connect(_show_mercenary_view)
 	_menu_view.add_child(merc_button)
 
 	# 内嵌时按钮语义是切回城镇信息，而不是关闭独立窗口。
@@ -297,11 +311,37 @@ func _build_sell_view() -> void:
 
 
 func _build_mercenary_view() -> void:
-	var label := _make_label("雇佣兵信息尚未开放。", 16)
-	label.name = "TavernMercenaryPlaceholder"
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_merc_view.add_child(label)
+	_merc_view.alignment = BoxContainer.ALIGNMENT_BEGIN
+	var header := _make_label("可招募雇佣兵", 16)
+	header.name = "TavernMercenaryHeader"
+	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_merc_view.add_child(header)
+
+	var scroll := ScrollContainer.new()
+	scroll.name = "TavernMercenaryScroll"
+	scroll.custom_minimum_size = Vector2(0.0, 118.0 if _embedded else 400.0)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_merc_view.add_child(scroll)
+
+	_merc_list = VBoxContainer.new()
+	_merc_list.name = "TavernMercenaryList"
+	_merc_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_merc_list.add_theme_constant_override("separation", 6)
+	scroll.add_child(_merc_list)
+
+	_merc_empty = _make_label("当前酒馆没有可招募的雇佣兵。", 13)
+	_merc_empty.name = "TavernMercenaryEmpty"
+	_merc_empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_merc_view.add_child(_merc_empty)
+
+	_merc_feedback_label = _make_label("", 13)
+	_merc_feedback_label.name = "TavernMercenaryFeedback"
+	_merc_feedback_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_merc_feedback_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_merc_view.add_child(_merc_feedback_label)
+
 	var back_button := _make_button("返回酒馆", "TavernMercenaryBackButton")
+	back_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	back_button.pressed.connect(_show_menu)
 	_merc_view.add_child(back_button)
 
@@ -322,6 +362,12 @@ func _on_sell_requested() -> void:
 	if _settlement == null:
 		return
 	sell_requested.emit(_settlement.settlement_id)
+
+
+func _on_mercenary_recruit_requested() -> void:
+	if _settlement == null:
+		return
+	mercenary_recruit_requested.emit(_settlement.settlement_id)
 
 
 func _on_sell_back_pressed() -> void:
@@ -349,6 +395,86 @@ func _show_mercenary_view() -> void:
 	_menu_view.visible = false
 	_sell_view.visible = false
 	_merc_view.visible = true
+	if _merc_feedback_label != null:
+		_merc_feedback_label.text = ""
+	_refresh_mercenary_view()
+
+
+func _sync_player_viewing_tavern() -> void:
+	if _context == null:
+		return
+	var settlement_id: String = ""
+	if visible and _settlement != null:
+		settlement_id = _settlement.settlement_id
+	_context.mercenary_manager.set_player_viewing_tavern(settlement_id)
+
+
+## 列表只读取驻留记录；价格与日薪由 MercenaryManager/UnitConfig 统一提供。
+func _refresh_mercenary_view() -> void:
+	if _merc_list == null or _context == null or _settlement == null:
+		return
+	_clear_list(_merc_list)
+	var mercenaries: Array[MercenaryData] = \
+		_context.mercenary_manager.get_stationed_mercenaries(_settlement.settlement_id)
+	var party := _context.get_player_party()
+	var party_available: bool = party != null and party.is_available_for_world()
+	for mercenary: MercenaryData in mercenaries:
+		_merc_list.add_child(_make_mercenary_row(mercenary, party_available))
+	_merc_empty.visible = mercenaries.is_empty()
+	_refresh_gold()
+
+
+func _make_mercenary_row(
+	mercenary: MercenaryData, party_available: bool
+) -> Control:
+	var row := HBoxContainer.new()
+	row.name = "TavernMercenary_%s" % mercenary.mercenary_id
+	row.add_theme_constant_override("separation", 8)
+
+	var info := _make_label(
+		"%s · %s · %s · %s · 战斗经验：%s · 招募 %d 金币 · 日薪 %d" % [
+			mercenary.display_name,
+			_context.mercenary_manager.get_tier_display_name(mercenary),
+			"骑马" if mercenary.mounted else "步行",
+			"雇佣兵",
+			CombatExperience.tier_name_for_level(mercenary.level),
+			_context.mercenary_manager.get_recruit_price(mercenary),
+			_context.mercenary_manager.get_daily_wage(mercenary),
+		],
+		13
+	)
+	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	row.add_child(info)
+
+	var price: int = _context.mercenary_manager.get_recruit_price(mercenary)
+	var button := _make_button("招募", "TavernRecruit_%s" % mercenary.mercenary_id)
+	button.disabled = not party_available \
+		or not _context.player_profile.can_afford(price)
+	button.pressed.connect(_on_recruit_mercenary_pressed.bind(mercenary.mercenary_id))
+	row.add_child(button)
+	return row
+
+
+func _on_recruit_mercenary_pressed(mercenary_id: String) -> void:
+	if _context == null or _settlement == null:
+		return
+	var result: Dictionary = _context.mercenary_manager.recruit_mercenary_for_player(
+		mercenary_id,
+		_settlement.settlement_id,
+		_context.player_profile,
+		_context.player_party_id
+	)
+	if not bool(result.get("success", false)):
+		_merc_feedback_label.text = "招募失败：%s" % str(
+			result.get("reason", "未知原因")
+		)
+		_refresh_mercenary_view()
+		return
+	_merc_feedback_label.text = "已招募 %s，花费 %d 金币。" % [
+		str(result.get("unit_name", "雇佣兵")), int(result.get("price", 0))
+	]
+	_refresh_mercenary_view()
 
 
 # ---------------------------------------------------------------------------

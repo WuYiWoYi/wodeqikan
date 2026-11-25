@@ -6,6 +6,69 @@
 
 ---
 
+## 2026-11-25 · 雇佣兵美术、独立招募、战败清理与玩家被俘
+
+### 新增
+
+- `CaptivityConfig`（`Scripts/Config/captivity_config.gd` + `Data/Combat/captivity_config.tres`）：俘虏每小时恢复点数、逃脱判定间隔/概率、逃脱保护时长。
+- `CaptivityManager`（`Scripts/Core/World/captivity_manager.gd`）：玩家被俘状态、押送部队、俘虏按小时恢复、满血逃脱判定、逃脱落点、保护期、存档往返。
+- `MercenaryRecruitPanel`（`Scripts/UI/WorldMap/mercenary_recruit_panel.gd`）：独立招募窗口，左侧列表 + 右侧复用 `UnitVisual` 的真实预览；预览单位 `create_detached_unit` 不进入仓储/部队。
+- 大地图 `CaptiveStatusPanel`、`CaptiveTitleLabel`、`CaptiveCaptorLabel`、`CaptiveHpLabel`、`PlayerHpLabel`。
+- `MercenaryData.appearance`：按 `mercenary_id` 稳定生成并持久化的外观快照。
+- `AppearanceConfig` 雇佣兵字段：`mercenary_tier2_tabard_texture_path`、`mercenary_tier3_tabard_texture_path`、`mercenary_plume_config_ids`、`mercenary_plume_texture_path`。
+- 测试：`captivity_escape_test`；扩展 `mercenary_system_test`、`stage13_tavern_test`。
+
+### 变更
+
+- 雇佣兵按 Tier 使用 `2级雇佣兵罩袍.png` / `3级雇佣兵罩袍.png`；固定 `tabard_variant = MERCENARY`、空 `family_id`、无家族长矛；仅 `mercenary_rogue_knight` 获得 `无赖骑士缨饰.png`。
+- 酒馆“招募雇佣兵”不再嵌入地点面板，改为隐藏地点面板后打开独立界面；关闭后恢复城镇信息面板。价格、经验、坐骑与工资规则不变。
+- 战斗结算完成后，`WorldContext` 移除无任何成员的非玩家部队，并清理目标/跟随/攻击意图引用；只剩伤兵的部队保留；玩家部队不删除。
+- 玩家侧战败时，玩家角色不再按永久死亡处理，而是成为胜利方真实俘虏；原部队禁用但保留，镜头跟随押送部队，部队面板只读。
+- 所有俘虏（含玩家）按世界时间独立恢复 HP，不占用伤兵治疗名额；玩家满血后按配置进行逃脱判定，成功后重建只含玩家角色的部队，并获得 2 游戏小时 AI 主动攻击豁免。
+- 顶栏显示真实玩家角色 `current_hp/max_hp`；被俘/恢复/逃脱后实时刷新。
+- `AIManager` 与 `EncounterManager` 接入 `CaptivityManager`，保护期内跳过 AI 主动攻击；玩家主动追击仍允许。
+- `SaveData` 升至 v10，新增 `captivity`；`MercenaryData` 新增 `appearance`。
+
+### 验证
+
+- 已运行并通过：`captivity_escape_test`、`mercenary_system_test`、`stage13_tavern_test`、`milestone2_flow_test`、`battle_scene_test`、`player_control_test`、`save_persistence_test`、`save_migration_test`、`lord_ransom_test`、`political_hierarchy_test`。
+- 未执行非 headless 视觉验收；雇佣兵预览排版、被俘面板与顶栏 HP 的实际观感需人工确认。
+
+---
+
+## 2026-11-25 · 地图操作、雇佣兵、装备管理与招募经济
+
+### 新增
+
+- `RecruitmentConfig`（`Scripts/Config/recruitment_config.gd` + `Data/Recruitment/recruitment_config.tres`）：普通招募价格、雇佣兵基础价/经验加价/坐骑加价、雇佣兵日薪来源、池增长/容量/流转/旅行、类型权重、NPC 招募参数。
+- `MercenaryData`（`Scripts/Entities/Mercenary/mercenary_data.gd`）：全局雇佣兵记录与 `WAITING` / `STATIONED` / `TRAVELING` 状态。
+- `MercenaryManager`（`Scripts/Core/World/mercenary_manager.gd`）：全局池初始化、每 12 世界小时增长、每酒馆 7 人容量、24 小时流转、2 小时旅行、酒馆分配、玩家与 NPC 原子招募、存档往返。
+- `Data/Units/mercenary_archer.tres`、`mercenary_sergeant.tres`、`mercenary_mounted_sergeant.tres`、`mercenary_rogue_knight.tres`：Tier2/3 四类雇佣兵；无赖骑士无坐骑。
+- `UnitData.is_mercenary` 与 `UnitData.can_manage_equipment()`；旧档按 `recruit_source == "tavern_mercenary"` 回填。
+- `EventBus.party_arrived(party_id)`、`EventBus.mercenary_recruited(...)`。
+- 大地图 `WorldPausedTip`：有效倍率为 0 时显示琥珀色“已暂停”。
+- 酒馆“招募雇佣兵”列表与原子招募按钮；部队详情“装备管理”区、雇佣兵锁定提示。
+- 测试：`mercenary_system_test`；扩展 `world_map_input_test`、`party_panel_test`、`stage13_tavern_test`。
+
+### 变更
+
+- 大地图左键改为单击/双击判定（0.28 秒、18 像素）：单击 1x、双击 2x，双击只下达一次移动/跟随；UI 控件点击不进入地图输入。
+- 玩家部队真正到达移动/跟随目标时自动暂停；NPC 到达、移动途中、重新下达指令后的旧目标均不触发。
+- 部队详情对普通士兵开放逐槽位换装/卸下；雇佣兵隐藏装备与坐骑管理，`UnitManager` 全部装备写入口拒绝雇佣兵。
+- 普通招募统一价格：Tier1 = 5、Tier3 = 400；贵族冒险者初始战斗经验固定为 2 级。
+- 工资调整为 Tier1/2/3 = 1/3/7；雇佣兵 Tier2 日薪 4、无赖骑士 9；经验与坐骑不改工资。
+- 新游戏玩家金币 500 → 10000；旧存档不变、不补发。
+- `WorldContext` 装配 `RecruitmentConfig` 与 `MercenaryManager`；`WorldSimulation` 每 tick 推进雇佣兵池；`SaveData` 升至 v9，新增 `mercenaries` 与 `UnitData.is_mercenary`。
+
+### 验证
+
+- 已运行并通过：`mercenary_system_test`、`world_map_input_test`、`party_panel_test`、`stage13_tavern_test`、`save_persistence_test`、`save_migration_test`、`unit_tier_wage_test`、`party_economy_ui_test`、`lord_ransom_test`、`political_hierarchy_test`、`fief_adventurer_system_test`、`fief_adventurer_ui_test`、`noble_adventurer_recruitment_test`、`main_map_info_test`、`unit_manager_test`、`unit_party_serialization_test`、`mount_instance_test`、`mounted_unit_test`、`ai_manager_test`、`player_party_expansion_test`、`world_map_move_target_test`、`world_map_layout_test`、`town_market_ui_test`、`event_center_test`、`stage13_prisoner_test`、`milestone1_restart_test`、`stage13_world_map_ui_test`、`world_map_milestone6_test`、`settlement_interaction_test`、`main_menu_ui_test`。
+- 修复既有测试偏差：`player_control_test` 改为校验“阵亡 + 伤兵 = 全员且无存活者”；`milestone2_flow_test` 补上攻击确认与战后俘虏选择（不接收）流程。两项均已运行通过。
+- 同时修复 `WorldMap._update_time_ui()` 在场景退出后收到速度信号时访问 viewport 的报错。
+- 未执行非 headless 视觉验收；暂停提示、酒馆列表与装备管理区排版需人工确认。
+
+---
+
 ## 2026-11-24 · 国王盔缨饰、酒馆独立出售与关押期赎买
 
 ### 新增

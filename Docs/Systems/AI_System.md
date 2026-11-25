@@ -269,6 +269,15 @@ Idle
 - 其他敌对势力复用同一流程，仅描述文本按阵营区分。
 - 遭遇期间 WorldSimulation 跳过 AI，避免重复创建战斗。
 
+### 3.8.1 逃脱保护期
+
+- `AIManager.set_captivity_manager()` 注入只读查询接口；目标选择统一经过 `_is_protected_player(party)`。
+- 保护期内：
+  - 追击目标解析与强盗目标评分跳过玩家部队，强盗不会把受保护玩家列为目标；
+  - `EncounterManager.update_encounters()` 在 `ai_initiated` 分支跳过受保护玩家，不生成遭遇。
+- 保护期只约束 AI 主动行为；玩家主动追击/跟随敌对部队仍会正常触发 `PLAYER_INITIATED` 遭遇。
+- 保护截止时间来自 `CaptivityManager.escape_protection_until`，到期后 AI 自动恢复原有目标选择，无需额外清理。
+
 ### 3.9 仍未实现
 
 - 威胁值、撤退、士气、外交与长期情报记忆。
@@ -297,6 +306,7 @@ Idle
 - 征召使用与玩家完全相同的管理器接口和资源扣除。
 - 成功事实通过 `EventBus.fief_recruited` / `EventBus.adventurers_recruited` 进入日志与大地图提示；AIManager 不直接写日志或 UI。
 - 找不到可征召目标、储备/候选人为 0、金币不足或部队不可用时不做任何修改，下一次分频重新判断。
+- 雇佣兵补充由 `MercenaryManager` 自己按世界时间检查（默认每 6 小时、25% 概率），不经过 `AIManager` 的领主战略链路；条件为存活非玩家贵族、部队人数低于阈值、位于城镇范围内、金币满足“价格 + 预留”，并跳过玩家正在查看的酒馆。详见 [Mercenary_System.md](Mercenary_System.md)。
 
 详见 [Lord_System.md](Lord_System.md) 与 [Fief_Recruitment_System.md](Fief_Recruitment_System.md)。
 

@@ -52,6 +52,7 @@ func _run() -> void:
 	await _test_open_and_overview()
 	await _test_member_list_and_switch()
 	await _test_equipment_display()
+	await _test_equipment_permissions()
 	await _test_preview()
 	await _test_invalid_member_reference()
 	await _test_close_and_pause_stack()
@@ -235,6 +236,146 @@ func _test_equipment_display() -> void:
 	_check(mount_label != null and mount_label.text.contains("普通战马"), "坐骑槽显示装备名称")
 	var mount_state := _panel.find_child("DetailMountState", true, false) as Label
 	_check(mount_state != null and mount_state.text.contains("骑乘"), "详情显示骑乘状态")
+
+
+## 普通士兵可在详情面板更换装备；雇佣兵只能查看，装备与坐骑管理必须隐藏。
+func _test_equipment_permissions() -> void:
+	if _panel == null:
+		return
+	# _test_equipment_display 已给当前选中单位装备铁剑与坐骑，这里直接沿用。
+	var normal_id: String = _panel.get_selected_unit_id()
+	var normal_unit := _context.unit_manager.get_unit(normal_id)
+	_check(
+		normal_unit != null and not normal_unit.is_mercenary,
+		"普通士兵用于装备权限测试"
+	)
+	if normal_unit == null:
+		return
+
+	var lock_label := _panel.find_child(
+		"DetailMercenaryEquipmentLock", true, false
+	) as Label
+	var management := _panel.find_child(
+		"DetailEquipmentManagement", true, false
+	) as VBoxContainer
+	var mount_section := _panel.find_child(
+		"DetailMountSection", true, false
+	) as VBoxContainer
+	_check(lock_label != null and not lock_label.visible, "普通士兵不显示雇佣兵锁定提示")
+	_check(management != null and management.visible, "普通士兵显示装备管理")
+	_check(mount_section != null and mount_section.visible, "普通士兵显示坐骑管理")
+
+	# 先卸下当前武器，保证后面的“更换”一定产生一次真实写入。
+	var weapon_id: String = str(normal_unit.equipment.get("WEAPON", ""))
+	if not weapon_id.is_empty():
+		var unequip_button := _panel.find_child(
+			"DetailUnequipButton_WEAPON", true, false
+		) as Button
+		_check(unequip_button != null and not unequip_button.disabled, "普通士兵可卸下武器")
+		var stock_before: int = _context.player_profile.get_item_count(weapon_id)
+		if unequip_button != null:
+			unequip_button.pressed.emit()
+			await get_tree().process_frame
+		_check(not normal_unit.equipment.has("WEAPON"), "UI 卸下装备写入单位数据")
+		_check(
+			_context.player_profile.get_item_count(weapon_id) == stock_before + 1,
+			"卸下装备返还玩家背包"
+		)
+
+	var option := _panel.find_child(
+		"DetailEquipOption_WEAPON", true, false
+	) as OptionButton
+	var equip_button := _panel.find_child(
+		"DetailEquipButton_WEAPON", true, false
+	) as Button
+	_check(option != null and equip_button != null, "普通士兵存在换装控件")
+	var chosen_id: String = ""
+	if option != null:
+		for index: int in range(option.item_count):
+			var metadata: Variant = option.get_item_metadata(index)
+			if metadata is String and not (metadata as String).is_empty():
+				option.select(index)
+				chosen_id = metadata
+				break
+	_check(not chosen_id.is_empty(), "背包中有可更换武器")
+	if chosen_id.is_empty() or equip_button == null:
+		return
+	var selected_stock_before: int = _context.player_profile.get_item_count(chosen_id)
+	equip_button.pressed.emit()
+	await get_tree().process_frame
+	_check(
+		str(normal_unit.equipment.get("WEAPON", "")) == chosen_id,
+		"UI 更换装备写入单位数据"
+	)
+	_check(
+		_context.player_profile.get_item_count(chosen_id) == selected_stock_before - 1,
+		"更换装备从玩家背包扣除"
+	)
+
+	# 招募一名雇佣兵，验证其详情页面的装备管理被锁定。
+	var manager: MercenaryManager = _context.mercenary_manager
+	var town := _find_settlement(WorldInitializer.BURKNANIA_TOWN_NAME)
+	_check(town != null, "找到用于招募的城市")
+	if town == null:
+		return
+	var stationed: Array[MercenaryData] = manager.get_stationed_mercenaries(
+		town.settlement_id
+	)
+	_check(not stationed.is_empty(), "城市酒馆有驻留雇佣兵")
+	if stationed.is_empty():
+		return
+	var result: Dictionary = manager.recruit_mercenary_for_player(
+		stationed[0].mercenary_id,
+		town.settlement_id,
+		_context.player_profile,
+		_context.player_party_id
+	)
+	_check(bool(result.get("success", false)), "测试准备：雇佣兵加入玩家部队")
+	var mercenary_unit_id: String = str(result.get("unit_id", ""))
+	if mercenary_unit_id.is_empty():
+		return
+	_panel.refresh()
+	await get_tree().process_frame
+	var mercenary_item := _panel.find_child(
+		"MemberItem_%s" % mercenary_unit_id, true, false
+	) as PartyMemberItem
+	_check(mercenary_item != null, "雇佣兵出现在成员列表")
+	if mercenary_item == null:
+		return
+	mercenary_item.pressed.emit()
+	await get_tree().process_frame
+
+	var mercenary_unit := _context.unit_manager.get_unit(mercenary_unit_id)
+	_check(mercenary_unit != null and mercenary_unit.is_mercenary, "雇佣兵身份显式记录")
+	_check(mercenary_unit != null and not mercenary_unit.can_manage_equipment(),
+		"雇佣兵在当前实现中禁止管理装备")
+	lock_label = _panel.find_child(
+		"DetailMercenaryEquipmentLock", true, false
+	) as Label
+	management = _panel.find_child(
+		"DetailEquipmentManagement", true, false
+	) as VBoxContainer
+	mount_section = _panel.find_child(
+		"DetailMountSection", true, false
+	) as VBoxContainer
+	_check(lock_label != null and lock_label.visible, "雇佣兵显示装备锁定提示")
+	_check(management != null and not management.visible, "雇佣兵隐藏装备管理")
+	_check(mount_section != null and not mount_section.visible, "雇佣兵隐藏坐骑管理")
+	_check(
+		_panel.find_child("DetailEquipButton_WEAPON", true, false) == null,
+		"雇佣兵没有更换装备按钮"
+	)
+	_check(
+		_panel.find_child("DetailUnequipButton_WEAPON", true, false) == null,
+		"雇佣兵没有卸下装备按钮"
+	)
+	# 数据层也必须拒绝，不能只靠隐藏 UI。
+	_check(
+		not _context.unit_manager.unequip_slot_to_holder(
+			mercenary_unit_id, "WEAPON", _context.player_profile
+		),
+		"数据层拒绝雇佣兵卸下装备"
+	)
 
 
 func _test_preview() -> void:
@@ -460,6 +601,15 @@ func _test_close_and_pause_stack() -> void:
 		is_equal_approx(TimeManager.get_effective_world_scale(), TimeManager.SPEED_DOUBLE),
 		"移除其他暂停原因后恢复基础倍率"
 	)
+
+
+func _find_settlement(display_name: String) -> SettlementData:
+	if _context == null:
+		return null
+	for settlement: SettlementData in _context.settlement_manager.get_all_settlements():
+		if settlement != null and settlement.display_name == display_name:
+			return settlement
+	return null
 
 
 func _check(condition: bool, message: String) -> void:

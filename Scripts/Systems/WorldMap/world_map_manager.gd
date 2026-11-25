@@ -112,6 +112,8 @@ func update_party_movement(fixed_delta: float) -> void:
 				party.movement_state = PartyData.MovementState.IDLE
 				party.current_order = PartyData.OrderType.NONE
 			EventBus.party_position_changed.emit(party.party_id)
+			# 只在真正到达当前目标时广播；重新下达指令后旧目标不会补发。
+			EventBus.party_arrived.emit(party.party_id)
 			continue
 
 		var step_distance: float = minf(

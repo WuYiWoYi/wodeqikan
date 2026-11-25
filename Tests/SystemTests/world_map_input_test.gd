@@ -71,6 +71,9 @@ func _run() -> void:
 	await _test_party_dialogue_blocks_input()
 	_test_follow_party()
 	await _test_map_click_speed()
+	_test_pause_tip_state()
+	_test_single_double_click()
+	_test_arrival_auto_pause()
 	await _test_camera_controls()
 	await _test_npc_runtime_movement()
 
@@ -414,6 +417,130 @@ func _test_map_click_speed() -> void:
 	if close_button != null:
 		close_button.pressed.emit()
 		await get_tree().process_frame
+	TimeManager.set_base_world_speed(TimeManager.SPEED_PAUSED)
+
+
+func _test_pause_tip_state() -> void:
+	var tip := _map.find_child("WorldPausedTip", true, false) as Label
+	_check(tip != null, "存在暂停提示")
+	if tip == null:
+		return
+	TimeManager.clear_pauses()
+	TimeManager.set_base_world_speed(TimeManager.SPEED_PAUSED)
+	_check(tip.visible and tip.text.contains("已暂停"), "暂停时显示已暂停提示")
+	_check(
+		tip.get_theme_color("font_color") == Color("#D97706"),
+		"暂停提示使用琥珀色"
+	)
+	var tip_font := tip.get_theme_font("font") as FontVariation
+	_check(
+		tip_font != null and tip_font.variation_embolden > 0.0,
+		"暂停提示使用半粗体"
+	)
+
+	TimeManager.set_base_world_speed(TimeManager.SPEED_NORMAL)
+	_check(not tip.visible, "世界运行时隐藏暂停提示")
+
+	# 其他暂停原因（例如 UI 面板）同样来自实际 TimeManager 状态。
+	TimeManager.push_pause(&"input_test_tip")
+	_check(tip.visible, "其他暂停原因也显示暂停提示")
+	TimeManager.pop_pause(&"input_test_tip")
+	_check(not tip.visible, "移除暂停原因后隐藏提示")
+	TimeManager.set_base_world_speed(TimeManager.SPEED_PAUSED)
+
+
+func _test_single_double_click() -> void:
+	TimeManager.clear_pauses()
+	_stop_player()
+	_player.world_position = Vector2(760.0, 620.0)
+	_player.target_position = _player.world_position
+	TimeManager.set_base_world_speed(TimeManager.SPEED_PAUSED)
+
+	# 单击：双击窗口结束前不执行，窗口结束后切 1x。
+	_map.call("_queue_map_click", Vector2(900.0, 700.0))
+	_check(
+		is_zero_approx(TimeManager.get_base_world_speed()),
+		"第一次点击先等待双击判定，不立即切换倍率"
+	)
+	# 大于脚本内 0.28 秒的双击窗口。
+	_map.call("_update_pending_map_click", 0.3)
+	_check(
+		is_equal_approx(TimeManager.get_base_world_speed(), TimeManager.SPEED_NORMAL),
+		"单击地图切换到 1x"
+	)
+	_check(
+		_player.movement_state == PartyData.MovementState.MOVING,
+		"单击地图下达移动指令"
+	)
+
+	_stop_player()
+	_player.world_position = Vector2(760.0, 620.0)
+	TimeManager.set_base_world_speed(TimeManager.SPEED_NORMAL)
+	_map.call("_queue_map_click", Vector2(900.0, 700.0))
+	_map.call("_queue_map_click", Vector2(900.0, 700.0))
+	_check(
+		is_equal_approx(TimeManager.get_base_world_speed(), TimeManager.SPEED_DOUBLE),
+		"同一位置双击切换到 2x"
+	)
+	_check(
+		_player.movement_state == PartyData.MovementState.MOVING,
+		"双击仍然只通过统一入口下达移动"
+	)
+	_stop_player()
+	TimeManager.set_base_world_speed(TimeManager.SPEED_PAUSED)
+
+
+func _test_arrival_auto_pause() -> void:
+	TimeManager.clear_pauses()
+	_stop_player()
+	_player.world_position = Vector2(1000.0, 1200.0)
+	_player.target_position = Vector2(1004.0, 1200.0)
+	_player.movement_state = PartyData.MovementState.MOVING
+	_player.current_order = PartyData.OrderType.MOVE
+	TimeManager.set_base_world_speed(TimeManager.SPEED_NORMAL)
+
+	# 尚未到达时不暂停。
+	_enemy.world_position = Vector2(2600.0, 1800.0)
+	_enemy.target_position = _enemy.world_position
+	_enemy.movement_state = PartyData.MovementState.IDLE
+	_context.world_map_manager.update_party_movement(0.01)
+	_check(
+		is_equal_approx(TimeManager.get_base_world_speed(), TimeManager.SPEED_NORMAL),
+		"到达前不自动暂停"
+	)
+
+	_context.world_map_manager.update_party_movement(1.0)
+	_check(
+		_player.world_position == _player.target_position,
+		"玩家部队真正到达目标"
+	)
+	# 移动逻辑在下一步 tick 判定到达，复用既有到达检测。
+	_context.world_map_manager.update_party_movement(0.01)
+	_check(
+		is_zero_approx(TimeManager.get_base_world_speed()),
+		"玩家到达指定目标后自动暂停"
+	)
+
+	# NPC 到达不触发玩家暂停。
+	TimeManager.set_base_world_speed(TimeManager.SPEED_NORMAL)
+	_stop_player()
+	var npc := _find_party_by_name(WorldInitializer.GUARD_PARTY_NAME)
+	_check(npc != null, "找到用于到达测试的 NPC 部队")
+	if npc != null:
+		npc.world_position = Vector2(2300.0, 1100.0)
+		npc.target_position = Vector2(2304.0, 1100.0)
+		npc.movement_state = PartyData.MovementState.MOVING
+		npc.current_order = PartyData.OrderType.MOVE
+		_context.world_map_manager.update_party_movement(1.0)
+		_context.world_map_manager.update_party_movement(0.01)
+		_check(
+			npc.world_position == npc.target_position,
+			"NPC 到达自身目标"
+		)
+		_check(
+			is_equal_approx(TimeManager.get_base_world_speed(), TimeManager.SPEED_NORMAL),
+			"NPC 到达不会暂停玩家世界"
+		)
 	TimeManager.set_base_world_speed(TimeManager.SPEED_PAUSED)
 
 

@@ -40,6 +40,7 @@
 | `equipment` | Dictionary | 槽位字符串（`WEAPON` 等）→ 装备 ID | `UnitManager.equip_item()` / `unequip_slot()` |
 | `is_mounted` | bool | 是否处于骑乘状态；由 `equipment` 是否存在 `MOUNT` 派生，不是独立兵种 | `UnitManager`（装备/重算时同步） |
 | `is_player_character` | bool | 玩家角色身份（持久化）；与控制权无关 | 配置 / `UnitManager` |
+| `is_mercenary` | bool | 雇佣兵身份（持久化）；`can_manage_equipment()` 据此返回 false | `MercenaryManager` 创建时 |
 | `joined_at_game_time` | float | 加入队伍的世界时间 | `PartyManager` |
 | `recruit_source` | String | 招募方式（村庄/任务等） | `PartyManager` |
 | `recruit_settlement_id` | String | 招募地点 ID | `PartyManager` |
@@ -60,16 +61,18 @@
 
 | tier | 定位 | 基础攻击 | 基础生命 | 每日工资 |
 |---:|---|---:|---:|---:|
-| 1 | 一般部队 | 10 | 50 | 2 |
-| 2 | 受过训练的军士 | 20 | 100 | 5 |
-| 3 | 训练有素的小贵族 | 25 | 180 | 10 |
+| 1 | 一般部队 | 10 | 50 | 1 |
+| 2 | 受过训练的军士 | 20 | 100 | 3 |
+| 3 | 训练有素的小贵族 | 25 | 180 | 7 |
 
 | 文件 | `config_id` | 名称 | tier | HP | 攻击 | 攻击间隔 | 移速 | 射程 | 工资 |
 |---|---|---|---:|---:|---:|---:|---:|---:|---:|
-| `Data/Units/infantry_militia.tres` | `infantry_militia` | 民兵 | 1 | 50 | 10 | 1.2 | 60 | 20 | 2 |
-| `Data/Units/infantry_trained.tres` | `infantry_trained` | 职业步兵 | 2 | 100 | 20 | 1.0 | 55 | 20 | 5 |
-| `Data/Units/infantry_veteran.tres` | `infantry_veteran` | 小贵族 | 3 | 180 | 25 | 1.0 | 55 | 20 | 10 |
+| `Data/Units/infantry_militia.tres` | `infantry_militia` | 民兵 | 1 | 50 | 10 | 1.2 | 60 | 20 | 1 |
+| `Data/Units/infantry_trained.tres` | `infantry_trained` | 职业步兵 | 2 | 100 | 20 | 1.0 | 55 | 20 | 3 |
+| `Data/Units/infantry_veteran.tres` | `infantry_veteran` | 小贵族 | 3 | 180 | 25 | 1.0 | 55 | 20 | 7 |
 | `Data/Units/player_hero.tres` | `player_hero` | 玩家角色 | 1 | 80 | 10 | 0.8 | 75 | 30 | 0 |
+
+- 雇佣兵工资单独由 `mercenary_*.tres` 配置：tier 2 统一 4，无赖骑士（tier 3）为 9；详见 [Mercenary_System.md](Mercenary_System.md)。
 
 - `tier` 与 `level` 是两个维度：tier 决定基础值与工资，level 决定经验成长。
 - 骑马只改变 MOUNT 装备状态与移速/移动攻击加成，不改变 tier、基础 HP、基础攻击或工资。
@@ -199,7 +202,9 @@ HP 安全规则：
 - `default_equipment` 在创建单位时逐条校验，非法条目报告错误并丢弃，不进入 `UnitData`。
 - WEAPON 还可配置 `attack_type`（`MELEE` / `RANGED`）、`attack_interval_override`、`projectile_texture_path`、`projectile_speed`、`projectile_arc_height`。远程武器要求 `projectile_speed > 0`、`projectile_arc_height >= 0`、`attack_interval_override > 0`，否则 `validate()` 失败。
 - 攻击方式由武器派生，不按兵种名/`unit_class` 分支：`StatCalculator` 把武器 `attack_type` 写入 `UnitData.attack_type`，战斗逻辑只读取 `UnitData.is_ranged_attacker()`。空手或未装备武器时保持 `MELEE`。
-- 数据层使用 `equip_item()` / `unequip_slot()`；阶段 6 起部队面板提供 MOUNT 上下马与晋升，其他装备槽位的更换 UI 尚未实现（KI327）。
+- 数据层使用 `equip_item()` / `unequip_slot()` 与持有者版本 `equip_item_from_holder()` / `unequip_slot_to_holder()`。
+- 部队详情面板已提供普通士兵的逐槽位换装/卸下与 MOUNT 管理；装备只从玩法背包读取。
+- 雇佣兵（`is_mercenary = true`）不能更换装备或坐骑：UI 隐藏管理区并显示锁定说明，所有 `UnitManager` 写入接口也会拒绝。普通招募与封地征召士兵不受限制。详见 [Mercenary_System.md](Mercenary_System.md) 第 7 节。
 - 村庄贵族冒险者候选人在招募前不属于仓储，使用 `UnitManager.equip_detached_mount()` 装备真实马匹实例；该入口只接受未注册单位，避免绕过正式装备写入口。招募后单位由仓储持有，后续装备变化仍走 `equip_item()` / `equip_mount_instance()`。
 - 本次不实现品质、耐久、随机词条、职业限制与装备获取（商店/掉落）。
 - 装备视觉字段（`EquipmentConfig`）：

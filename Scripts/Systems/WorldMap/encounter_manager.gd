@@ -30,6 +30,8 @@ var _party_manager: PartyManager = null
 var _faction_manager: FactionManager = null
 var _battle_manager: BattleManager = null
 var _world_map_manager: WorldMapManager = null
+## 逃脱保护期查询入口；为 null 时视为没有保护期。
+var _captivity_manager: CaptivityManager = null
 
 var _encounter_serial: int = 0
 var _interaction_serial: int = 0
@@ -53,6 +55,10 @@ func setup(
 	_faction_manager = faction_manager
 	_battle_manager = battle_manager
 	_world_map_manager = world_map_manager
+
+
+func set_captivity_manager(captivity_manager: CaptivityManager) -> void:
+	_captivity_manager = captivity_manager
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +191,11 @@ func update_encounters() -> bool:
 					attacker.attack_intent
 					and attacker.current_target_id == target.party_id
 				)
+				# 逃脱保护期内 AI 不得主动发起对玩家的攻击；
+				# 玩家主动追击仍允许（保护期只约束 AI 主动行为）。
+				if ai_initiated and _captivity_manager != null \
+						and _captivity_manager.is_player_protected():
+					continue
 				var player_pursuit: bool = (
 					not target.focus_party_id.is_empty()
 					and target.focus_party_id == attacker.party_id

@@ -60,15 +60,37 @@ static func ensure_random(
 	family: FamilyConfig,
 	config: AppearanceConfig,
 	is_leader: bool = false,
-	rng: RandomNumberGenerator = null
+	rng: RandomNumberGenerator = null,
+	is_mercenary: bool = false
 ) -> void:
 	if unit == null or not unit.appearance.is_empty():
 		return
 
+	var appearance: Dictionary = build_appearance(
+		unit_config, family, config, is_leader, rng, is_mercenary
+	)
+	if family != null and not is_mercenary:
+		unit.family_id = family.family_id
+	unit.appearance = appearance
+
+
+## 生成一份可持久化的外观字典，不依赖 UnitData。
+## 雇佣兵外观只由 is_mercenary 与 tier/配置决定：
+## - 按 tier 使用专属罩袍；
+## - 不使用家族罩袍颜色、家族制式长矛或领袖缨饰；
+## - 只有配置中指定的兵种（无赖骑士）显示专属缨饰。
+static func build_appearance(
+	unit_config: UnitConfig,
+	family: FamilyConfig,
+	config: AppearanceConfig,
+	is_leader: bool = false,
+	rng: RandomNumberGenerator = null,
+	is_mercenary: bool = false
+) -> Dictionary:
 	var tier: int = clampi(unit_config.tier if unit_config != null else 1, 1, 3)
 	var appearance: Dictionary = {
 		"version": VERSION,
-		"family_id": family.family_id if family != null else "",
+		"family_id": "",
 		"tabard_variant": "",
 		"tabard_texture_path": "",
 		"tabard_color": "",
@@ -80,8 +102,18 @@ static func ensure_random(
 	if config != null:
 		appearance["helmet_texture_path"] = config.pick_helmet_texture_path(tier, rng)
 
+	if is_mercenary:
+		appearance["tabard_variant"] = "MERCENARY"
+		if config != null:
+			appearance["tabard_texture_path"] = \
+				config.get_mercenary_tabard_texture_path(tier)
+			appearance["plume_texture_path"] = config.get_mercenary_plume_texture_path(
+				unit_config.config_id if unit_config != null else ""
+			)
+		return appearance
+
 	if family != null:
-		unit.family_id = family.family_id
+		appearance["family_id"] = family.family_id
 		var use_primary: bool = true
 		if family.has_secondary_tabard():
 			var primary_chance: float = 1.0 if config == null \
@@ -95,7 +127,7 @@ static func ensure_random(
 		if is_leader:
 			appearance["plume_texture_path"] = family.leader_plume_texture_path
 
-	unit.appearance = appearance
+	return appearance
 
 
 ## 旧存档/手工构造单位缺失 appearance 时的安全空值。

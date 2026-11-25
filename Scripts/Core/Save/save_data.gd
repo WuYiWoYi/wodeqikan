@@ -10,9 +10,11 @@ extends RefCounted
 ## v6（阶段 12）增加独立马匹实例、村庄市场、NPC 背包/资金与每日补给结算日。
 ## v7（阶段 13）增加伤兵状态、部队俘虏列表、俘虏归属与伤兵治疗结算小时。
 ## v8 增加战斗经验五级制（旧 1–10 级折算）与 NPC 领主赎回记录。
-## 读取时保留 v1 → v8 的浅迁移入口，缺失字段按安全默认值恢复。
+## v9 增加全地图雇佣兵池、酒馆驻留/流动状态与雇佣兵身份字段。
+## v10 增加玩家被俘状态、押送部队、俘虏恢复/逃脱计时与逃脱保护期。
+## 读取时保留 v1 → v10 的浅迁移入口，缺失字段按安全默认值恢复。
 
-const CURRENT_SCHEMA_VERSION: int = 8
+const CURRENT_SCHEMA_VERSION: int = 10
 ## 战斗经验等级上限；与 CombatExperience.MAX_LEVEL 保持一致。
 const MAX_COMBAT_LEVEL: int = 5
 
@@ -56,6 +58,12 @@ var settlements: Dictionary = {}
 var markets: Dictionary = {}
 ## NPC 领主赎回记录：{ ransom_id: { noble_id, status, due_world_seconds, ... } }。
 var ransoms: Dictionary = {}
+## 全地图雇佣兵池：{ initialized, timers, records: [...] }。
+## 旧存档缺失时由 MercenaryManager 首次初始化，只生成一次。
+var mercenaries: Dictionary = {}
+## 玩家被俘与逃脱状态：{ is_player_captive, captor_party_id, timers, protection }。
+## v10 之前的存档缺失时视为未被俘，计时以读档时刻为起点。
+var captivity: Dictionary = {}
 var factions: Dictionary = {}
 var quests: Dictionary = {}
 
@@ -93,6 +101,8 @@ func to_dict() -> Dictionary:
 		"settlements": settlements.duplicate(true),
 		"markets": markets.duplicate(true),
 		"ransoms": ransoms.duplicate(true),
+		"mercenaries": mercenaries.duplicate(true),
+		"captivity": captivity.duplicate(true),
 		"factions": factions.duplicate(true),
 		"quests": quests.duplicate(true),
 	}
@@ -143,6 +153,8 @@ static func from_dict(payload: Dictionary) -> SaveData:
 	save.settlements = _as_dict(payload.get("settlements", {}))
 	save.markets = _as_dict(payload.get("markets", {}))
 	save.ransoms = _as_dict(payload.get("ransoms", {}))
+	save.mercenaries = _as_dict(payload.get("mercenaries", {}))
+	save.captivity = _as_dict(payload.get("captivity", {}))
 	save.factions = _as_dict(payload.get("factions", {}))
 	save.quests = _as_dict(payload.get("quests", {}))
 
@@ -158,6 +170,14 @@ static func from_dict(payload: Dictionary) -> SaveData:
 	if save.schema_version < 8:
 		_migrate_legacy_unit_levels(save.units)
 		save.schema_version = 8
+	# v8 -> v9：雇佣兵池缺失时保持空载荷，由 WorldContext 首次初始化；
+	# 已在部队中的旧单位由 UnitData.from_dict 回填非雇佣兵身份。
+	if save.schema_version < 9:
+		save.schema_version = 9
+	# v9 -> v10：旧存档没有玩家被俘状态；按“未被俘”恢复，
+	# 俘虏恢复/逃脱计时由 CaptivityManager 在加载时以读档时刻初始化。
+	if save.schema_version < 10:
+		save.schema_version = 10
 	# v4 -> v5：旧存档只有 lords，没有独立 nobles/houses/kingdoms；
 	# 具体政治数据由 WorldContext 在加载后迁移，不在这里伪造实体。
 	return save

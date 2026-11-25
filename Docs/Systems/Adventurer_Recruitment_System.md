@@ -2,8 +2,8 @@
 
 **核心逻辑：** `Scripts/Core/World/adventurer_recruitment_manager.gd`
 **候选数据：** `Scripts/Entities/Settlement/adventurer_candidate_data.gd`
-**配置：** `Data/Settlements/settlement_economy_config.tres`
-**状态：** 已实现：每村普通候选人池、世界时间刷新、村庄 NPC 对话支付 1 金币招募、离开村庄清理；贵族冒险者特殊候选人；玩家/NPC 共用招募流程与大地图提示。
+**配置：** `Scripts/Config/recruitment_config.gd`、`Data/Recruitment/recruitment_config.tres`、`Data/Settlements/settlement_economy_config.tres`
+**状态：** 已实现：每村普通候选人池、世界时间刷新、村庄 NPC 对话按 tier 支付金币招募、离开村庄清理；贵族冒险者特殊候选人；玩家/NPC 共用招募流程与大地图提示。
 
 ---
 
@@ -15,7 +15,7 @@
 |---|---|---|
 | 来源 | 领主自有封地储备 | 村庄候选人池 |
 | 一次获得 | 固定 6 人成组 | 1 人 |
-| 费用 | 储备 + 人口 + 繁荣度 | 1 金币 |
+| 费用 | 储备 + 人口 + 繁荣度 | 按候选人 tier：Tier1 = 5 金币，Tier3 = 400 金币 |
 | 入口 | 地图面板 / 头人对话 | 点击候选人 NPC 对话 |
 | 目标部队 | 领主部队（玩家或 AI） | 玩家部队或领主自有村庄的 NPC 部队 |
 | 上限 | 每村储备 4 组 | 每村最多 5 名普通候选人；另加 1 名贵族冒险者 |
@@ -64,7 +64,8 @@
 
 - 每村最多 1 名，保存在 `SettlementData.noble_adventurer_candidate`，不加入普通 `adventurer_candidates` 数组，因此不占 5 名普通候选人上限，也不影响普通刷新数量。
 - 只有村庄 `has_owner()` 时生成；`noble_adventurer_spawned` 记录“该村已生成过”。无主村庄之后获得归属时由世界 tick 补生成。
-- 兵种固定读取 `noble_adventurer_unit_config_id`（默认 `infantry_veteran`，tier 3）。
+- 兵种固定读取 `noble_adventurer_unit_config_id`（默认 `infantry_veteran`，tier 3），初始战斗经验固定为 2 级（普通士兵）；招募价 400，日薪 7。
+- 贵族不是雇佣兵（`is_mercenary = false`），招募后可以正常更换装备与坐骑。
 - 通过 `UnitManager.create_detached_unit()` 创建独立身份，再以 `UnitManager.equip_detached_mount()` 装备 `MountInstanceData.create_random(fief_mount_equipment_id)` 的真实战马；单位保持 `is_mounted = true` 与 `equipment["MOUNT"]` 关系。
 - 招募后 `noble_adventurer_candidate` 记录离开清理时置空，`noble_adventurer_spawned` 保持 true，读档不会重新生成。
 - 普通候选人刷新逻辑完全不感知贵族字段。
@@ -75,7 +76,7 @@
 
 1. 校验村庄、候选人存在、`AVAILABLE`、玩家档案有效。
 2. 贵族候选人额外校验 `is_noble_recruit_authorized(settlement, recruiter_lord_id)`：直接复用 `FiefRecruitmentManager.is_authorized_owner()`；明确 `owner_noble_id` 时只认该贵族，未指定时认所有者家族领袖。
-3. 校验金币 >= `adventurer_recruit_cost`（默认 1）。
+3. 校验金币 >= `RecruitmentConfig.get_civilian_recruit_cost(candidate.tier)`：Tier1 = 5，Tier3 = 400。
 4. 校验玩家部队存在且 `is_available_for_world()`。
 5. 读取候选人兵种配置；优先使用候选人独立 `unit_data` 快照转化为真实单位，旧档缺失时新建。贵族保留三级属性与战马实例。
 6. 加入玩家部队。
@@ -145,7 +146,7 @@ NPC 领主招募普通冒险者：
 
 ## 8. 测试
 
-- `Tests/SystemTests/fief_adventurer_system_test.tscn`：1 金币扣款、只生成 1 个单位、姓名/外观持久化、重复招募拒绝、离开清理幂等、刷新上限、日志。
+- `Tests/SystemTests/fief_adventurer_system_test.tscn`：Tier1 = 5 / Tier3 = 400 金币扣款、只生成 1 个单位、姓名/外观持久化、重复招募拒绝、离开清理幂等、刷新上限、日志。
 - `Tests/SystemTests/fief_adventurer_ui_test.tscn`：村庄候选 NPC、距离交互、对话按钮、已招募标记、离开清理、日志面板。
 - `Tests/SystemTests/stage13_village_candidates_test.tscn`：初始候选人数量/上限、独立 Unit 身份、村庄归属、不重复、招募后进入玩家部队、存档往返。
 - `Tests/SystemTests/noble_adventurer_recruitment_test.tscn`：贵族三级身份/真实战马、所有权拒绝、招募合并与防重复、清理后不复活、存档往返、村庄步行人物+独立战马、NPC 普通冒险者招募与事件。

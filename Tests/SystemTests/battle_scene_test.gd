@@ -267,7 +267,10 @@ func _run() -> void:
 	_check(surviving_unit != null and surviving_unit.current_hp == 12, "存活士兵写回剩余 HP")
 	_check(player.member_unit_ids.has(surviving_id), "存活士兵保留成员关系")
 	_check(player.battle_state == PartyData.BattleState.AVAILABLE, "玩家部队解锁")
-	_check(enemy.battle_state == PartyData.BattleState.DISABLED, "敌方全员阵亡后失效")
+	_check(
+		_context.party_manager.get_party(enemy.party_id) == null,
+		"敌方全员阵亡后从世界移除"
+	)
 	_check(enemy.member_unit_ids.is_empty(), "阵亡敌方成员全部移出部队")
 	for unit_id: String in _session.defender_unit_ids:
 		_check(_context.unit_manager.get_unit(unit_id) == null, "阵亡单位数据已清理")

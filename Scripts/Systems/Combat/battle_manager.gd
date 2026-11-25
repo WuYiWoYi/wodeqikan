@@ -477,7 +477,7 @@ func build_battle_result(
 		return data
 
 	# 负伤判定必须先于结果统计；每场战斗只判定一次，预览与最终结算一致。
-	_decide_wounded_outcomes(session)
+	_decide_wounded_outcomes(session, int(result))
 
 	data.battle_id = session.battle_id
 	data.result_code = int(result)
@@ -910,11 +910,15 @@ func _ensure_screen_battle(session: BattleSession) -> void:
 
 
 ## 结算前一次性决定每个 0 HP 单位的去留。
-## 玩家角色保留原有永久死亡规则；普通士兵按 tier 概率负伤。
+## 普通士兵按 tier 概率负伤；玩家角色仅在“玩家所在侧战败且未永久死亡”时
+## 转为伤兵，作为进入胜利方俘虏列表的前提。玩家获胜/撤退/平局时仍沿用
+## 既有永久死亡规则。
 ## 判定结果写回 BattleUnitState，预览与最终结算共用，不会重复掷骰。
-func _decide_wounded_outcomes(session: BattleSession) -> void:
+func _decide_wounded_outcomes(session: BattleSession, result: int) -> void:
 	if session == null:
 		return
+	var battle_result := result as BattleSession.BattleResult
+	var player_can_be_captured: bool = _player_lost_battle(session, battle_result)
 	for value: Variant in session.unit_states.values():
 		var state := value as BattleUnitState
 		if state == null or state.wounded_decided:
@@ -924,7 +928,11 @@ func _decide_wounded_outcomes(session: BattleSession) -> void:
 		state.wounded_decided = true
 		state.wounded = false
 		var unit := _unit_manager.get_unit(state.unit_id)
-		if unit == null or unit.is_player_character:
+		if unit == null:
+			continue
+		if unit.is_player_character:
+			if player_can_be_captured and not unit.is_dead():
+				state.wounded = true
 			continue
 		if wounded_config == null or not wounded_config.enabled:
 			continue
@@ -935,6 +943,22 @@ func _decide_wounded_outcomes(session: BattleSession) -> void:
 			continue
 		if _wounded_rng.randf() < chance:
 			state.wounded = true
+
+
+## 玩家所在侧是否明确战败；撤退/中止/平局不产生被俘。
+func _player_lost_battle(
+	session: BattleSession, result: BattleSession.BattleResult
+) -> bool:
+	if session == null or player_party_id.is_empty():
+		return false
+	if result == BattleSession.BattleResult.RETREATED \
+			or result == BattleSession.BattleResult.ABORTED \
+			or result == BattleSession.BattleResult.DRAW:
+		return false
+	var player_side: int = session.get_side_of_party(player_party_id)
+	if player_side < 0 or session.winning_side_index < 0:
+		return false
+	return player_side != session.winning_side_index
 
 
 func _settle_session(session: BattleSession) -> void:

@@ -17,6 +17,15 @@ extends Resource
 @export_range(0.0, 1.0, 0.01) var tier2_primary_tabard_chance: float = 0.5
 @export_range(0.0, 1.0, 0.01) var tier3_primary_tabard_chance: float = 1.0
 
+@export_category("Mercenary Appearance")
+## 雇佣兵按 tier 使用的专属罩袍。身份只由 UnitData.is_mercenary 决定，
+## 不读取姓名、家族或部队类型；Tier2/Tier3 各自独立配置。
+@export var mercenary_tier2_tabard_texture_path: String = ""
+@export var mercenary_tier3_tabard_texture_path: String = ""
+## 专属缨饰只发给指定兵种配置（当前为无赖骑士），其他雇佣兵不显示缨饰。
+@export var mercenary_plume_config_ids: Array[String] = ["mercenary_rogue_knight"]
+@export var mercenary_plume_texture_path: String = ""
+
 @export_category("Identity Appearance Override")
 ## 国王身份对应的头盔外观覆盖。只在原本就会显示头盔时替换贴图；
 ## 不写入 UnitData.appearance / 装备数据，身份失效后自动恢复原头盔。
@@ -55,3 +64,21 @@ func pick_helmet_texture_path(
 	var index: int = rng.randi_range(0, paths.size() - 1) if rng != null \
 		else randi_range(0, paths.size() - 1)
 	return paths[index]
+
+
+## 雇佣兵罩袍：只按 tier 取，不参与家族主/副罩袍随机。
+func get_mercenary_tabard_texture_path(tier: int) -> String:
+	match clampi(tier, 1, 3):
+		2:
+			return mercenary_tier2_tabard_texture_path
+		3:
+			return mercenary_tier3_tabard_texture_path
+		_:
+			return ""
+
+
+## 雇佣兵缨饰：只有兵种配置命中专属列表时才显示。
+func get_mercenary_plume_texture_path(config_id: String) -> String:
+	if config_id.is_empty() or not mercenary_plume_config_ids.has(config_id):
+		return ""
+	return mercenary_plume_texture_path

@@ -16,6 +16,8 @@ const FAMILY_CONFIG_DIR: String = "res://Data/Families"
 const APPEARANCE_CONFIG_PATH: String = "res://Data/Appearance/appearance_config.tres"
 const SETTLEMENT_ECONOMY_CONFIG_PATH: String = \
 	"res://Data/Settlements/settlement_economy_config.tres"
+const RECRUITMENT_CONFIG_PATH: String = \
+	"res://Data/Recruitment/recruitment_config.tres"
 ## 旧存档升级 v6 时，为完全没有补给数据的部队补几天起步物资与少量资金。
 const MIGRATION_SUPPLY_DAYS: int = 3
 const MIGRATION_NPC_GOLD: int = 200
@@ -44,6 +46,8 @@ var family_registry: FamilyRegistry = FamilyRegistry.new()
 var appearance_config: AppearanceConfig = null
 ## 封地经济/征召/冒险者刷新参数；只读静态资源，不进入存档。
 var economy_config: SettlementEconomyConfig = null
+## 统一招募价格与雇佣兵世界刷新参数；只读静态资源，不进入存档。
+var recruitment_config: RecruitmentConfig = null
 ## 贵族/家族/王国是本阶段的政治实体层级；lord_manager 指向同一个 NobleManager，
 ## 用于兼容封地所有权与既有 AI 接口。
 var noble_manager: NobleManager = NobleManager.new()
@@ -53,6 +57,10 @@ var lord_manager: LordManager = null
 var fief_recruitment_manager: FiefRecruitmentManager = FiefRecruitmentManager.new()
 var adventurer_recruitment_manager: AdventurerRecruitmentManager = \
 	AdventurerRecruitmentManager.new()
+## 全地图雇佣兵池的唯一所有者：生成、酒馆分配、流动、玩家/NPC 招募与存档。
+var mercenary_manager: MercenaryManager = MercenaryManager.new()
+## 俘虏恢复与玩家被俘/逃脱：世界 tick 驱动的唯一结算入口。
+var captivity_manager: CaptivityManager = CaptivityManager.new()
 var vision_manager: VisionManager = VisionManager.new()
 var world_map_manager: WorldMapManager = WorldMapManager.new()
 var encounter_manager: EncounterManager = EncounterManager.new()
@@ -84,6 +92,8 @@ func _ready() -> void:
 	_register_king_appearance_override()
 	if not TimeManager.world_tick.is_connected(world_simulation.on_world_tick):
 		TimeManager.world_tick.connect(world_simulation.on_world_tick)
+	if not EventBus.battle_finished.is_connected(_on_battle_finished):
+		EventBus.battle_finished.connect(_on_battle_finished)
 
 
 func _exit_tree() -> void:
@@ -91,6 +101,8 @@ func _exit_tree() -> void:
 	world_log_manager.dispose()
 	if TimeManager.world_tick.is_connected(world_simulation.on_world_tick):
 		TimeManager.world_tick.disconnect(world_simulation.on_world_tick)
+	if EventBus.battle_finished.is_connected(_on_battle_finished):
+		EventBus.battle_finished.disconnect(_on_battle_finished)
 
 
 ## 国王盔覆盖只依赖静态外观配置与当前政治身份，由本世界显式注册。
@@ -306,6 +318,8 @@ func to_save_data() -> SaveData:
 	save.settlements = settlement_manager.to_dict()
 	save.markets = market_manager.to_dict()
 	save.ransoms = lord_ransom_manager.to_dict()
+	save.mercenaries = mercenary_manager.to_dict()
+	save.captivity = captivity_manager.to_dict()
 	save.nobles = noble_manager.to_dict()
 	# v4 兼容字段：旧读取方仍然可以只读 lords，但内容已经是完整贵族数据。
 	save.lords = save.nobles.duplicate(true)
@@ -314,6 +328,79 @@ func to_save_data() -> SaveData:
 	save.factions = {}
 	save.quests = {}
 	return save
+
+
+## 战斗结算完成后的世界侧收尾：
+## 1. 移除已无任何成员的部队（仅剩伤兵的部队保留，等待治疗恢复）；
+## 2. 清理其他部队指向被消灭部队的目标/追随引用；
+## 3. 以“玩家角色是否被关押”同步被俘状态。
+func _on_battle_finished(_battle_id: String, _result: int) -> void:
+	_cleanup_defeated_parties()
+	captivity_manager.sync_player_capture()
+
+
+func _cleanup_defeated_parties() -> void:
+	var destroyed: Dictionary = {}
+	for party: PartyData in party_manager.get_all_parties():
+		if party == null or party.party_id == player_party_id:
+			continue
+		# 仍有成员（包括伤兵）的部队按既有规则继续存在。
+		if not party.member_unit_ids.is_empty():
+			continue
+		destroyed[party.party_id] = true
+	if destroyed.is_empty():
+		return
+
+	for party_id_value: Variant in destroyed:
+		var party_id: String = str(party_id_value)
+		var party := party_manager.get_party(party_id)
+		if party == null:
+			continue
+		var prisoner_ids: Array[String] = party.prisoner_unit_ids.duplicate()
+		for unit_id: String in prisoner_ids:
+			var unit := unit_manager.get_unit(unit_id)
+			# 玩家俘虏由 CaptivityManager 负责获释/重建部队；
+			# 这里只解除归属，绝不删除玩家角色。
+			if unit != null and unit.is_player_character:
+				party_manager.remove_prisoner(party_id, unit_id)
+			else:
+				_release_destroyed_party_prisoner(unit_id)
+		# 整支部队覆灭时，其指挥贵族不再拥有可用部队；
+		# 贵族是否死亡由既有贵族/赎买流程决定，清理本身不改写存活状态。
+		if not party.leader_noble_id.is_empty():
+			var noble := noble_manager.get_noble(party.leader_noble_id)
+			if noble != null and not noble.is_player_lord \
+					and noble.party_id == party.party_id:
+				noble.party_id = ""
+		party_manager.remove_party(party_id)
+
+	_clear_destroyed_party_references(destroyed)
+
+
+func _release_destroyed_party_prisoner(unit_id: String) -> void:
+	var unit := unit_manager.get_unit(unit_id)
+	if unit == null:
+		return
+	unit.clear_prisoner_ownership()
+	if not unit.current_party_id.is_empty():
+		party_manager.remove_member(unit.current_party_id, unit_id)
+	unit_manager.remove_unit(unit_id)
+
+
+## 其他部队不得继续追击/跟随已不存在的部队。
+func _clear_destroyed_party_references(destroyed: Dictionary) -> void:
+	for party: PartyData in party_manager.get_all_parties():
+		if party == null:
+			continue
+		if destroyed.has(party.current_target_id):
+			party.current_target_id = ""
+			party.attack_intent = false
+			if party.current_order == PartyData.OrderType.FOLLOW_PARTY:
+				party.current_order = PartyData.OrderType.NONE
+				party.movement_state = PartyData.MovementState.IDLE
+				party.target_position = party.world_position
+		if destroyed.has(party.focus_party_id):
+			party.focus_party_id = ""
 
 
 ## 旧存档迁移：只给完全没有补给记录的部队补起始物资，避免开局立即全员缺粮。
@@ -377,6 +464,7 @@ func load_from_save_data(save: SaveData) -> bool:
 	ai_manager.player_party_id = player_party_id
 	supply_manager.set_player_party_id(player_party_id)
 	battle_manager.player_party_id = player_party_id
+	captivity_manager.set_player_party_id(player_party_id)
 
 	id_generator.restore_from(save.id_counters)
 	unit_manager.load_from_dict(save.units)
@@ -427,6 +515,9 @@ func load_from_save_data(save: SaveData) -> bool:
 	_backfill_noble_unit_ids()
 	# v8：赎回记录在实体/家族恢复后载入，失效记录不会重新生成事件。
 	lord_ransom_manager.load_from_dict(save.ransoms)
+	# v10：俘虏恢复/逃脱计时与保护期按存档恢复；玩家被俘状态在全部实体
+	# 恢复并校验后再以实际归属为准做一次校正。
+	captivity_manager.load_from_dict(save.captivity, save.world_elapsed_seconds)
 
 	# 旧存档没有贵族数据时，至少恢复玩家贵族身份；不伪造封地归属。
 	var player_noble: NobleData = noble_manager.get_noble(player_lord_id)
@@ -453,7 +544,14 @@ func load_from_save_data(save: SaveData) -> bool:
 		var player_unit: UnitData = get_player_unit()
 		player_unit_id = player_unit.unit_id if player_unit != null else ""
 	adventurer_recruitment_manager.player_party_id = player_party_id
+	mercenary_manager.set_player_party_id(player_party_id)
 	house_manager.refresh_settlement_links()
+
+	# 雇佣兵池在城镇与部队恢复后载入；旧存档没有该字段时只初始化一次，
+	# 已初始化存档不会重复生成或重复发放。
+	mercenary_manager.load_from_dict(save.mercenaries)
+	if not mercenary_manager.is_initialized():
+		mercenary_manager.initialize_world(true)
 
 	# 采邑容量/税收与候选人生成都来自同一经济配置；读档只修正边界，
 	# 不覆盖存档中的储备与刷新计时。
@@ -489,6 +587,8 @@ func load_from_save_data(save: SaveData) -> bool:
 			push_error("[WorldContext] 封地所有权校验失败: %s" % message)
 		return false
 
+	# 俘虏/逃脱状态不信任过期引用：押送部队不存在时自动获释并重建玩家部队。
+	captivity_manager.validate_after_load()
 	return is_valid_world()
 
 
@@ -651,6 +751,7 @@ func register_static_configs() -> bool:
 		success = false
 	fief_recruitment_manager.set_appearance_config(appearance_config)
 	adventurer_recruitment_manager.set_appearance_config(appearance_config)
+	mercenary_manager.set_appearance_config(appearance_config)
 
 	_static_configs_registered = success
 	return success
@@ -684,6 +785,15 @@ func _wire_managers() -> void:
 			)
 			economy_config = SettlementEconomyConfig.new()
 	economy_config.sanitize()
+
+	if recruitment_config == null:
+		recruitment_config = load(RECRUITMENT_CONFIG_PATH) as RecruitmentConfig
+		if recruitment_config == null:
+			push_warning(
+				"无法加载招募配置，使用脚本默认值: %s" % RECRUITMENT_CONFIG_PATH
+			)
+			recruitment_config = RecruitmentConfig.new()
+	recruitment_config.sanitize()
 
 	unit_manager.setup(id_generator)
 	party_manager.setup(unit_manager, id_generator)
@@ -724,6 +834,11 @@ func _wire_managers() -> void:
 		party_manager, unit_manager, player_profile, player_party_id
 	)
 	wounded_healing_manager.setup(party_manager, unit_manager)
+	# 俘虏恢复与玩家逃脱独立于伤兵治疗，只按 WorldTime 推进。
+	captivity_manager.setup(unit_manager, party_manager, world_map_manager)
+	captivity_manager.set_player_party_id(player_party_id)
+	ai_manager.set_captivity_manager(captivity_manager)
+	encounter_manager.set_captivity_manager(captivity_manager)
 	# 赎回流程只登记出售后的等待与请求；实际出售仍由 PrisonerTradeManager 原子完成。
 	lord_ransom_manager.setup(
 		self,
@@ -758,8 +873,20 @@ func _wire_managers() -> void:
 		id_generator,
 		family_registry,
 		economy_config,
-		fief_recruitment_manager
+		fief_recruitment_manager,
+		recruitment_config
 	)
+	mercenary_manager.setup(
+		unit_manager,
+		party_manager,
+		settlement_manager,
+		noble_manager,
+		id_generator,
+		recruitment_config,
+		family_registry,
+		appearance_config
+	)
+	mercenary_manager.set_player_party_id(player_party_id)
 	ai_manager.setup(
 		unit_manager,
 		party_manager,
@@ -786,6 +913,8 @@ func _wire_managers() -> void:
 		adventurer_recruitment_manager,
 		supply_manager,
 		wounded_healing_manager,
-		lord_ransom_manager
+		lord_ransom_manager,
+		mercenary_manager,
+		captivity_manager
 	)
 	event_center.setup(self)

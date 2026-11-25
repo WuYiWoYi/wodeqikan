@@ -233,17 +233,127 @@ func _test_tavern_menu_and_selling() -> void:
 	_check(_settlement_panel.visible, "酒馆内容复用城镇信息面板，不打开第二个窗口")
 	_check(_tavern.is_menu_visible(), "酒馆默认显示菜单")
 
-	# 雇佣兵占位界面。
+	# 雇佣兵招募：酒馆入口只发起意图，打开独立界面；列表来自
+	# MercenaryManager，右侧使用真实 UnitVisual 预览，按钮走统一原子招募。
 	var merc_button := _tavern.find_child(
 		"TavernMercenariesButton", true, false
 	) as Button
-	_check(merc_button != null, "存在查看雇佣兵信息入口")
+	_check(merc_button != null, "存在招募雇佣兵入口")
 	merc_button.pressed.emit()
-	var placeholder := _tavern.find_child(
-		"TavernMercenaryPlaceholder", true, false
-	) as Label
-	_check(placeholder != null and placeholder.visible, "雇佣兵信息占位界面显示")
-	(_tavern.find_child("TavernMercenaryBackButton", true, false) as Button).pressed.emit()
+	var recruit_panel := _map.call("get_mercenary_recruit_panel") as MercenaryRecruitPanel
+	_check(recruit_panel != null and recruit_panel.visible, "雇佣兵招募界面独立显示")
+	_check(not _settlement_panel.visible, "独立招募界面不嵌入城镇面板")
+	_check(not _tavern.visible, "打开独立招募界面时退出嵌入酒馆")
+	if recruit_panel == null:
+		return
+
+	var manager: MercenaryManager = _context.mercenary_manager
+	var stationed: Array[MercenaryData] = manager.get_stationed_mercenaries(
+		_town.settlement_id
+	)
+	var merc_list := recruit_panel.find_child(
+		"MercenaryRecruitList", true, false
+	) as VBoxContainer
+	_check(
+		merc_list != null and merc_list.get_child_count() == stationed.size()
+			and stationed.size() > 0,
+		"独立界面列出全部驻留雇佣兵"
+	)
+	_check(
+		recruit_panel.get_settlement_id() == _town.settlement_id,
+		"独立界面绑定当前城镇"
+	)
+	if merc_list != null and not stationed.is_empty():
+		var mercenary: MercenaryData = stationed[0]
+		_check(
+			recruit_panel.get_selected_mercenary_id()
+				== mercenary.mercenary_id,
+			"默认选中首位雇佣兵"
+		)
+		var entry := merc_list.find_child(
+			"MercenaryRecruitEntry_%s" % mercenary.mercenary_id, true, false
+		) as Button
+		_check(entry != null, "列表条目使用稳定雇佣兵 ID")
+		var preview := recruit_panel.find_child(
+			"PreviewUnitVisual", true, false
+		) as UnitVisual
+		_check(preview != null and preview.unit_data != null, "右侧显示真实单位预览")
+		if preview != null and preview.unit_data != null:
+			var preview_unit := preview.unit_data
+			_check(preview_unit.is_mercenary, "预览单位带雇佣兵身份")
+			_check(
+				preview_unit.appearance
+					== manager.get_mercenary_appearance(mercenary),
+				"预览外观与招募记录一致"
+			)
+			_check(
+				not _context.unit_manager.has_unit(preview_unit.unit_id)
+					and _context.party_manager.get_prisoner_owner_party_id(
+						preview_unit.unit_id
+					).is_empty(),
+				"预览单位不进入仓储/部队，避免重复实体"
+			)
+		for label_name: String in [
+			"MercenaryRecruitName", "MercenaryRecruitType",
+			"MercenaryRecruitTier", "MercenaryRecruitMount",
+			"MercenaryRecruitExp", "MercenaryRecruitPrice",
+			"MercenaryRecruitWage",
+		]:
+			var label := recruit_panel.find_child(label_name, true, false) as Label
+			if label == null or label.text.is_empty():
+				_check(false, "详情字段存在: %s" % label_name)
+		_check(true, "详情展示类型/等级/坐骑/经验/价格/工资")
+
+		var price := manager.get_recruit_price(mercenary)
+		var merc_gold_before: int = _context.player_profile.gold
+		var members_before: int = _player.member_unit_ids.size()
+		var pool_before: int = manager.get_total_pool_count()
+		var recruit_button := recruit_panel.find_child(
+			"MercenaryRecruitButton", true, false
+		) as Button
+		_check(recruit_button != null and not recruit_button.disabled, "存在可点击招募按钮")
+		if recruit_button != null:
+			recruit_button.pressed.emit()
+			_check(
+				_context.player_profile.gold == merc_gold_before - price,
+				"独立界面招募按统一价格扣金币"
+			)
+			_check(
+				_player.member_unit_ids.size() == members_before + 1,
+				"独立界面招募把真实单位加入玩家部队"
+			)
+			_check(
+				manager.get_total_pool_count() == pool_before - 1,
+				"招募后雇佣兵记录从池中移除"
+			)
+			_check(
+				merc_list.find_child(
+					"MercenaryRecruitEntry_%s" % mercenary.mercenary_id,
+					true, false
+				) == null,
+				"被招募的雇佣兵从列表消失"
+			)
+			var feedback := recruit_panel.find_child(
+				"MercenaryRecruitFeedback", true, false
+			) as Label
+			_check(
+				feedback != null and feedback.text.contains("已招募"),
+				"招募后显示结果反馈"
+			)
+
+	var close_button := recruit_panel.find_child(
+		"MercenaryRecruitCloseButton", true, false
+	) as Button
+	_check(close_button != null, "独立招募界面可关闭")
+	if close_button != null:
+		close_button.pressed.emit()
+	_check(not recruit_panel.visible, "关闭后独立招募界面隐藏")
+	_check(_settlement_panel.visible, "关闭后恢复城镇信息面板")
+	_check(not _tavern.visible, "关闭后不重新嵌入酒馆视图")
+
+	# 重新进入酒馆，继续验证出售俘虏流程。
+	tavern_button.pressed.emit()
+	_check(_tavern.visible and _tavern.is_menu_visible(), "可重新进入酒馆菜单")
 
 	# 点击出售俘虏：退出嵌入酒馆层级，打开独立出售界面。
 	var sell_button := _tavern.find_child(

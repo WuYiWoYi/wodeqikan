@@ -59,7 +59,7 @@ func _test_configs(
 		"二级兵种基础属性 20 / 100")
 	_check(veteran.tier == 3 and veteran.base_attack == 25 and veteran.base_max_hp == 180,
 		"三级兵种基础属性 25 / 180")
-	_check(militia.daily_wage == 2 and trained.daily_wage == 5 and veteran.daily_wage == 10,
+	_check(militia.daily_wage == 1 and trained.daily_wage == 3 and veteran.daily_wage == 7,
 		"三个等级工资独立配置")
 	_check(
 		militia.promotion_target_config_id == "infantry_trained"
@@ -81,10 +81,10 @@ func _test_new_game_economy(context: WorldContext) -> void:
 	_check(context.player_profile.get_item_count(MOUNT_ID) == 1, "新游戏背包剩余 1 匹马")
 	_check(
 		context.party_manager.get_total_wage(player.party_id)
-			== WorldInitializer.PLAYER_MILITIA_COUNT * 2
-				+ WorldInitializer.PLAYER_TRAINED_COUNT * 5
-				+ WorldInitializer.PLAYER_ARCHER_MILITIA_COUNT * 2
-				+ WorldInitializer.PLAYER_ARCHER_TRAINED_COUNT * 5,
+			== WorldInitializer.PLAYER_MILITIA_COUNT * 1
+				+ WorldInitializer.PLAYER_TRAINED_COUNT * 3
+				+ WorldInitializer.PLAYER_ARCHER_MILITIA_COUNT * 1
+				+ WorldInitializer.PLAYER_ARCHER_TRAINED_COUNT * 3,
 		"玩家部队每日工资按民兵/职业步兵/弓箭手数量计算"
 	)
 
@@ -104,11 +104,11 @@ func _test_new_game_economy(context: WorldContext) -> void:
 	_check(militia_unit != null and trained_unit != null and hero_unit != null,
 		"玩家部队包含三类成员")
 	if militia_unit != null:
-		_check(militia_unit.wage == 2, "民兵工资来自配置")
+		_check(militia_unit.wage == 1, "民兵工资来自配置")
 		_check(militia_unit.max_hp == 50 and militia_unit.attack == 10,
 			"民兵使用一级基础属性")
 	if trained_unit != null:
-		_check(trained_unit.wage == 5, "职业步兵工资来自配置")
+		_check(trained_unit.wage == 3, "职业步兵工资来自配置")
 		_check(trained_unit.max_hp == 100 and trained_unit.attack == 20,
 			"职业步兵使用二级基础属性")
 	if hero_unit != null:
@@ -178,7 +178,7 @@ func _test_promotion(context: WorldContext) -> void:
 	_check(unit.config_id == "infantry_trained", "晋升后切换到二级兵种配置")
 	_check(unit.level == level_before and unit.exp == exp_before, "晋升保留等级与经验")
 	_check(unit.equipment == equipment_before, "晋升保留装备")
-	_check(unit.wage == 5, "晋升后工资切换为二级工资")
+	_check(unit.wage == 3, "晋升后工资切换为二级工资")
 	_check(unit.max_hp == 115 and unit.attack == 20, "二级 3 级属性按新成长曲线重算")
 	_check(
 		context.player_profile.get_item_count(TOKEN_ID) == tokens_before - 1,
@@ -195,7 +195,7 @@ func _test_promotion(context: WorldContext) -> void:
 		"继续晋升到三级"
 	)
 	_check(unit.config_id == "infantry_veteran", "晋升后切换到三级兵种配置")
-	_check(unit.wage == 10, "晋升后工资切换为三级工资")
+	_check(unit.wage == 7, "晋升后工资切换为三级工资")
 	_check(unit.max_hp == 195 and unit.attack == 25, "三级 3 级属性 195 / 25")
 	_check(
 		context.player_profile.get_item_count(TOKEN_ID) == tokens_left - 1,
@@ -237,7 +237,7 @@ func _test_old_save_wage_migration(context: WorldContext) -> void:
 	_check(legacy.wage == -1, "旧存档缺少工资字段时使用哨兵值")
 	_check(not context.unit_manager.add_unit(legacy).is_empty(), "旧单位注册成功")
 	_check(context.unit_manager.recalculate_stats(legacy.unit_id), "旧单位属性重算成功")
-	_check(legacy.wage == 2, "旧存档工资按当前兵种配置补全")
+	_check(legacy.wage == 1, "旧存档工资按当前兵种配置补全")
 	_check(context.unit_manager.remove_unit(legacy.unit_id), "清理旧单位")
 
 

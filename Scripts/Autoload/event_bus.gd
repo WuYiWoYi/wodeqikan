@@ -13,6 +13,8 @@ signal game_session_started()
 signal game_session_ended()
 
 signal party_position_changed(party_id: String)
+## 部队真正到达大地图移动/跟随目标的事实；旧目标被替换后不会补发。
+signal party_arrived(party_id: String)
 signal party_battle_state_changed(party_id: String, battle_state: int)
 signal settlement_interaction_requested(settlement_id: String)
 ## 玩家实际进入/离开小场景的事实，供世界日志等系统消费。
@@ -50,6 +52,16 @@ signal adventurers_recruited(
 	settlement_id: String,
 	counts: Dictionary,
 	total: int,
+	is_player_recruiter: bool
+)
+
+## 酒馆雇佣兵被玩家或 NPC 招募成功；记录已从可招募池删除。
+signal mercenary_recruited(
+	settlement_id: String,
+	party_id: String,
+	mercenary_id: String,
+	unit_id: String,
+	unit_name: String,
 	is_player_recruiter: bool
 )
 

@@ -25,6 +25,13 @@ var _selected_unit_id: String = ""
 
 var _title_label: Label = null
 var _prisoner_notice_label: Label = null
+## 雇佣兵装备锁定提示；普通士兵不显示。
+var _mercenary_lock_label: Label = null
+var _equipment_management_section: VBoxContainer = null
+var _equipment_rows: VBoxContainer = null
+var _equipment_options: Dictionary = {}
+var _equipment_unequip_buttons: Dictionary = {}
+var _equipment_status_label: Label = null
 var _mount_section: VBoxContainer = null
 var _promotion_section: VBoxContainer = null
 var _recruit_section: VBoxContainer = null
@@ -83,6 +90,13 @@ func show_unit(unit_id: String) -> void:
 	_prisoner_notice_label.visible = prisoner
 	_prisoner_notice_label.text = "俘虏：仅可查看，不可装备、晋升或招募。"
 	_set_management_sections_visible(not prisoner)
+	var equipment_allowed: bool = not prisoner and unit.can_manage_equipment()
+	_equipment_management_section.visible = equipment_allowed
+	_mount_section.visible = equipment_allowed
+	_mercenary_lock_label.visible = not prisoner and not equipment_allowed
+	_mercenary_lock_label.text = "雇佣兵装备与坐骑由契约固定，无法更换。"
+	_equipment_status_label.text = ""
+	_refresh_equipment_management(unit)
 	_mount_status_label.text = ""
 	_promotion_status_label.text = ""
 	_name_label.text = unit.display_name if not unit.display_name.is_empty() else "未命名士兵"
@@ -141,6 +155,14 @@ func clear() -> void:
 		var index: int = EQUIPMENT_SLOT_ORDER.find(slot)
 		var label_text: String = EQUIPMENT_SLOT_LABELS[index] if index >= 0 else slot
 		(_equipment_labels[slot] as Label).text = "%s：无" % label_text
+	_equipment_options.clear()
+	_equipment_unequip_buttons.clear()
+	if _equipment_rows != null:
+		for child: Node in _equipment_rows.get_children():
+			_equipment_rows.remove_child(child)
+			child.queue_free()
+	if _equipment_status_label != null:
+		_equipment_status_label.text = ""
 	if _mount_option != null:
 		_mount_option.clear()
 		_mount_option.add_item("背包中没有马匹")
@@ -162,6 +184,10 @@ func clear() -> void:
 func _set_management_sections_visible(value: bool) -> void:
 	if _mount_section != null:
 		_mount_section.visible = value
+	if _equipment_management_section != null:
+		_equipment_management_section.visible = value
+	if _mercenary_lock_label != null:
+		_mercenary_lock_label.visible = false
 	if _promotion_section != null:
 		_promotion_section.visible = value
 	if _recruit_section != null:
@@ -264,6 +290,28 @@ func _build() -> void:
 		label.name = "DetailEquipment_%s" % slot
 		add_child(label)
 		_equipment_labels[slot] = label
+
+	# 雇佣兵不能换装；提示与普通士兵的装备管理区互斥显示。
+	add_child(HSeparator.new())
+	_mercenary_lock_label = _make_label("", 13)
+	_mercenary_lock_label.name = "DetailMercenaryEquipmentLock"
+	_mercenary_lock_label.modulate = Color(0.95, 0.78, 0.42)
+	_mercenary_lock_label.visible = false
+	add_child(_mercenary_lock_label)
+
+	_equipment_management_section = VBoxContainer.new()
+	_equipment_management_section.name = "DetailEquipmentManagement"
+	_equipment_management_section.add_theme_constant_override("separation", 6)
+	add_child(_equipment_management_section)
+	_equipment_management_section.add_child(_make_label("装备管理", 16))
+	_equipment_rows = VBoxContainer.new()
+	_equipment_rows.name = "DetailEquipmentRows"
+	_equipment_rows.add_theme_constant_override("separation", 6)
+	_equipment_management_section.add_child(_equipment_rows)
+	_equipment_status_label = _make_label("", 12)
+	_equipment_status_label.name = "DetailEquipmentStatus"
+	_equipment_status_label.modulate = Color(1.0, 0.86, 0.55)
+	_equipment_management_section.add_child(_equipment_status_label)
 
 	# 坐骑/晋升/招募区只在普通士兵详情中显示；俘虏仅展示只读信息。
 	_mount_section = VBoxContainer.new()
@@ -582,6 +630,129 @@ func _refresh_equipment(unit: UnitData) -> void:
 			label.text = "%s：%s" % [slot_label, equipment.display_name]
 		else:
 			label.text = "%s：%s（%s）" % [slot_label, equipment.display_name, bonus]
+
+
+## 普通士兵的逐槽位换装；装备来源只读取玩家背包，写入统一经 UnitManager。
+func _refresh_equipment_management(unit: UnitData) -> void:
+	_equipment_options.clear()
+	_equipment_unequip_buttons.clear()
+	for child: Node in _equipment_rows.get_children():
+		_equipment_rows.remove_child(child)
+		child.queue_free()
+	if unit == null or not unit.can_manage_equipment():
+		return
+
+	for index: int in range(EQUIPMENT_SLOT_ORDER.size()):
+		var slot: String = EQUIPMENT_SLOT_ORDER[index]
+		if slot == "MOUNT":
+			continue
+		var row := HBoxContainer.new()
+		row.name = "DetailEquipRow_%s" % slot
+		row.add_theme_constant_override("separation", 6)
+		_equipment_rows.add_child(row)
+
+		var option := OptionButton.new()
+		option.name = "DetailEquipOption_%s" % slot
+		option.custom_minimum_size = Vector2(0.0, 30.0)
+		option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		option.focus_mode = Control.FOCUS_NONE
+		var equipment_ids := _owned_equipment_ids_for_slot(slot)
+		if equipment_ids.is_empty():
+			option.add_item("%s：背包无可用装备" % EQUIPMENT_SLOT_LABELS[index])
+			option.set_item_disabled(0, true)
+		else:
+			for equipment_id: String in equipment_ids:
+				var equipment := _context.unit_manager.get_equipment_config(
+					equipment_id
+				)
+				var display_name: String = equipment.display_name \
+					if equipment != null else equipment_id
+				var count: int = _context.player_profile.get_item_count(equipment_id)
+				var item_index: int = option.item_count
+				option.add_item("%s ×%d" % [display_name, count])
+				option.set_item_metadata(item_index, equipment_id)
+			option.select(0)
+		row.add_child(option)
+		_equipment_options[slot] = option
+
+		var equip_button := _make_slot_button(
+			"更换", "DetailEquipButton_%s" % slot
+		)
+		equip_button.disabled = equipment_ids.is_empty()
+		equip_button.pressed.connect(_on_equip_slot_pressed.bind(slot))
+		row.add_child(equip_button)
+
+		var unequip_button := _make_slot_button(
+			"卸下", "DetailUnequipButton_%s" % slot
+		)
+		unequip_button.disabled = not unit.equipment.has(slot)
+		unequip_button.pressed.connect(_on_unequip_slot_pressed.bind(slot))
+		row.add_child(unequip_button)
+		_equipment_unequip_buttons[slot] = unequip_button
+
+
+func _make_slot_button(text: String, node_name: String) -> Button:
+	var button := Button.new()
+	button.name = node_name
+	button.text = text
+	button.focus_mode = Control.FOCUS_NONE
+	button.custom_minimum_size = Vector2(64.0, 30.0)
+	return button
+
+
+func _owned_equipment_ids_for_slot(slot: String) -> Array[String]:
+	var result: Array[String] = []
+	if _context == null:
+		return result
+	for item_id_value: Variant in _context.player_profile.inventory:
+		var item_id: String = str(item_id_value)
+		if item_id.is_empty() or result.has(item_id):
+			continue
+		if _context.player_profile.get_item_count(item_id) <= 0:
+			continue
+		var equipment := _context.unit_manager.get_equipment_config(item_id)
+		if equipment == null or equipment.slot == EquipmentConfig.Slot.MOUNT:
+			continue
+		if equipment.slot_name() == slot:
+			result.append(item_id)
+	result.sort()
+	return result
+
+
+func _get_selected_equipment_id(slot: String) -> String:
+	var option := _equipment_options.get(slot) as OptionButton
+	if option == null or option.selected < 0:
+		return ""
+	var metadata: Variant = option.get_item_metadata(option.selected)
+	return str(metadata) if metadata is String else ""
+
+
+func _on_equip_slot_pressed(slot: String) -> void:
+	if _selected_unit_id.is_empty():
+		return
+	var equipment_id: String = _get_selected_equipment_id(slot)
+	if equipment_id.is_empty():
+		_equipment_status_label.text = "背包中没有可装备的物品"
+		return
+	if _context.unit_manager.equip_item_from_holder(
+		_selected_unit_id, equipment_id, _context.player_profile
+	):
+		unit_changed.emit()
+		_equipment_status_label.text = "已更换装备"
+	else:
+		_equipment_status_label.text = "无法更换：物品不足或单位状态不允许"
+
+
+func _on_unequip_slot_pressed(slot: String) -> void:
+	if _selected_unit_id.is_empty():
+		return
+	if _context.unit_manager.unequip_slot_to_holder(
+		_selected_unit_id, slot, _context.player_profile
+	):
+		unit_changed.emit()
+		_equipment_status_label.text = "已卸下装备，物品已返回背包"
+	else:
+		_equipment_status_label.text = "无法卸下：该槽位没有装备"
 
 
 func _refresh_recruit_info(unit: UnitData) -> void:

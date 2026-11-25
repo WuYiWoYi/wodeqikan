@@ -1,7 +1,7 @@
 # 我的骑砍 · 开发入口（核心记忆）
 
 > 本文件是每次任务默认读取的**核心记忆**。它只保留项目身份、硬约束、读取规则与文档导航；具体系统规则在 `Docs/Systems/`，易变状态在 `Docs/Development/Current_Status.md`，历史在 `Docs/Archive/` 与 `Docs/04_Change_Log.md`。
-> 最后整理：2026-11-24（五级战斗经验、俘虏价格与领主赎回完成后）。本文件不替代代码；实现是否存在以当前工程为准。
+> 最后整理：2026-11-25（雇佣兵美术/独立招募、战败清理、玩家被俘与逃脱完成后）。本文件不替代代码；实现是否存在以当前工程为准。
 
 ## 1. 项目身份
 
@@ -53,6 +53,8 @@
 | 部队成员、控制类型、编队、部队 UI、遭遇对话 | `Docs/Systems/Party_System.md` |
 | 战斗流程、攻击判定、队形、增援、离屏结算、BattleResult | `Docs/Systems/Combat_System.md` |
 | 伤兵判定/治疗、俘虏分配/出售、酒馆 | `Docs/Systems/Wounded_Prisoner_System.md` |
+| 雇佣兵招募/独立招募 UI、雇佣兵外观、全局雇佣兵池、装备限制、NPC 采购 | `Docs/Systems/Mercenary_System.md` |
+| 玩家被俘、俘虏恢复、逃脱与保护期、被俘 UI | `Docs/Systems/Captivity_System.md`、`World_Map_System.md` |
 | NPC 领主出售、赎回等待、赎金事件、右侧事件框 | `Docs/Systems/Lord_Ransom_System.md`、`Wounded_Prisoner_System.md`、`World_Map_System.md` |
 | 大地图移动、视野、标记、跟随、相机、地点交互 | `Docs/Systems/World_Map_System.md` |
 | AI 决策、路线、追击、支援、NPC 补给采购 | `Docs/Systems/AI_System.md` |

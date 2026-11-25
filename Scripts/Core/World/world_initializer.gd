@@ -39,7 +39,7 @@ const PLAYER_START_POSITION: Vector2 = Vector2(760.0, 620.0)
 const PLAYER_MOVE_SPEED: float = 150.0
 const PLAYER_SIGHT_RANGE: float = 300.0
 ## 新游戏初始金币；读档完全以存档中的 PlayerProfile 为准。
-const PLAYER_STARTING_GOLD: int = 500
+const PLAYER_STARTING_GOLD: int = 10000
 
 ## 阶段 4 优化的 NPC 速度关系：治安队 > 强盗 > 商队。
 ## 旧存档通过 PartyData.movement_speed 保留原速度，不会在这里被重置。
@@ -197,6 +197,8 @@ static func create_new_world(context: WorldContext) -> bool:
 	context.ai_manager.player_party_id = player_party.party_id
 	context.battle_manager.player_party_id = player_party.party_id
 	context.adventurer_recruitment_manager.player_party_id = player_party.party_id
+	context.mercenary_manager.set_player_party_id(player_party.party_id)
+	context.captivity_manager.set_player_party_id(player_party.party_id)
 
 	# 玩家是家族中的一名骑士贵族，与玩家角色 UnitData 分离；
 	# 封地所有权只认 noble_id/owner_house_id，不依赖玩家角色单位。
@@ -619,6 +621,8 @@ static func create_new_world(context: WorldContext) -> bool:
 	if not context.market_manager.ensure_markets():
 		push_error("城镇市场初始化失败")
 		return false
+	# 雇佣兵池在所有城镇与酒馆归属建立后首次生成；读档不经过这里。
+	context.mercenary_manager.initialize_world(true)
 
 	return context.is_valid_world()
 

@@ -52,6 +52,7 @@ GameManager (Autoload)
     ├── MarketManager（村庄/城镇市场与交易）       │
     ├── SupplyManager（每日补给结算）              │
     ├── WoundedHealingManager（伤兵小时治疗）      │
+    ├── CaptivityManager（俘虏恢复/玩家被俘逃脱）  │
     ├── PrisonerTradeManager（酒馆出售俘虏）       │
     ├── PartyManager                              │
     ├── SettlementManager                         │
@@ -68,6 +69,7 @@ GameManager (Autoload)
     ├── WorldMapManager（移动/跟随）               │
     ├── EncounterManager（统一遭遇/中途参战）      │
     ├── WorldLogManager（世界事件日志）             │
+    ├── MercenaryManager（全局雇佣兵池）            │
     ├── AIManager                                 │
     ├── BattleManager                             │
     ├── DialogueManager                           │
@@ -114,6 +116,7 @@ GameManager (Autoload)
 | `MarketManager` | 村庄/城镇商品注册、独立库存、马匹实例交易、交易校验与原子结算、市场库存序列化 | 持有玩家背包/金币、操作 UI、决定是否采购（AI 决策） |
 | `SupplyManager` | 按 `TimeManager` 日边界统一结算玩家/NPC 面包与草料、剩余天数与采购需求查询 | 市场交易、价格计算、路线决策、UI |
 | `WoundedHealingManager` | 按 `WorldTime` 整小时生成治疗点、按成员顺序治疗、恢复伤兵状态与仅伤兵部队 | 战斗内 HP、补给、工资、UI |
+| `CaptivityManager` | 玩家被俘状态、押送部队、俘虏按小时恢复、满血逃脱判定、逃脱落点与保护期 | 战斗结算、部队成员关系写入、UI |
 | `PrisonerTradeManager` | 城镇酒馆出售俘虏的校验、集中定价、原子结算与售出状态写入 | 直接修改 Unit 状态、UI 预览逻辑 |
 | `PartyManager` | `PartyData` 增删查、成员关系维护、工资汇总 | 部队 AI |
 | `SettlementManager` | `SettlementData` 增删查、场景路径与序列化 | 地点图标、交互面板 |
@@ -123,7 +126,8 @@ GameManager (Autoload)
 | `KingdomManager` | `KingdomData` 增删查、统治家族/国王/附庸、敌对关系、战争传播 | 外交 UI、战役指挥 |
 | `FactionManager` | 阵营与政治身份的统一关系查询（敌对/友好/中立） | 修改家族/王国数据 |
 | `FiefRecruitmentManager` | 封地归属校验、采邑储备/补充、成组征召、资源成本、税收缓存 | UI、场景节点、世界日志 |
-| `AdventurerRecruitmentManager` | 村庄候选人池、刷新、1 金币招募、离开清理 | UI、场景节点、AI |
+| `AdventurerRecruitmentManager` | 村庄候选人池、刷新、按 tier 定价招募、离开清理 | UI、场景节点、AI |
+| `MercenaryManager` | 全局雇佣兵池、增长/流转/酒馆分配、玩家与 NPC 原子招募、雇佣兵身份写入 | UI、场景节点、战斗结算 |
 | `SettlementEconomyConfig` | 采邑/税收/候选人参数（只读） | 单个地点运行时状态 |
 | `FamilyRegistry` | `FamilyConfig` 只读注册与查询（旗帜/罩袍/缨饰） | 外交、成员关系、战斗；家族不进入存档 |
 | `AppearanceConfig` | 士兵外观随机池（等级头盔、罩袍概率） | 运行时单位状态；选择结果写入 `UnitData.appearance` |
@@ -173,6 +177,8 @@ Manager → EventBus（只发事实）
 │           ├── AdventurerRecruitmentManager.tick（候选人刷新）
 │           ├── SupplyManager.update_daily（跨日时结算补给）
 │           ├── WoundedHealingManager.tick（整小时顺序治疗）
+│           ├── CaptivityManager.on_world_tick（俘虏恢复/玩家逃脱）
+│           ├── MercenaryManager.tick（池增长/流转/NPC 招募）
 │           ├── EncounterManager 遭遇检测 / 中途参战
 │           └── AIManager.tick（按内部分频；待处理遭遇/交互时跳过）
 │
@@ -208,7 +214,7 @@ Manager → EventBus（只发事实）
 | `SettlementData.scene_path` | `WorldInitializer` / 存档恢复 | 场景只读取，不修改地点数据 |
 | `PartyData.world_position`、`target_position`、移动状态 | `WorldMapManager` | 其他系统只读 |
 | `PartyData.member_unit_ids` | `PartyManager` | 与 `UnitData.current_party_id` 双向一致 |
-| `PartyData.battle_state` | `BattleManager` | 锁定/解锁；全员阵亡→DISABLED |
+| `PartyData.battle_state` | `BattleManager`（战斗）、`CaptivityManager`（被俘/逃脱） | 锁定/解锁；全员阵亡→DISABLED；被俘玩家部队禁用、逃脱后恢复 |
 | `PartyData.control_type` / `party_kind` | `WorldInitializer` / 存档恢复（`PartyManager.apply_runtime_defaults()`） | 运行时只读；AI 调度只看 `control_type`，表现与配置按 `party_kind` 取 |
 | `PartyData.ai_type` / `ai_route_settlement_ids` | `WorldInitializer` | 运行时只读，不靠部队名称判断行为 |
 | `PartyData.ai_route_index` | `AIManager` | 到达路线点后推进下一步索引 |
@@ -217,6 +223,10 @@ Manager → EventBus（只发事实）
 | `SettlementData.owner_lord_id` | `WorldInitializer` / 存档恢复 / 未来的领地系统 | UI 与征召只读 |
 | `SettlementData` 采邑储备/计时、人口/繁荣度、税收缓存 | `FiefRecruitmentManager` | 征召与 `WorldSimulation` 调用；UI 只读 |
 | `SettlementData.adventurer_candidates` / 刷新计时 | `AdventurerRecruitmentManager` | 村庄表现只读；离开时清理 |
+| 全局雇佣兵池 `MercenaryData`、池计时 | `MercenaryManager` | 酒馆 UI、NPC AI 只读；招募是唯一移除入口 |
+| `UnitData.is_mercenary` | `MercenaryManager` | `UnitManager` 据此拒绝装备写入；UI 只读 |
+| `MercenaryData.appearance` | `MercenaryManager` | 酒馆预览与招募单位只读复制，不重新随机 |
+| 玩家被俘标记、押送部队、恢复/逃脱计时、保护期 | `CaptivityManager` | 大地图 UI、AI/遭遇只读查询；俘虏归属仍以 `PartyManager` 为权威 |
 | 封地征召/候选人招募权限 | `FiefRecruitmentManager` / `AdventurerRecruitmentManager` | 场景与 UI 只调用接口 |
 | `SettlementData` 驻军 | `SettlementManager` / 未来的战斗系统 | 地点交互只读 |
 | 世界时间、倍率 | `TimeManager` | 其他系统只能请求 |
@@ -326,6 +336,7 @@ Continue / Load Game
 | `game_session_started` | 无 | `GameManager` | 音频、统计、场景 |
 | `game_session_ended` | 无 | `GameManager` | 清理方 |
 | `party_position_changed` | `party_id` | `WorldMapManager` | 大地图图标 |
+| `party_arrived` | `party_id` | `WorldMapManager` | 大地图（只对玩家部队触发到达暂停） |
 | `party_battle_state_changed` | `party_id`, `battle_state` | `BattleManager` | 大地图图标、UI |
 | `settlement_interaction_requested` | `settlement_id` | 大地图输入/交互 | 地点面板 |
 | `settlement_entered` | `settlement_id`, `party_id` | `WorldMap` | 世界日志 |
@@ -344,6 +355,7 @@ Continue / Load Game
 | `unit_died` | `unit_id`, `party_id` | `BattleManager` / `UnitManager` | UI、统计 |
 | `party_supply_changed` | `party_id`, `is_food_low`, `is_fodder_low` | `SupplyManager` | 大地图 UI、提示 |
 | `npc_supply_purchased` | `party_id`, `bread_count`, `fodder_count` | `AIManager`（经 `MarketManager` 成功后） | 大地图部队图标浮字 |
+| `mercenary_recruited` | `settlement_id`, `party_id`, `mercenary_id`, `unit_id`, `unit_name`, `is_player_recruiter` | `MercenaryManager` | 预留事实通知；当前无订阅者（酒馆直接刷新列表） |
 
 规则：
 

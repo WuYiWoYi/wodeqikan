@@ -206,7 +206,7 @@ unit.prisoner_owner_party_id == party.party_id
 
 | 项 | 状态 |
 |---|---|
-| 战斗负伤判定 | 已实现（按 tier 概率，玩家除外） |
+| 战斗负伤判定 | 已实现（普通单位按 tier 概率；玩家侧战败时角色进入俘虏池） |
 | 伤兵身份/数据保留 | 已实现 |
 | WorldTime 顺序治疗 | 已实现（溢出、跨小时、暂停、1x/2x） |
 | 伤兵存档与续算 | 已实现（v7） |
@@ -215,9 +215,11 @@ unit.prisoner_owner_party_id == party.party_id
 | 城镇酒馆出售 | 已实现（城镇限定、原子结算） |
 | 兵种 tier 定价 | 已实现：5 / 20 / 60 |
 | NPC 领主出售 | 已实现：统一 100 金币并启动赎回等待 |
-| 雇佣兵信息 | 占位 |
+| 雇佣兵信息 | 已实现：真实酒馆招募与雇佣兵身份 |
+| 俘虏恢复 | 已实现：`CaptivityManager` 按游戏小时独立治疗，不占伤兵名额 |
+| 玩家被俘/逃脱 | 已实现：押送、满血逃脱、2 小时保护 |
 | 药物技能/治疗物品 | 未实现（预留配置） |
-| 俘虏容量/逃跑/守卫/招募 | 未实现 |
+| 俘虏容量/守卫/普通俘虏逃跑/直接招募 | 未实现 |
 | 装备/状态/经验定价 | 明确未实现 |
 
 ## 10. 相关文档
@@ -226,6 +228,7 @@ unit.prisoner_owner_party_id == party.party_id
 - [Party_System.md](Party_System.md)：俘虏列表与归属 API。
 - [Combat_System.md](Combat_System.md)：结算顺序与负伤判定。
 - [Settlement_System.md](Settlement_System.md)：城镇酒馆入口。
-- [Save_System.md](Save_System.md)：Schema v8 字段与迁移。
+- [Captivity_System.md](Captivity_System.md)：俘虏恢复、玩家被俘与逃脱。
+- [Save_System.md](Save_System.md)：伤兵/俘虏字段与当前 Schema v10 迁移。
 - [Lord_Ransom_System.md](Lord_Ransom_System.md)：NPC 领主出售后的赎回流程。
 - [Time_System.md](Time_System.md)：WorldTime 与游戏小时。

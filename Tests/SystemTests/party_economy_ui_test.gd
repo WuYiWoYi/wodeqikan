@@ -64,8 +64,8 @@ func _run() -> void:
 func _test_overview() -> void:
 	var gold := _panel.find_child("PartyPanelGoldLabel", true, false) as Label
 	var wage := _panel.find_child("PartyPanelWageLabel", true, false) as Label
-	_check(gold != null and gold.text.contains("0"), "部队面板显示金币")
-	_check(wage != null and wage.text.contains("49"), "部队面板显示每日工资总额")
+	_check(gold != null and gold.text.contains("10000"), "部队面板显示金币")
+	_check(wage != null and wage.text.contains("28"), "部队面板显示每日工资总额")
 
 
 func _test_mount_controls() -> void:
@@ -139,7 +139,7 @@ func _test_promotion_ui() -> void:
 		"晋升消耗 1 个凭证"
 	)
 	_check(tier_label.text.contains("二级"), "晋升后详情显示二级兵种")
-	_check(militia.wage == 5, "晋升后工资更新为二级工资")
+	_check(militia.wage == 3, "晋升后工资更新为二级工资")
 
 	button.pressed.emit()
 	await get_tree().process_frame
@@ -152,7 +152,7 @@ func _test_promotion_ui() -> void:
 	), "最高等级不能继续晋升")
 
 	var wage := _panel.find_child("PartyPanelWageLabel", true, false) as Label
-	_check(wage != null and wage.text.contains("57"), "工资总额随晋升同步更新")
+	_check(wage != null and wage.text.contains("34"), "工资总额随晋升同步更新")
 
 
 func _find_member_unit(config_id: String, mounted: bool) -> UnitData:
