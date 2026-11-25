@@ -2,7 +2,7 @@
 
 **场景：** `Scenes/Village/village.tscn`
 **控制器：** `Scripts/UI/Village/village_scene.gd`
-**状态：** 进入/离开、玩家表现、村庄头人、数据驱动对话、越界倒计时、冒险者候选人、采邑对话入口与共享日志面板已实现；商店、任务、城镇/城堡小场景未实现
+**状态：** 进入/离开、玩家表现、村庄头人、数据驱动对话、越界倒计时、普通/贵族冒险者候选人、采邑对话入口与共享日志面板已实现；商店、任务、城镇/城堡小场景未实现
 
 ---
 
@@ -110,7 +110,9 @@
 - 点击后打开底部对话，选项 action 为 `recruit_adventurer`；显示候选人姓名与 1 金币费用。
 - 招募成功后关闭对话、刷新“已招募”标签；已招募候选人在玩家离开村庄前仍保留。
 - 已招募候选人再次对话不再提供招募选项；离开村庄时清理候选人记录，真实单位保留。
-- 候选 NPC 只是表现，不是 `UnitData`，不进入 UnitManager / PartyManager。
+- 候选 NPC 是表现节点，不进入 UnitManager / PartyManager；候选人自身保存独立 Unit 身份快照，但招募前不属于任何部队。
+- 贵族冒险者使用单独的表现节点：人物按步行显示，战马是独立 `HorseVisual`，位于人物左侧且不重叠；表现层不修改候选人快照或真实单位的骑乘数据。贵族不进入普通候选人数量接口。
+- 贵族对话仅对当前村庄拥有者提供招募选项；其他玩家可查看并看到“只有村庄拥有者可以招募”。
 - 详细数据与刷新规则见 [Adventurer_Recruitment_System.md](Adventurer_Recruitment_System.md)。
 
 ## 6. 对话
@@ -170,6 +172,8 @@
 | `get_candidate_count()` | 当前候选 NPC 表现数量 |
 | `get_candidate_visual(candidate_id)` | 查询候选人表现节点 |
 | `get_candidate_position(candidate_id)` | 查询候选人生成位置 |
+| `get_noble_candidate_visual()` / `get_noble_mount_visual()` | 查询贵族人物与独立战马表现节点 |
+| `get_noble_candidate_position()` | 查询贵族人物位置 |
 | `try_interact_with_candidate(candidate_id)` | 按距离规则尝试与候选人对话 |
 | `get_world_log_panel()` | 查询村庄共享日志面板 |
 | `get_camera_rig()` / `is_camera_free_mode()` | 检查摄像机跟随/自由状态 |

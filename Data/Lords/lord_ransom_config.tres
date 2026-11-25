@@ -7,5 +7,7 @@ script = ExtResource("1_lordransom")
 enabled = true
 wait_hours_min = 12
 wait_hours_max = 48
+captive_wait_hours_min = 3
+captive_wait_hours_max = 12
 ransom_gold_min = 150
 ransom_gold_max = 400

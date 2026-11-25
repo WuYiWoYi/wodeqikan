@@ -10,3 +10,4 @@ tier3_helmet_texture_paths = Array[String](["res://art/正式人物美术/头盔
 tier1_primary_tabard_chance = 0.2
 tier2_primary_tabard_chance = 0.5
 tier3_primary_tabard_chance = 1.0
+king_helmet_texture_path = "res://art/正式人物美术/头盔美术/头盔_特殊_国王盔.png"

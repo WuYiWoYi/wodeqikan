@@ -3,7 +3,7 @@
 **所属层：** 玩法逻辑 / 表现
 **核心脚本：** `Scripts/Systems/WorldMap/world_map_manager.gd`、`Scripts/UI/WorldMap/world_map.gd`
 **场景：** `Scenes/WorldMap/world_map.tscn`
-**状态：** 基础移动、NPC 自主商队/巡逻/强盗/治安队、统一 Party 数据、恢复原尺寸的圆形部队标记、放大的村庄圆形标记与位于上方的固定屏幕名称、部队跟随、视野查询、地点交互与村庄入口、底部 NPC 遭遇对话（领袖头像/对白/动态选项）、遭遇原因与敌对追击禁离开、玩家追击接触、追逐焦点保护、人数图标与悬浮信息、日期/时间段 UI、按战斗 ID 独立的多战斗标记与多方战斗汇总、世界日志面板、封地信息与采邑征召入口、部队浮动提示、5000×3000 地图与城镇图标、百科入口、阶段 9 地点区域化布局与部队内部旗帜放大、阶段 13 地点家族旗帜与停留部队旗帜条、统一最终移动速度显示、玩家移动目标标记与动态虚线、右侧纵向事件框与可操作事件详情弹窗已实现
+**状态：** 基础移动、NPC 自主商队/巡逻/强盗/治安队、统一 Party 数据、恢复原尺寸的圆形部队标记、放大的村庄圆形标记与位于上方的固定屏幕名称、部队跟随、视野查询、地点交互与村庄入口、底部 NPC 遭遇对话（领袖头像/对白/动态选项）、遭遇原因与敌对追击禁离开、玩家追击接触、追逐焦点保护、人数图标与悬浮信息、日期/时间段 UI、按战斗 ID 独立的多战斗标记与多方战斗汇总、世界日志面板、封地信息与采邑征召入口、部队浮动提示、5000×3000 地图与城镇图标、百科入口、阶段 9 地点区域化布局与部队内部旗帜放大、阶段 13 地点家族旗帜与停留部队旗帜条、统一最终移动速度显示、玩家移动目标标记与动态虚线、右侧纵向事件框与可操作事件详情弹窗、家族入口与家族面板、冒险者招募浮动提示已实现
 
 ---
 
@@ -270,7 +270,8 @@ WorldSimulation 更新 PartyData.world_position
 - 点击按钮调用 `FiefRecruitmentManager.recruit_group(settlement_id, player_lord_id)`；UI 不计算编制、成本或周期。
 - 成功后 `EventBus.fief_recruited` 触发玩家部队图标 `show_floating_text("招募了N组采邑")`，并刷新面板。
 - 非自有村庄隐藏按钮，不显示不可用入口。
-- 详细规则见 [Fief_Recruitment_System.md](Fief_Recruitment_System.md)。
+- 玩家或 NPC 成功招募冒险者时，`EventBus.adventurers_recruited` 复用同一 `PartyIcon.show_floating_text()` 显示“招募了 N 个兵种”；文本由实际兵种与数量生成，只显示成功结果。
+- 详细规则见 [Fief_Recruitment_System.md](Fief_Recruitment_System.md) 与 [Adventurer_Recruitment_System.md](Adventurer_Recruitment_System.md)。
 
 ## 6. 视野
 
@@ -468,7 +469,8 @@ WorldSimulation 更新 PartyData.world_position
 | 左下角世界日志 | 已实现（`WorldLogManager` + 滚动面板，与村庄共享） |
 | 地点封地信息 | 已实现（领主/家族/人口/繁荣度/税收/采邑储备） |
 | 采邑征召入口 | 已实现（仅玩家自有村庄；调用统一管理器） |
-| 部队上方浮动提示 | 已实现（`PartyIcon.show_floating_text`，成功后显示“招募了N组采邑”） |
+| 部队上方浮动提示 | 已实现（`PartyIcon.show_floating_text`，成功后显示“招募了N组采邑”或“招募了N个兵种”） |
+| 家族入口与面板 | 已实现（顶栏 `FamilyButton`；部队/封地实时只读，点击封地定位） |
 | 中立/无关部队不自动弹窗 | 已实现（只对主动点击目标打开普通对话） |
 | AI 主动追击才自动遭遇 | 已实现（实际追击关系 + 敌对判定 + 单次触发） |
 
@@ -693,11 +695,13 @@ WorldSimulation 更新 PartyData.world_position
 - 旗帜缩放、圆形遮罩与布局尺寸基于裁切后的有效区域计算；`map_flag_circle.gdshader` 的 `uv_aspect` 按有效宽高比设置，保证圆形徽章不变形、不丢边缘像素。
 - 裁切结果按资源路径缓存；同一贴图只在首次使用时计算一次。
 
-### 16.4 城镇酒馆内嵌地点面板（阶段 13 后续）
+### 16.4 城镇酒馆与独立出售界面（阶段 13 后续）
 
-- 酒馆内容嵌入原 `SettlementPanel` 的 `SettlementTavernHost`，切换时只改变 `SettlementInfoView` 与酒馆内容的可见性；不创建第二个弹窗，窗口位置、尺寸与 `ui_panel` 暂停原因保持不变。
-- `TavernPanel` 只实例化一次，打开时复用同一实例与业务数据；离开酒馆后由 `closed` 信号切回城镇信息并刷新金币/背包显示。
-- 关闭地点、进入村庄或切换地点时调用 `TavernPanel.reset()` 清理出售预览与选中状态；`reset()` 不广播 `closed`，避免收尾阶段误切视图。
+- 酒馆菜单嵌入原 `SettlementPanel` 的 `SettlementTavernHost`，切换时只改变 `SettlementInfoView` 与酒馆内容的可见性；窗口位置、尺寸与 `ui_panel` 暂停原因保持不变。
+- 嵌入的 `TavernPanel` 只负责菜单与雇佣兵占位；点击“出售俘虏”只发出 `sell_requested`，不在城镇面板内部展开出售视图。
+- `WorldMap` 收到请求后隐藏城镇面板，打开独立的 `PrisonerSalePanel`（`TavernPanel` 的独立窗口 + 遮罩，`open_sale()` 直接进入出售视图）。
+- 独立界面复用同一套俘虏列表、价格和 `PrisonerTradeManager` 结算；关闭后恢复城镇信息面板并刷新金币/背包显示，世界保持暂停。
+- 关闭地点、进入村庄或切换地点时调用两个面板的 `reset()` 清理出售预览与选中状态；`reset()` 不广播 `closed`，避免收尾阶段误切视图。
 
 ## 17. 统一最终移动速度显示（阶段 13）
 
@@ -713,21 +717,27 @@ WorldSimulation 更新 PartyData.world_position
 
 - 顶栏内容分为 `TopBarLeft`、`TopBarCenter`、`TopBarRight` 三个锚定区域。
 - `WorldTimeLabel` 位于 `TopBarCenter` 并保持屏幕水平居中；左右区域新增内容不会推离中心。
-- 左侧显示 `MoneyLabel`（金币）与 `PartySpeedLabel`（部队移速），右侧保留暂停/1x/2x/事件/部队/背包/百科/保存/主菜单。
+- 左侧显示三个“图标 + 数值”条目：`MoneyLabel`（金币）、`PartySpeedLabel`（部队移速）、`PartySizeLabel`（部队人数）；右侧保留暂停/1x/2x/事件/部队/家族/背包/百科/保存/主菜单。
+- 每个条目由 `<标签名>Entry` 容器、`<标签名>Icon` 与 `<标签名>` 数值标签组成，图标统一 20×20、字号 15、条目间距 12、图标与数值间距 4。
+- 数值不再带“金币：/部队移速：/部队人数：”文字前缀，只显示数量。
 - 顶栏入口使用紧凑尺寸（52×30、字号 13），在 1280 宽度下不与中间时间区域重叠。
 - 视口宽度小于 1400 时，居中时间文本降到字号 11；时间与倍率文本保持完整。视口尺寸变化通过 `size_changed` 立即重排。
 
-### 18.2 金币与移速实时显示
+### 18.2 金币、移速与部队人数实时显示
 
-- 金币每帧读取 `PlayerProfile.gold`，显示为 `金币：<值>`；购买、征召、工资与税收变化后下一帧更新。
-- 移速每帧调用 `WorldMapManager.get_effective_movement_speed(party)`，显示为 `部队移速：%.1f`，与其他悬浮/移动结算共用同一入口。
+- 金币每帧读取 `PlayerProfile.gold`；购买、征召、工资与税收变化后下一帧更新。
+- 移速每帧调用 `WorldMapManager.get_effective_movement_speed(party)`，与其他悬浮/移动结算共用同一入口。
+- 部队人数每帧统计玩家部队成员：`可战斗`（`UnitData.is_alive()`）+ `伤员`（`UnitData.is_wounded()`）；永久死亡与俘虏不计入。
+- 使用图标：`UI_金币.png`、`UI_移速.png`、`UI_人数.png`，路径集中在 `world_map.gd` 顶部常量。
 
 ### 18.3 悬浮提示与 ALT 明细
 
+- 悬浮事件挂在每个 `<标签名>Entry` 容器上，图标与数值子节点忽略鼠标；移入图标或数值任意位置都显示同一提示，移出条目关闭。
 - 悬浮金币简述显示 `预计每日收入：<带符号净额>`；数据来自 `WorldContext.get_daily_balance_preview()`。
 - `get_daily_balance_preview()` 复用现有缓存：`PartyManager.get_total_wage()` 与玩家封地 `SettlementData.tax_income_per_day`，不另写经济公式。
 - 按住 ALT 时切换为明细：`每日收支`、`总计`、逐项 `标签 + 带符号金额`；无项目时显示空状态。
 - 悬浮移速简述显示 `当前部队移速：%.1f`；ALT 明细来自 `WorldMapManager.get_movement_speed_breakdown(party)`，包含基础移速、大地图移动系数与最终移速，最终值复用实际有效移速。
+- 悬浮部队人数显示标题 `部队`，随后为 `可战斗人数`、`伤员`、`俘虏`；数据分别来自成员真实状态与 `PartyData.prisoner_unit_ids`，互不重复统计。
 - ALT 松开立即恢复简述；鼠标移出关闭提示。ALT 处理集中在 `world_map._input()`，与地点悬浮 Alt 共用 `set_alt_detail_active()`。
 
 ### 18.4 主界面事件中心
@@ -745,7 +755,7 @@ WorldSimulation 更新 PartyData.world_position
 
 ### 18.5 建筑信息面板打开时的 UI 权限
 
-- 建筑信息面板（地点面板）打开时，仍可使用百科、部队、背包、事件中心等普通功能入口。
+- 建筑信息面板（地点面板）打开时，仍可使用百科、部队、家族、背包、事件中心等普通功能入口。
 - 这些入口使用 `_has_open_modal(true)` 判断，忽略地点面板自身的阻塞；其他覆盖层之间仍互相阻塞。
 - 世界时间控制使用 `_has_open_modal(false)`：地点面板或任意覆盖层打开时，暂停/1x/2x 按钮与快捷键均不可用。
 - 关闭百科/部队/背包/事件后，地点面板保持打开、世界保持暂停、时间按钮保持禁用；离开地点后按钮恢复可用。
@@ -754,10 +764,26 @@ WorldSimulation 更新 PartyData.world_position
 ### 18.6 右侧纵向事件框与详情弹窗（阶段 13 后续）
 
 - `EventFeed` 固定在大地图右侧（宽 280、上偏移 60、最大高度 430），纵向可滚动。
-- 只展示 `EventCenter.get_actionable_events()`；当前可操作事件为家族赎回请求，后续类型可复用同一入口。
-- 有事件时显示“待处理事件”、数量与条目摘要（`[赎回] 标题 / 领主 · 家族 · 赎金`）；没有可操作事件时整体隐藏，不占地图空间。
+- 只展示 `EventCenter.get_actionable_events()`；当前可操作事件为家族赎回/赎买请求，后续类型可复用同一入口。
+- 有事件时显示“待处理事件”、数量与条目摘要（`[赎回]` 或 `[赎买]` + 标题 / 领主 · 家族 · 赎金）；没有可操作事件时整体隐藏，不占地图空间。
 - 事件框出现在顶栏下方，避开右侧顶栏按钮与地点面板；显示与滚动不暂停世界时间。
 - 点击条目发出 `event_selected(event_id)`，由 `WorldMap` 打开 `EventDetailDialog`；事件框本身不结算规则。
-- 详情弹窗显示标题、领主、家族、赎金与正文，提供“取消”和“接受赎金”；取消只关闭弹窗。
-- 弹窗打开时压入暂停原因并禁用时间控制；每帧重新读取事件中心，事件失效时立即关闭，事件框同一帧刷新。
-- 弹窗与事件框都只读取当前世界状态，不缓存创建时的事件副本。
+- `EventReminder` 是右侧居中的小型提醒，只显示“有新的事件待处理（N）”：
+  - 可见性与数量来自同一个 `EventCenter.get_actionable_events()`；
+  - 有事件时持续显示，玩家忽略时不会消失，也不暂停世界；
+  - 点击时唯一事件直接打开详情，多条事件打开事件中心；
+  - 不创建第二套事件数据，不重复触发提醒。
+- 详情弹窗显示标题、领主、家族、赎金与正文；出售赎回提供“取消/接受赎金”，关押期赎买提供“拒绝/接受赎金”。
+- “取消”只关闭弹窗；“拒绝”调用 `LordRansomManager.reject_captive_ransom()` 结束当前事件。
+- 弹窗打开时压入暂停原因并禁用时间控制；每帧重新读取事件中心，事件失效时立即关闭，事件框与提醒同一帧刷新。
+- 弹窗、事件框与提醒都只读取当前世界状态，不缓存创建时的事件副本。
+
+### 18.7 家族入口与家族面板
+
+- 顶栏 `FamilyButton` 打开 `FamilyOverlay`（`FamilyPanel`），与事件中心一样是屏幕空间覆盖层。
+- 打开时压入 `GameManager.PAUSE_REASON_UI_PANEL` 并禁用时间控制；关闭或点击封地后弹出同一暂停原因，恢复原时间倍率，不修改时间逻辑。
+- 面板标题显示玩家家族名；没有家族时显示“暂无家族”与空状态。
+- 部队页（默认）：每次刷新从 `HouseManager.get_house_nobles()` 读取家族存活/死亡贵族，排除玩家本人；状态按实时单位与部队数据推导为正常/被俘/战斗中/已阵亡；被俘或无部队时显示“暂无部队”，不展示过期部队信息。
+- 封地页：按村庄/城镇/城堡分组，数据来自 `SettlementData.owner_house_id` 与家族成员的 `owner_noble_id`；不包含其他家族或盟友的封地，所有权变更后下一帧刷新。
+- 点击封地条目调用 `focus_settlement_on_map()`：进入自由镜头并对准该地点，同时关闭面板；不修改地点数据。
+- 面板只读实时实体状态，不在 UI 内缓存成员或封地列表；详细字段来源见 [Political_Hierarchy_System.md](Political_Hierarchy_System.md)。

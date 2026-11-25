@@ -144,7 +144,9 @@ func _add_event_button(event: Dictionary) -> void:
 	var lord_name: String = str(event.get("lord_name", "领主"))
 	var house_name: String = str(event.get("house_name", "家族"))
 	var gold: int = int(event.get("gold", 0))
-	button.text = "[赎回] %s\n%s · %s · %d 金币" % [
+	var tag: String = str(event.get("tag", event.get("type_text", "赎回")))
+	button.text = "[%s] %s\n%s · %s · %d 金币" % [
+		tag,
 		str(event.get("title", "家族赎回请求")),
 		lord_name,
 		house_name,

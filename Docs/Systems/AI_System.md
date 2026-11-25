@@ -287,14 +287,16 @@ Idle
 `AIManager._tick_lord_strategic()` 对每个非玩家、存活的领主：
 
 1. 取领主 `party_id` 对应的部队；无效或不可用则跳过。
-2. 部队人数低于 `SettlementEconomyConfig.ai_lord_recruit_threshold`（默认 12）时，查找最近的、`owner_lord_id` 为自己的、采邑储备 > 0 的村庄。
-3. 设置 `LordData.current_state = "RECRUITING"` 与 `current_target_settlement_id`，让部队移动到该村。
+2. 部队人数低于 `SettlementEconomyConfig.ai_lord_recruit_threshold`（默认 12）时，优先查找最近的、`owner_lord_id` 为自己的、采邑储备 > 0 的村庄。
+3. 设置 `LordData.current_state = "RECRUITING"`、`current_goal = "FIEF_RECRUIT"` 与 `current_target_settlement_id`，让部队移动到该村。
 4. 抵达后调用 `FiefRecruitmentManager.recruit_group()`；无论成功失败都清除征召状态和目标。
-5. `RECRUITING` 期间 `_tick_party_tactical()` 跳过该部队，避免巡逻/追击覆盖征召目标。
+5. 若没有可用采邑，则按 `is_authorized_owner()` 查找自有村庄中仍有普通冒险者候选人、且部队能支付至少 1 名招募费用的最近村庄；设置 `current_goal = "ADVENTURER_RECRUIT"` 并前往。
+6. 抵达后调用 `AdventurerRecruitmentManager.recruit_normal_candidates_for_party()`，只招募普通候选人，不招募贵族冒险者；随后清除征召状态。
+7. `RECRUITING` 期间 `_tick_party_tactical()` 跳过该部队，避免巡逻/追击覆盖征召目标。
 
 - 征召使用与玩家完全相同的管理器接口和资源扣除。
-- 成功事实通过 `EventBus.fief_recruited` 进入世界日志；AIManager 不直接写日志。
-- 找不到自有封地、储备为 0 或部队不可用时不做任何修改，下一次分频重新判断。
+- 成功事实通过 `EventBus.fief_recruited` / `EventBus.adventurers_recruited` 进入日志与大地图提示；AIManager 不直接写日志或 UI。
+- 找不到可征召目标、储备/候选人为 0、金币不足或部队不可用时不做任何修改，下一次分频重新判断。
 
 详见 [Lord_System.md](Lord_System.md) 与 [Fief_Recruitment_System.md](Fief_Recruitment_System.md)。
 

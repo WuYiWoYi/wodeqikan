@@ -9,6 +9,7 @@ extends Node2D
 signal exit_requested
 
 const UnitVisualScript = preload("res://Scripts/Systems/Combat/unit_visual.gd")
+const HorseVisualScript = preload("res://Scripts/Systems/Combat/horse_visual.gd")
 
 const WORLD_SIZE := Vector2(1920.0, 1080.0)
 ## 可活动区域。走出该区域会开始返回大地图的倒计时。
@@ -38,6 +39,12 @@ var _npc_unit_data: UnitData = null
 ## 候选人表现：{ candidate_id: UnitVisual } / { candidate_id: Label }。
 var _candidate_visuals: Dictionary = {}
 var _candidate_labels: Dictionary = {}
+## 贵族冒险者单独保存表现：人物按步行呈现，战马是独立场景对象。
+## 权威单位数据仍保留骑乘关系，本场景不修改 UnitData / MountInstanceData。
+var _noble_candidate: AdventurerCandidateData = null
+var _noble_visual: UnitVisual = null
+var _noble_mount_visual: HorseVisual = null
+var _noble_label: Label = null
 var _camera: Camera2D = null
 var _camera_rig: SceneCameraRig = null
 
@@ -231,9 +238,76 @@ func _build_adventurer_candidates() -> void:
 		_candidate_labels[candidate.candidate_id] = label
 		_refresh_candidate_label(candidate)
 
+	_build_noble_candidate()
+
+
+## 贵族冒险者表现：人物按步行呈现，战马作为独立节点显示在人物左侧。
+## 只复制候选人的外观字段到临时 UnitData，不注册单位、不改骑乘数据。
+func _build_noble_candidate() -> void:
+	if _settlement == null:
+		return
+	_noble_candidate = _settlement.get_noble_adventurer_candidate()
+	if _noble_candidate == null:
+		return
+
+	var spawn_position: Vector2 = _noble_candidate.world_position
+	if spawn_position == Vector2.ZERO:
+		spawn_position = AdventurerRecruitmentManager.NOBLE_CANDIDATE_POSITION
+
+	var unit := UnitData.new()
+	unit.unit_id = _noble_candidate.candidate_id
+	unit.config_id = _noble_candidate.unit_config_id
+	unit.display_name = _noble_candidate.display_name
+	unit.faction_id = _settlement.faction_id
+	unit.appearance = _noble_candidate.appearance.duplicate(true)
+	unit.family_id = str(unit.appearance.get("family_id", ""))
+	# 表现层强制步行；真实 UnitData 上的骑乘关系保持不变。
+	unit.is_mounted = false
+
+	_noble_visual = UnitVisualScript.new()
+	_noble_visual.name = "NobleAdventurerVisual_%s" % _noble_candidate.candidate_id
+	_noble_visual.position = spawn_position
+	_noble_visual.z_index = 100
+	add_child(_noble_visual)
+	_noble_visual.setup(unit)
+	_noble_visual.set_facing(-1.0)
+	_noble_visual.reset_locomotion()
+
+	var mount: MountInstanceData = _noble_candidate.get_mount_instance_data()
+	_noble_mount_visual = HorseVisualScript.new()
+	_noble_mount_visual.name = "NobleAdventurerHorse"
+	_noble_mount_visual.position = spawn_position \
+		+ AdventurerRecruitmentManager.NOBLE_MOUNT_VISUAL_OFFSET
+	_noble_mount_visual.z_index = 99
+	add_child(_noble_mount_visual)
+	_noble_mount_visual.rebuild(
+		mount.coat_style_id if mount != null else "brown",
+		mount.saddle_style_id if mount != null else "saddle_01"
+	)
+	_noble_mount_visual.set_facing(-1.0)
+
+	_noble_label = _make_label("", 14)
+	_noble_label.name = "NobleAdventurerName_%s" % _noble_candidate.candidate_id
+	_noble_label.position = spawn_position + Vector2(-80.0, -82.0)
+	_noble_label.size = Vector2(160.0, 20.0)
+	_noble_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	add_child(_noble_label)
+	_refresh_noble_label()
+
+
+func _refresh_noble_label() -> void:
+	if _noble_label == null or _noble_candidate == null:
+		return
+	_noble_label.text = "%s（贵族·3级）" % _noble_candidate.display_name
+	if not _noble_candidate.is_available():
+		_noble_label.text = "%s（已招募）" % _noble_candidate.display_name
+
 
 func _refresh_candidate_label(candidate: AdventurerCandidateData) -> void:
 	if candidate == null:
+		return
+	if candidate.is_noble:
+		_refresh_noble_label()
 		return
 	var label := _candidate_labels.get(candidate.candidate_id) as Label
 	if label == null:
@@ -467,6 +541,11 @@ func _physics_process(delta: float) -> void:
 		var visual := value as UnitVisual
 		if visual != null and is_instance_valid(visual):
 			visual.update_locomotion(delta, false)
+	if is_instance_valid(_noble_visual):
+		_noble_visual.update_locomotion(delta, false)
+	if is_instance_valid(_noble_mount_visual):
+		# 独立战马使用同一条 idle 时间轴；人物数据不变。
+		_noble_mount_visual.update_locomotion(0.0, 0.0, 0.0, delta)
 	if _camera_rig != null:
 		_camera_rig.update(delta, _player_position, true, not _dialogue_open)
 
@@ -496,7 +575,7 @@ func _update_interaction_hint() -> void:
 		return
 	var near_candidate: bool = false
 	if _settlement != null:
-		for candidate: AdventurerCandidateData in _settlement.adventurer_candidates:
+		for candidate: AdventurerCandidateData in _settlement.get_all_adventurer_candidates():
 			if candidate == null:
 				continue
 			if _player_position.distance_to(_find_candidate_position(candidate)) \
@@ -567,13 +646,11 @@ func _find_candidate_at(world_position: Vector2) -> AdventurerCandidateData:
 		return null
 	var nearest: AdventurerCandidateData = null
 	var nearest_distance: float = CANDIDATE_CLICK_RADIUS
-	for candidate: AdventurerCandidateData in _settlement.adventurer_candidates:
+	for candidate: AdventurerCandidateData in _settlement.get_all_adventurer_candidates():
 		if candidate == null:
 			continue
-		var visual := _candidate_visuals.get(candidate.candidate_id) as UnitVisual
-		if visual == null or not is_instance_valid(visual):
-			continue
-		var distance := world_position.distance_to(visual.position)
+		var candidate_position := _find_candidate_position(candidate)
+		var distance := world_position.distance_to(candidate_position)
 		if distance <= nearest_distance:
 			nearest_distance = distance
 			nearest = candidate
@@ -583,6 +660,10 @@ func _find_candidate_at(world_position: Vector2) -> AdventurerCandidateData:
 func _find_candidate_position(candidate: AdventurerCandidateData) -> Vector2:
 	if candidate == null:
 		return Vector2.ZERO
+	if candidate.is_noble:
+		if is_instance_valid(_noble_visual):
+			return _noble_visual.position
+		return candidate.world_position
 	var visual := _candidate_visuals.get(candidate.candidate_id) as UnitVisual
 	if visual != null and is_instance_valid(visual):
 		return visual.position
@@ -611,20 +692,47 @@ func _open_candidate_dialogue(candidate: AdventurerCandidateData) -> bool:
 	data.speaker_name = candidate.display_name
 	data.start_node_id = "start"
 	var available: bool = candidate.is_available()
+	var authorized: bool = true
 	var text: String = ""
-	if available:
-		text = "我听说%s需要人手。付我 1 金币，我就加入你的队伍。" \
-			% get_village_name()
-	else:
-		text = "我已经加入你的队伍，等你离开%s时一起走。" % get_village_name()
 	var choices: Array = []
-	if available:
-		choices.append({
-			"text": "招募他（1 金币）",
-			"next_node_id": "",
-			"action": "recruit_adventurer",
-			"candidate_id": candidate.candidate_id,
-		})
+	if candidate.is_noble:
+		var player_lord_id: String = _player_lord_id()
+		authorized = _context.adventurer_recruitment_manager \
+			.is_noble_recruit_authorized(_settlement, player_lord_id)
+		if not available:
+			text = "我已经加入你的队伍，我的战马也会随行。"
+		elif authorized:
+			text = "我是%s的贵族冒险者，带着自己的战马。付我 1 金币，" \
+				% get_village_name()
+			text += "我与战马一同加入你的队伍。"
+		else:
+			text = "我是%s的贵族冒险者，只效忠于这座村庄的拥有者。" \
+				% get_village_name()
+			text += "\n只有村庄拥有者可以招募。"
+		if available and authorized:
+			choices.append({
+				"text": "招募贵族冒险者（1 金币，含战马）",
+				"next_node_id": "",
+				"action": "recruit_adventurer",
+				"candidate_id": candidate.candidate_id,
+			})
+		elif available and not authorized:
+			choices.append({
+				"text": "只有村庄拥有者可以招募",
+				"next_node_id": "",
+			})
+	else:
+		if available:
+			text = "我听说%s需要人手。付我 1 金币，我就加入你的队伍。" \
+				% get_village_name()
+			choices.append({
+				"text": "招募他（1 金币）",
+				"next_node_id": "",
+				"action": "recruit_adventurer",
+				"candidate_id": candidate.candidate_id,
+			})
+		else:
+			text = "我已经加入你的队伍，等你离开%s时一起走。" % get_village_name()
 	choices.append({"text": "暂时不了", "next_node_id": ""})
 	data.nodes = {
 		"start": {
@@ -690,6 +798,13 @@ func _build_elder_dialogue(base: DialogueData) -> DialogueData:
 	start_node["choices"] = choices
 	data.nodes[data.start_node_id] = start_node
 	return data
+
+
+func _player_lord_id() -> String:
+	if _context == null:
+		return ""
+	var player_lord: LordData = _context.get_player_lord()
+	return player_lord.lord_id if player_lord != null else ""
 
 
 func _can_player_recruit_fief() -> bool:
@@ -765,13 +880,18 @@ func _execute_dialogue_action(action: String, choice: Dictionary) -> String:
 		"recruit_adventurer":
 			var candidate_id: String = str(choice.get("candidate_id", ""))
 			var success: bool = _context.adventurer_recruitment_manager.recruit_candidate(
-				_settlement.settlement_id, candidate_id, _context.player_profile
+				_settlement.settlement_id,
+				candidate_id,
+				_context.player_profile,
+				_player_lord_id()
 			)
 			if success:
 				var candidate: AdventurerCandidateData = _settlement.get_candidate(
 					candidate_id
 				)
 				_refresh_candidate_label(candidate)
+				if candidate != null and candidate.is_noble:
+					return "贵族冒险者与战马已加入你的队伍。"
 				return "冒险者已加入你的队伍。"
 			return _context.adventurer_recruitment_manager.last_error
 		"open_market":
@@ -950,6 +1070,19 @@ func get_candidate_visual(candidate_id: String) -> UnitVisual:
 func get_candidate_position(candidate_id: String) -> Vector2:
 	var visual := get_candidate_visual(candidate_id)
 	return visual.position if visual != null else Vector2.ZERO
+
+
+## 贵族冒险者表现只在村庄场景存在；普通候选人的既有计数/查找接口不变。
+func get_noble_candidate_visual() -> UnitVisual:
+	return _noble_visual
+
+
+func get_noble_mount_visual() -> HorseVisual:
+	return _noble_mount_visual
+
+
+func get_noble_candidate_position() -> Vector2:
+	return _noble_visual.position if is_instance_valid(_noble_visual) else Vector2.ZERO
 
 
 func get_world_log_panel() -> WorldLogPanel:

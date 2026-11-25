@@ -14,6 +14,45 @@ extends RefCounted
 
 const VERSION: int = 1
 
+## 国王盔是纯表现的身份覆盖：由 WorldContext 在装配时注册只读解析器，
+## UnitVisual 每次重建时查询当前身份，不把结果写入 UnitData/装备/存档。
+static var _king_override_owner: Object = null
+static var _king_helmet_texture_path: String = ""
+static var _king_unit_predicate: Callable = Callable()
+
+
+## 注册当前世界的国王外观覆盖。资源缺失时清空路径，回退普通头盔。
+static func configure_king_helmet_override(
+	owner: Object, texture_path: String, unit_predicate: Callable
+) -> void:
+	_king_override_owner = owner
+	_king_helmet_texture_path = (
+		texture_path if not texture_path.is_empty() \
+			and ResourceLoader.exists(texture_path) else ""
+	)
+	_king_unit_predicate = unit_predicate
+
+
+## 世界销毁时清理注册；只允许当前拥有者清理，避免覆盖后来注册的世界。
+static func clear_king_helmet_override(owner: Object) -> void:
+	if owner != null and _king_override_owner != null \
+			and _king_override_owner != owner:
+		return
+	_king_override_owner = null
+	_king_helmet_texture_path = ""
+	_king_unit_predicate = Callable()
+
+
+## 单位当前是否应显示国王盔；身份由解析器实时判断，没有头盔时返回空。
+static func get_king_helmet_texture_path(unit: UnitData) -> String:
+	if unit == null or _king_helmet_texture_path.is_empty():
+		return ""
+	if not _king_unit_predicate.is_valid():
+		return ""
+	if not bool(_king_unit_predicate.call(unit)):
+		return ""
+	return _king_helmet_texture_path
+
 
 static func ensure_random(
 	unit: UnitData,

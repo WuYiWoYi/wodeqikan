@@ -41,6 +41,8 @@ extends Resource
 ## 新游戏每个村庄初始生成的候选人数。
 @export var adventurer_initial_count: int = 2
 @export var adventurer_unit_config_id: String = "infantry_militia"
+## 贵族冒险者固定使用三级士兵配置，并自带 fief_mount_equipment_id 对应战马。
+@export var noble_adventurer_unit_config_id: String = "infantry_veteran"
 
 @export_category("Tax / AI")
 @export var default_tax_base: int = 20
@@ -74,5 +76,9 @@ func sanitize() -> void:
 	adventurer_initial_count = clampi(
 		adventurer_initial_count, 0, adventurer_max_candidates
 	)
+	if adventurer_unit_config_id.strip_edges().is_empty():
+		adventurer_unit_config_id = "infantry_militia"
+	if noble_adventurer_unit_config_id.strip_edges().is_empty():
+		noble_adventurer_unit_config_id = "infantry_veteran"
 	default_tax_base = maxi(0, default_tax_base)
 	ai_lord_recruit_threshold = maxi(1, ai_lord_recruit_threshold)

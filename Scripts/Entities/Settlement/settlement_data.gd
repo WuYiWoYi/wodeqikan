@@ -49,9 +49,13 @@ var fief_recruitment_capacity: int = 4
 ## 距离下一次采邑补充的累计世界时间（秒）。
 var fief_recruitment_elapsed: float = 0.0
 
-## 当前村庄的冒险者候选人与距离下一次刷新的累计世界时间。
+## 当前村庄的普通冒险者候选人与距离下一次刷新的累计世界时间。
 var adventurer_candidates: Array[AdventurerCandidateData] = []
 var adventurer_refresh_elapsed: float = 0.0
+## 贵族冒险者：每村最多 1 名，作为独立特殊候选人，不占用普通候选人上限。
+## 一旦生成即置位 noble_adventurer_spawned；被招募后不会因读档重新生成。
+var noble_adventurer_candidate: AdventurerCandidateData = null
+var noble_adventurer_spawned: bool = false
 
 var garrison_unit_ids: Array[String] = []
 var is_under_siege: bool = false
@@ -65,11 +69,31 @@ func get_available_candidates() -> Array[AdventurerCandidateData]:
 	return result
 
 
+## 候选人查询同时覆盖普通候选人与贵族冒险者；贵族冒险者只有 1 名。
 func get_candidate(candidate_id: String) -> AdventurerCandidateData:
 	for candidate: AdventurerCandidateData in adventurer_candidates:
 		if candidate != null and candidate.candidate_id == candidate_id:
 			return candidate
+	if noble_adventurer_candidate != null \
+			and noble_adventurer_candidate.candidate_id == candidate_id:
+		return noble_adventurer_candidate
 	return null
+
+
+## 返回贵族冒险者候选人；已招募/未生成时返回 null。
+func get_noble_adventurer_candidate() -> AdventurerCandidateData:
+	return noble_adventurer_candidate
+
+
+## 普通候选人与贵族冒险者的合并只读视图；UI 用来统一生成表现。
+func get_all_adventurer_candidates() -> Array[AdventurerCandidateData]:
+	var result: Array[AdventurerCandidateData] = []
+	for candidate: AdventurerCandidateData in adventurer_candidates:
+		if candidate != null:
+			result.append(candidate)
+	if noble_adventurer_candidate != null:
+		result.append(noble_adventurer_candidate)
+	return result
 
 
 func has_owner() -> bool:
@@ -102,6 +126,11 @@ func to_dict() -> Dictionary:
 		"fief_recruitment_elapsed": fief_recruitment_elapsed,
 		"adventurer_candidates": candidates,
 		"adventurer_refresh_elapsed": adventurer_refresh_elapsed,
+		"noble_adventurer_candidate": (
+			noble_adventurer_candidate.to_dict()
+			if noble_adventurer_candidate != null else {}
+		),
+		"noble_adventurer_spawned": noble_adventurer_spawned,
 		"garrison_unit_ids": garrison_unit_ids.duplicate(),
 		"is_under_siege": is_under_siege,
 	}
@@ -153,6 +182,22 @@ static func from_dict(data: Dictionary) -> SettlementData:
 				var candidate := AdventurerCandidateData.from_dict(value)
 				if not candidate.candidate_id.is_empty():
 					settlement.adventurer_candidates.append(candidate)
+
+	# 旧存档没有贵族冒险者字段：保持未生成状态，由读档后的世界初始化补齐。
+	var noble_value: Variant = data.get("noble_adventurer_candidate", {})
+	if noble_value is Dictionary and not (noble_value as Dictionary).is_empty():
+		var noble_candidate := AdventurerCandidateData.from_dict(
+			noble_value as Dictionary
+		)
+		if not noble_candidate.candidate_id.is_empty():
+			noble_candidate.is_noble = true
+			settlement.noble_adventurer_candidate = noble_candidate
+	settlement.noble_adventurer_spawned = bool(
+		data.get(
+			"noble_adventurer_spawned",
+			settlement.noble_adventurer_candidate != null
+		)
+	)
 
 	var garrison_values: Variant = data.get("garrison_unit_ids", [])
 	if garrison_values is Array:

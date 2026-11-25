@@ -57,6 +57,8 @@ var _vision_manager: VisionManager = null
 var _battle_manager: BattleManager = null
 var _lord_manager: LordManager = null
 var _fief_recruitment_manager: FiefRecruitmentManager = null
+## NPC 领主在自有村庄招募普通冒险者的统一业务入口（与玩家共用同一管理器）。
+var _adventurer_recruitment_manager: AdventurerRecruitmentManager = null
 var _economy_config: SettlementEconomyConfig = null
 ## 阶段 12：补给需求查询与市场采购都走既有统一系统，AI 只负责决策与移动。
 var _supply_manager: SupplyManager = null
@@ -77,7 +79,8 @@ func setup(
 	fief_recruitment_manager: FiefRecruitmentManager = null,
 	economy_config: SettlementEconomyConfig = null,
 	supply_manager: SupplyManager = null,
-	market_manager: MarketManager = null
+	market_manager: MarketManager = null,
+	adventurer_recruitment_manager: AdventurerRecruitmentManager = null
 ) -> void:
 	_unit_manager = unit_manager
 	_party_manager = party_manager
@@ -93,6 +96,7 @@ func setup(
 	_economy_config.sanitize()
 	_supply_manager = supply_manager
 	_market_manager = market_manager
+	_adventurer_recruitment_manager = adventurer_recruitment_manager
 
 
 func tick(world_delta: float) -> void:
@@ -664,11 +668,15 @@ func _update_patrol_party(party: PartyData) -> void:
 	_world_map_manager.set_party_target(party.party_id, target)
 
 
-## 领主战略层：人数低于阈值时，前往自己的封地征召一组采邑。
+## 领主战略层：人数低于阈值时，优先前往自己的封地征召一组采邑；
+## 封地没有储备时，退而前往自有村庄招募普通冒险者。
 ## 普通巡逻/路线 AI 在 current_state == RECRUITING 期间被跳过，避免覆盖目标。
 func _tick_lord_strategic() -> void:
 	if _lord_manager == null or _party_manager == null \
-			or _world_map_manager == null or _fief_recruitment_manager == null:
+			or _world_map_manager == null or _settlement_manager == null:
+		return
+	if _fief_recruitment_manager == null \
+			and _adventurer_recruitment_manager == null:
 		return
 
 	for lord: LordData in _lord_manager.get_all_lords():
@@ -683,29 +691,52 @@ func _tick_lord_strategic() -> void:
 			continue
 
 		var target: SettlementData = _find_owned_recruit_settlement(lord, party)
-		if target == null:
-			_clear_lord_recruit_state(lord)
+		if target != null:
+			_advance_lord_recruit(lord, party, target, "FIEF_RECRUIT")
 			continue
 
-		if party.world_position.distance_to(target.world_position) <= AI_ARRIVAL_RADIUS:
-			# 到达后只尝试一次；成功/失败都退出征召状态，恢复普通 AI。
-			lord.current_state = "RECRUITING"
-			lord.current_goal = "FIEF_RECRUIT"
-			lord.current_target_settlement_id = target.settlement_id
-			_fief_recruitment_manager.recruit_group(target.settlement_id, lord.lord_id)
+		var adventurer_target: SettlementData = \
+			_find_owned_adventurer_settlement(lord, party)
+		if adventurer_target == null:
 			_clear_lord_recruit_state(lord)
 			continue
+		_advance_lord_recruit(
+			lord, party, adventurer_target, "ADVENTURER_RECRUIT"
+		)
 
-		lord.current_state = "RECRUITING"
-		lord.current_goal = "FIEF_RECRUIT"
-		lord.current_target_settlement_id = target.settlement_id
+
+## 推进一次领主征召目标：先记录状态并移动；到达后只尝试一次，
+## 成功/失败都退出征召状态，恢复普通 AI。
+func _advance_lord_recruit(
+	lord: LordData,
+	party: PartyData,
+	target: SettlementData,
+	goal: String
+) -> void:
+	lord.current_state = "RECRUITING"
+	lord.current_goal = goal
+	lord.current_target_settlement_id = target.settlement_id
+
+	if party.world_position.distance_to(target.world_position) > AI_ARRIVAL_RADIUS:
 		_world_map_manager.set_party_target(party.party_id, target.world_position)
+		return
+
+	if goal == "FIEF_RECRUIT":
+		if _fief_recruitment_manager != null:
+			_fief_recruitment_manager.recruit_group(
+				target.settlement_id, lord.lord_id
+			)
+	elif _adventurer_recruitment_manager != null:
+		_adventurer_recruitment_manager.recruit_normal_candidates_for_party(
+			target.settlement_id, party.party_id, lord.lord_id
+		)
+	_clear_lord_recruit_state(lord)
 
 
 func _find_owned_recruit_settlement(
 	lord: LordData, party: PartyData
 ) -> SettlementData:
-	if _settlement_manager == null:
+	if _settlement_manager == null or _fief_recruitment_manager == null:
 		return null
 	var nearest: SettlementData = null
 	var nearest_distance: float = INF
@@ -724,10 +755,54 @@ func _find_owned_recruit_settlement(
 	return nearest
 
 
+## 自有村庄中仍有普通冒险者候选人、且部队至少付得起一名招募费用的最近村庄。
+## 所有权复用封地系统的统一授权规则，不按场景进入状态或名字推断。
+func _find_owned_adventurer_settlement(
+	lord: LordData, party: PartyData
+) -> SettlementData:
+	if _settlement_manager == null or _adventurer_recruitment_manager == null:
+		return null
+	if _economy_config == null \
+			or not party.can_afford(_economy_config.adventurer_recruit_cost):
+		return null
+	var nearest: SettlementData = null
+	var nearest_distance: float = INF
+	for settlement: SettlementData in _settlement_manager.get_all_settlements():
+		if settlement == null \
+				or settlement.settlement_type != SettlementData.SettlementType.VILLAGE:
+			continue
+		if not _is_lord_authorized_owner(settlement, lord):
+			continue
+		if not _has_available_normal_candidate(settlement):
+			continue
+		var distance := party.world_position.distance_to(settlement.world_position)
+		if distance < nearest_distance:
+			nearest_distance = distance
+			nearest = settlement
+	return nearest
+
+
+func _is_lord_authorized_owner(settlement: SettlementData, lord: LordData) -> bool:
+	if _fief_recruitment_manager != null:
+		return _fief_recruitment_manager.is_authorized_owner(
+			settlement, lord.lord_id
+		)
+	return settlement.owner_lord_id == lord.lord_id
+
+
+func _has_available_normal_candidate(settlement: SettlementData) -> bool:
+	for candidate: AdventurerCandidateData in settlement.get_available_candidates():
+		if candidate != null and not candidate.is_noble:
+			return true
+	return false
+
+
 func _clear_lord_recruit_state(lord: LordData) -> void:
 	if lord == null:
 		return
-	if lord.current_state == "RECRUITING" or lord.current_goal == "FIEF_RECRUIT":
+	if lord.current_state == "RECRUITING" \
+			or lord.current_goal == "FIEF_RECRUIT" \
+			or lord.current_goal == "ADVENTURER_RECRUIT":
 		lord.current_state = "IDLE"
 		lord.current_goal = ""
 		lord.current_target_settlement_id = ""

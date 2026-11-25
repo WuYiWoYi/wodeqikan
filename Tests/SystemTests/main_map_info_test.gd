@@ -58,6 +58,7 @@ func _run() -> void:
 	await _test_time_centered()
 	await _test_money_display_and_tooltip()
 	await _test_speed_display_and_tooltip()
+	await _test_troop_display_and_tooltip()
 	_test_building_panel_ui_permissions()
 
 
@@ -126,14 +127,20 @@ func _test_money_display_and_tooltip() -> void:
 		return
 	var gold: int = _context.player_profile.gold
 	_check(
-		money_label.text == "金币：%d" % gold,
-		"金币显示实际数据（%s）" % money_label.text
+		money_label.text == str(gold),
+		"金币只显示数值（%s）" % money_label.text
+	)
+	_check(not money_label.text.contains("金币"), "金币不再显示文字前缀")
+	_check(_map.find_child("MoneyLabelIcon", true, false) != null, "金币图标存在")
+	_check(
+		_map.find_child("MoneyLabelEntry", true, false) != null,
+		"金币图标与数值属于同一悬浮条目"
 	)
 
 	_context.player_profile.gold = gold - 123
 	await get_tree().process_frame
 	_check(
-		money_label.text == "金币：%d" % (gold - 123),
+		money_label.text == str(gold - 123),
 		"金币变化后实时更新"
 	)
 	_context.player_profile.gold = gold
@@ -193,15 +200,24 @@ func _test_speed_display_and_tooltip() -> void:
 		return
 	var effective: float = _context.world_map_manager.get_effective_movement_speed(_party)
 	_check(
-		speed_label.text == "部队移速：%.1f" % effective,
-		"移速显示实际有效移速（%s）" % speed_label.text
+		speed_label.text == "%.1f" % effective,
+		"移速只显示数值（%s）" % speed_label.text
+	)
+	_check(not speed_label.text.contains("移速"), "移速不再显示文字前缀")
+	_check(
+		_map.find_child("PartySpeedLabelIcon", true, false) != null,
+		"移速图标存在"
+	)
+	_check(
+		_map.find_child("PartySpeedLabelEntry", true, false) != null,
+		"移速图标与数值属于同一悬浮条目"
 	)
 
 	_party.movement_speed += 10.0
 	await get_tree().process_frame
 	var changed: float = _context.world_map_manager.get_effective_movement_speed(_party)
 	_check(
-		speed_label.text == "部队移速：%.1f" % changed,
+		speed_label.text == "%.1f" % changed,
 		"移速随部队速度变化实时更新"
 	)
 	_party.movement_speed -= 10.0
@@ -237,6 +253,145 @@ func _test_speed_display_and_tooltip() -> void:
 	)
 	_map.call("set_top_info_hover_for_test", "PartySpeedLabel", false)
 	_check(not bool(_map.call("is_top_info_tooltip_visible")), "移出移速后关闭提示")
+
+
+func _test_troop_display_and_tooltip() -> void:
+	var troop_label := _map.find_child("PartySizeLabel", true, false) as Label
+	_check(troop_label != null, "顶栏显示部队人数")
+	if troop_label == null:
+		return
+	var counts: Dictionary = _expected_party_counts()
+	_check(
+		troop_label.text == str(int(counts["total"])),
+		"部队人数显示实际成员数（%s）" % troop_label.text
+	)
+	_check(
+		_map.find_child("PartySizeLabelIcon", true, false) != null,
+		"部队人数图标存在"
+	)
+	var entry := _map.find_child("PartySizeLabelEntry", true, false) as HBoxContainer
+	_check(entry != null, "部队人数图标与数值属于同一悬浮条目")
+	if entry != null:
+		var icon := entry.get_node_or_null("PartySizeLabelIcon") as Control
+		var value := entry.get_node_or_null("PartySizeLabel") as Control
+		_check(
+			entry.mouse_filter == Control.MOUSE_FILTER_STOP,
+			"条目容器接收悬浮事件"
+		)
+		_check(
+			icon != null and icon.mouse_filter == Control.MOUSE_FILTER_IGNORE
+				and value != null and value.mouse_filter == Control.MOUSE_FILTER_IGNORE,
+			"图标与数值共同由条目容器触发悬浮"
+		)
+
+	_map.call("set_top_info_hover_for_test", "PartySizeLabel", true)
+	var tooltip := str(_map.call("get_top_info_tooltip_text"))
+	_check(bool(_map.call("is_top_info_tooltip_visible")), "部队人数悬浮显示提示")
+	_check(tooltip.contains("部队"), "部队提示包含标题")
+	_check(
+		tooltip.contains("可战斗人数 %d" % int(counts["combat"])),
+		"部队提示显示可战斗人数"
+	)
+	_check(
+		tooltip.contains("伤员 %d" % int(counts["wounded"])),
+		"部队提示显示伤员"
+	)
+	_check(
+		tooltip.contains("俘虏 %d" % int(counts["prisoners"])),
+		"部队提示显示俘虏"
+	)
+
+	# 伤兵：总人数不变，可战斗与伤员按真实状态分别统计。
+	var wounded_unit: UnitData = null
+	for unit_id: String in _party.member_unit_ids:
+		var unit := _context.unit_manager.get_unit(unit_id)
+		if unit != null and unit.is_alive() and not unit.is_player_character:
+			wounded_unit = unit
+			break
+	if wounded_unit != null:
+		wounded_unit.mark_wounded()
+		await get_tree().process_frame
+		counts = _expected_party_counts()
+		_check(
+			troop_label.text == str(int(counts["total"])),
+			"出现伤员后部队总人数保持正确"
+		)
+		tooltip = str(_map.call("get_top_info_tooltip_text"))
+		_check(
+			tooltip.contains("可战斗人数 %d" % int(counts["combat"])),
+			"伤员不计入可战斗人数"
+		)
+		_check(
+			tooltip.contains("伤员 %d" % int(counts["wounded"])),
+			"伤员数量实时更新"
+		)
+
+	# 俘虏：由真实部队俘虏列表统计，不混入成员人数。
+	var base_unit := _context.unit_manager.get_unit(_party.member_unit_ids[0])
+	var member_config: UnitConfig = null
+	if wounded_unit != null:
+		member_config = _context.unit_manager.get_unit_config(wounded_unit.config_id)
+	elif base_unit != null:
+		member_config = _context.unit_manager.get_unit_config(base_unit.config_id)
+	var prisoner: UnitData = null
+	if member_config != null:
+		prisoner = _context.unit_manager.create_unit(
+			member_config, _party.faction_id
+		)
+	if prisoner != null:
+		_check(
+			_context.party_manager.add_member(_party.party_id, prisoner.unit_id),
+			"准备俘虏：先加入部队"
+		)
+		_context.party_manager.remove_member(_party.party_id, prisoner.unit_id)
+		prisoner.mark_wounded()
+		_check(
+			_context.party_manager.add_prisoner(_party.party_id, prisoner.unit_id),
+			"准备俘虏：加入玩家俘虏列表"
+		)
+		await get_tree().process_frame
+		counts = _expected_party_counts()
+		tooltip = str(_map.call("get_top_info_tooltip_text"))
+		_check(
+			tooltip.contains("俘虏 %d" % int(counts["prisoners"])),
+			"俘虏数量来自真实俘虏列表"
+		)
+		_check(
+			troop_label.text == str(int(counts["total"])),
+			"俘虏不计入部队成员人数"
+		)
+		_context.party_manager.remove_prisoner(_party.party_id, prisoner.unit_id)
+
+	# 恢复准备数据，避免影响后续建筑面板测试。
+	if wounded_unit != null:
+		wounded_unit.current_hp = wounded_unit.max_hp
+		wounded_unit.clamp_hp()
+	await get_tree().process_frame
+	_map.call("set_top_info_hover_for_test", "PartySizeLabel", false)
+	_check(not bool(_map.call("is_top_info_tooltip_visible")), "移出部队人数后关闭提示")
+	_check(
+		troop_label.text == str(int(_expected_party_counts()["total"])),
+		"恢复后部队人数显示正确"
+	)
+
+
+func _expected_party_counts() -> Dictionary:
+	var combat: int = 0
+	var wounded: int = 0
+	for unit_id: String in _party.member_unit_ids:
+		var unit := _context.unit_manager.get_unit(unit_id)
+		if unit == null:
+			continue
+		if unit.is_wounded():
+			wounded += 1
+		elif unit.is_alive():
+			combat += 1
+	return {
+		"combat": combat,
+		"wounded": wounded,
+		"prisoners": _party.prisoner_unit_ids.size(),
+		"total": combat + wounded,
+	}
 
 
 func _test_building_panel_ui_permissions() -> void:

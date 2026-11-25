@@ -8,6 +8,9 @@ extends Control
 ## 未确认前金币与真实归属不变；确认由 PrisonerTradeManager 原子结算。
 
 signal closed
+## 嵌入城镇面板时，点击“出售俘虏”请求大地图打开独立出售界面。
+## 嵌入视图本身不再展示出售操作，避免形成城镇面板内的多级嵌套。
+signal sell_requested(settlement_id: String)
 ## 出售成功后广播结果，供大地图刷新金币/背包等只读显示。
 signal prisoners_sold(result: Dictionary)
 
@@ -18,6 +21,8 @@ var _context: WorldContext = null
 var _settlement: SettlementData = null
 ## 嵌入模式：作为城镇信息面板的一段内容，不再创建独立二级窗口。
 var _embedded: bool = false
+## 独立出售模式：唯一目的就是展示出售俘虏视图，不显示酒馆菜单。
+var _sale_only: bool = false
 ## 进入出售界面时的玩家俘虏快照。
 var _initial_prisoner_ids: Array[String] = []
 ## 本次预览中准备出售的俘虏（尚未提交）。
@@ -36,6 +41,7 @@ var _player_empty: Label = null
 var _total_label: Label = null
 var _feedback_label: Label = null
 var _confirm_button: Button = null
+var _sell_back_button: Button = null
 
 
 func setup(context: WorldContext, embedded: bool = false) -> void:
@@ -54,6 +60,7 @@ func open(settlement: SettlementData) -> bool:
 	if settlement.settlement_type != SettlementData.SettlementType.TOWN:
 		return false
 	_settlement = settlement
+	_sale_only = false
 	_title_label.text = "%s · 酒馆" % settlement.display_name
 	_feedback_text = ""
 	visible = true
@@ -62,8 +69,25 @@ func open(settlement: SettlementData) -> bool:
 	return true
 
 
+## 独立出售界面：直接进入出售视图，不显示酒馆菜单。
+## 复用同一套俘虏列表、价格与原子结算逻辑，只改变界面层级。
+func open_sale(settlement: SettlementData) -> bool:
+	if _context == null or settlement == null:
+		return false
+	if settlement.settlement_type != SettlementData.SettlementType.TOWN:
+		return false
+	_settlement = settlement
+	_sale_only = true
+	_title_label.text = "%s · 出售俘虏" % settlement.display_name
+	_feedback_text = ""
+	visible = true
+	_show_sell_view()
+	return true
+
+
 func close() -> void:
 	visible = false
+	_sale_only = false
 	_settlement = null
 	_sell_ids.clear()
 	_initial_prisoner_ids.clear()
@@ -74,12 +98,17 @@ func close() -> void:
 ## 避免调用方在收尾阶段又被信号切回城镇信息视图。
 func reset() -> void:
 	visible = false
+	_sale_only = false
 	_settlement = null
 	_sell_ids.clear()
 	_initial_prisoner_ids.clear()
 	_feedback_text = ""
 	if _menu_view != null:
 		_show_menu()
+
+
+func is_sale_only() -> bool:
+	return _sale_only
 
 
 func get_settlement_id() -> String:
@@ -184,7 +213,12 @@ func _build_content(column: VBoxContainer) -> void:
 func _build_menu_view() -> void:
 	var sell_button := _make_button("出售俘虏", "TavernSellPrisonersButton")
 	sell_button.custom_minimum_size = Vector2(260.0, 44.0)
-	sell_button.pressed.connect(_show_sell_view)
+	if _embedded:
+		# 嵌入城镇面板时只发起“打开独立出售界面”的意图，
+		# 不在城镇面板内部再嵌套一层出售视图。
+		sell_button.pressed.connect(_on_sell_requested)
+	else:
+		sell_button.pressed.connect(_show_sell_view)
 	_menu_view.add_child(sell_button)
 
 	var merc_button := _make_button("查看雇佣兵信息", "TavernMercenariesButton")
@@ -257,9 +291,9 @@ func _build_sell_view() -> void:
 	_confirm_button.pressed.connect(_on_confirm_sale)
 	buttons.add_child(_confirm_button)
 
-	var back_button := _make_button("返回酒馆", "TavernSellBackButton")
-	back_button.pressed.connect(_show_menu)
-	buttons.add_child(back_button)
+	_sell_back_button = _make_button("返回酒馆", "TavernSellBackButton")
+	_sell_back_button.pressed.connect(_on_sell_back_pressed)
+	buttons.add_child(_sell_back_button)
 
 
 func _build_mercenary_view() -> void:
@@ -284,6 +318,19 @@ func _show_menu() -> void:
 	_refresh_gold()
 
 
+func _on_sell_requested() -> void:
+	if _settlement == null:
+		return
+	sell_requested.emit(_settlement.settlement_id)
+
+
+func _on_sell_back_pressed() -> void:
+	if _sale_only:
+		close()
+		return
+	_show_menu()
+
+
 func _show_sell_view() -> void:
 	if _context == null:
 		return
@@ -293,6 +340,8 @@ func _show_sell_view() -> void:
 	_menu_view.visible = false
 	_merc_view.visible = false
 	_sell_view.visible = true
+	if _sell_back_button != null:
+		_sell_back_button.text = "关闭" if _sale_only else "返回酒馆"
 	_refresh_sell_view()
 
 

@@ -43,6 +43,15 @@ signal fief_recruited(
 )
 ## 普通冒险者被玩家招募成功的事实。
 signal adventurer_recruited(settlement_id: String, unit_id: String, unit_name: String)
+## 玩家或 NPC 在村庄招募冒险者成功的事实；counts 为 { config_id: 数量 }。
+## 大地图据此显示统一的浮动提示，不在 UI 里推断招募结果。
+signal adventurers_recruited(
+	party_id: String,
+	settlement_id: String,
+	counts: Dictionary,
+	total: int,
+	is_player_recruiter: bool
+)
 
 ## 阶段 12：部队每日补给状态发生变化（只在低补给状态切换时广播）。
 signal party_supply_changed(party_id: String, is_food_low: bool, is_fodder_low: bool)

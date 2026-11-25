@@ -200,6 +200,7 @@ HP 安全规则：
 - WEAPON 还可配置 `attack_type`（`MELEE` / `RANGED`）、`attack_interval_override`、`projectile_texture_path`、`projectile_speed`、`projectile_arc_height`。远程武器要求 `projectile_speed > 0`、`projectile_arc_height >= 0`、`attack_interval_override > 0`，否则 `validate()` 失败。
 - 攻击方式由武器派生，不按兵种名/`unit_class` 分支：`StatCalculator` 把武器 `attack_type` 写入 `UnitData.attack_type`，战斗逻辑只读取 `UnitData.is_ranged_attacker()`。空手或未装备武器时保持 `MELEE`。
 - 数据层使用 `equip_item()` / `unequip_slot()`；阶段 6 起部队面板提供 MOUNT 上下马与晋升，其他装备槽位的更换 UI 尚未实现（KI327）。
+- 村庄贵族冒险者候选人在招募前不属于仓储，使用 `UnitManager.equip_detached_mount()` 装备真实马匹实例；该入口只接受未注册单位，避免绕过正式装备写入口。招募后单位由仓储持有，后续装备变化仍走 `equip_item()` / `equip_mount_instance()`。
 - 本次不实现品质、耐久、随机词条、职业限制与装备获取（商店/掉落）。
 - 装备视觉字段（`EquipmentConfig`）：
   - `visual_texture_path`：可选贴图；空路径表示使用槽位默认表现。
@@ -675,12 +676,27 @@ Idle
 3. 右手武器：`WEAPON` 装备视觉优先；无武器装备时使用家族长矛；再缺失时回退默认长矛。
 4. 缨饰：家族配置存在且为领袖时显示；`set_plume_texture()` 仍可覆盖。
 5. 左手装备、攻击动画、属性、装备数据与碰撞规则均不受家族外观影响。
+6. 国王身份头盔覆盖：在“原本会显示头盔”时用 `AppearanceConfig.king_helmet_texture_path` 替换贴图；没有普通头盔时不凭空添加。见 10.5。
 
 ### 10.4 旧存档兼容
 
 - 旧单位没有 `family_id` / `appearance` 时保持原有阵营外观，不自动补随机头盔或家族服装。
 - 新游戏创建的士兵（包括玩家起始部队）在 `WorldInitializer` 统一生成外观。
 - 外观资源缺失时 `PartVisual` 只跳过对应部件并记录一次警告，不阻止单位生成。
+
+### 10.5 国王身份头盔覆盖
+
+- 配置：`AppearanceConfig.king_helmet_texture_path` 指向 `头盔_特殊_国王盔.png`；资源缺失时覆盖自动禁用，回退普通头盔。
+- 身份来源：`WorldContext.is_king_unit(unit)` 只读查询现有政治数据，要求同时满足：
+  - 单位对应贵族（`UnitData.noble_id`；玩家角色回退到 `player_lord_id`）存活且 `NobleData.is_king`；
+  - 该贵族是其家族 `HouseData.leader_noble_id`；
+  - 家族所属王国 `KingdomData.ruling_house_id` 指向该家族；
+  - `KingdomData.king_noble_id` 指向该贵族且 `is_active` 为真。
+- 装配：`WorldContext._ready()` 把解析器与资源路径注册到 `UnitAppearance`；`_exit_tree()` 清理。注册是只读表现层解析，不新增 Autoload。
+- 表现：`UnitVisual` 每次重建时查询当前身份；只有原本会显示头盔（`HEAD` 装备视觉或 `appearance.helmet_texture_path`）时才替换为国王盔，层级/锚点沿用默认头盔处理。
+- 缨饰联动：国王盔生效时，本次重建不创建 `Plume` 部件，保证国王盔与普通头盔缨饰不同时显示；
+  身份失效后下一次重建按 `appearance.plume_texture_path` 恢复原缨饰。
+- 数据隔离：国王盔与缨饰隐藏都只作用于表现层，不写入 `appearance`、装备、背包或存档；身份失效后重建 `UnitVisual` 即恢复原头盔与缨饰。已显示的表现节点调用 `rebuild()` 即可响应身份变化，无需重新生成单位。
 
 ## 11. 伤兵、俘虏与售出状态（阶段 13 新增）
 

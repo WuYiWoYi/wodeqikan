@@ -111,6 +111,50 @@ func create_detached_unit(
 	return unit
 
 
+## 为尚未注册的独立单位装备一匹真实马匹实例，并按装备重算属性。
+##
+## 用于贵族冒险者候选人：候选人需要在被招募前就拥有完整的三级士兵 + 战马
+## 数据快照，但不能进入 UnitManager 仓储。已注册单位必须走 equip_item /
+## equip_mount_instance，避免绕过仓储单写者规则。
+func equip_detached_mount(
+	unit: UnitData,
+	equipment_id: String,
+	instance: MountInstanceData = null
+) -> bool:
+	if unit == null or _units.has(unit.unit_id):
+		return false
+	var equipment := get_equipment_config(equipment_id)
+	if equipment == null or equipment.slot != EquipmentConfig.Slot.MOUNT:
+		return false
+	var config := get_unit_config(unit.config_id)
+	if config == null:
+		return false
+	var mount := instance
+	if mount == null or mount.equipment_id != equipment_id:
+		mount = MountInstanceData.create_random(equipment_id)
+
+	var slot_key: String = EquipmentConfig.SLOT_NAMES[EquipmentConfig.Slot.MOUNT]
+	var had_previous: bool = unit.equipment.has(slot_key)
+	var previous_equipment: Variant = unit.equipment.get(slot_key)
+	var previous_instance: Dictionary = unit.mount_instance.duplicate(true)
+
+	unit.equipment[slot_key] = equipment_id
+	unit.set_mount_instance_data(mount)
+	unit.is_mounted = true
+	if StatCalculator.apply_to_unit(unit, config, _equipment_configs):
+		# 新创建的候选人应满血；装备提高上限后同步当前生命。
+		unit.current_hp = unit.max_hp
+		return true
+
+	if had_previous:
+		unit.equipment[slot_key] = previous_equipment
+	else:
+		unit.equipment.erase(slot_key)
+	unit.mount_instance = previous_instance
+	unit.is_mounted = had_previous
+	return false
+
+
 ## 创建单位数据但不注册；create_unit / create_detached_unit 的唯一构造入口。
 func _build_unit_data(
 	config: UnitConfig,

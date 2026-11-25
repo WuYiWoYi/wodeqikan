@@ -17,6 +17,9 @@ var candidate_id: String = ""
 var display_name: String = ""
 var settlement_id: String = ""
 var unit_config_id: String = ""
+## 贵族冒险者：固定三级士兵，只允许村庄拥有者招募，并自带一匹真实战马实例。
+## 普通冒险者保持 false，沿用原有生成与刷新规则。
+var is_noble: bool = false
 ## 村庄小场景中的生成位置（世界像素）。
 var world_position: Vector2 = Vector2.ZERO
 var status: Status = Status.AVAILABLE
@@ -27,10 +30,24 @@ var unit_id: String = ""
 var unit_data: Dictionary = {}
 ## 创建时一次性生成的外观字典，结构与 UnitData.appearance 一致。
 var appearance: Dictionary = {}
+## 贵族冒险者自备战马的独立实例（MountInstanceData.to_dict()）。
+## 与 unit_data 中的 mount_instance 指向同一匹马；招募后清空 unit_data 时
+## 仍保留该显示数据，直到候选人记录被清理。
+var mount_instance: Dictionary = {}
 
 
 func is_available() -> bool:
 	return status == Status.AVAILABLE
+
+
+## 返回候选人携带的真实马匹实例；普通冒险者或数据缺失时返回 null。
+func get_mount_instance_data() -> MountInstanceData:
+	if mount_instance.is_empty():
+		var snapshot_mount: Variant = unit_data.get("mount_instance", {})
+		if snapshot_mount is Dictionary and not (snapshot_mount as Dictionary).is_empty():
+			return MountInstanceData.from_dict(snapshot_mount as Dictionary)
+		return null
+	return MountInstanceData.from_dict(mount_instance)
 
 
 func to_dict() -> Dictionary:
@@ -39,11 +56,13 @@ func to_dict() -> Dictionary:
 		"display_name": display_name,
 		"settlement_id": settlement_id,
 		"unit_config_id": unit_config_id,
+		"is_noble": is_noble,
 		"world_position": [world_position.x, world_position.y],
 		"status": int(status),
 		"unit_id": unit_id,
 		"unit_data": unit_data.duplicate(true),
 		"appearance": appearance.duplicate(true),
+		"mount_instance": mount_instance.duplicate(true),
 	}
 
 
@@ -53,6 +72,7 @@ static func from_dict(data: Dictionary) -> AdventurerCandidateData:
 	candidate.display_name = str(data.get("display_name", ""))
 	candidate.settlement_id = str(data.get("settlement_id", ""))
 	candidate.unit_config_id = str(data.get("unit_config_id", ""))
+	candidate.is_noble = bool(data.get("is_noble", false))
 	candidate.world_position = _read_vector2(data.get("world_position", []))
 	var status_value: int = int(data.get("status", Status.AVAILABLE))
 	if status_value < Status.AVAILABLE or status_value > Status.RECRUITED_PENDING_DEPARTURE:
@@ -65,6 +85,9 @@ static func from_dict(data: Dictionary) -> AdventurerCandidateData:
 	var appearance_value: Variant = data.get("appearance", {})
 	if appearance_value is Dictionary:
 		candidate.appearance = (appearance_value as Dictionary).duplicate(true)
+	var mount_value: Variant = data.get("mount_instance", {})
+	if mount_value is Dictionary:
+		candidate.mount_instance = (mount_value as Dictionary).duplicate(true)
 	return candidate
 
 

@@ -135,15 +135,20 @@ share_i = floor(P * N_i / N)
 ### 6.1 入口
 
 - 只有 `SettlementType.TOWN` 的地点面板显示 `SettlementTavernButton`。
-- 打开 `TavernPanel` 后隐藏地点面板，保持同一个 `PAUSE_REASON_UI_PANEL`。
+- 酒馆菜单嵌入地点面板的 `SettlementTavernHost`，切换时只改变视图可见性，保持同一个 `PAUSE_REASON_UI_PANEL`。
 - 菜单：出售俘虏、查看雇佣兵信息（占位）、离开酒馆。
+- 点击“出售俘虏”不再在城镇面板内展开下一级视图，而是发出
+  `TavernPanel.sell_requested`；`WorldMap` 隐藏城镇面板并打开独立的
+  `PrisonerSalePanel`（同一 `TavernPanel` 类的独立窗口 + 遮罩）。
 
 ### 6.2 出售界面
 
+- 独立界面直接显示出售视图，不包含酒馆菜单；
 - 左栏：当前城镇买家中的待售俘虏；
 - 右栏：玩家俘虏列表；
 - 右侧行“卖出”、左侧行“撤回”；“重置出售”恢复打开时快照；
-- 只有“确认出售”调用 `PrisonerTradeManager.sell_prisoners()`。
+- 只有“确认出售”调用 `PrisonerTradeManager.sell_prisoners()`；
+- “关闭”后隐藏独立界面并恢复城镇信息面板；世界保持暂停，不重新展开酒馆菜单。
 
 ### 6.3 价格与结算
 
@@ -159,7 +164,9 @@ share_i = floor(P * N_i / N)
   4. 一次性增加金币、`remove_prisoner()` 并 `mark_sold(settlement_id)`；
   5. 失败时不做任何部分结算。
 - 售出单位退出玩家控制与俘虏列表，保留 `sold_to_settlement_id`；普通士兵不再参与战斗、治疗、工资或后续买卖。
-- NPC 领主售出后额外交给 `LordRansomManager.on_lord_sold()` 登记赎回等待；具体生命周期见 [Lord_Ransom_System.md](Lord_Ransom_System.md)。
+- NPC 领主售出后额外交给 `LordRansomManager.on_lord_sold()` 登记 12–48 小时赎回等待；
+  若领主仍被玩家关押而未出售，则由同一管理器按 3–12 小时生成家族赎买请求。
+  两种流程互斥，详见 [Lord_Ransom_System.md](Lord_Ransom_System.md)。
 
 ## 7. 数据不变量
 

@@ -336,6 +336,7 @@ Continue / Load Game
 | `party_reinforced` | `battle_id`, `party_id`, `noble_id`, `side_index` | `BattleManager`（`try_join_battle` / `add_reinforcement`） | 战斗场景增援表现、日志、统计 |
 | `fief_recruited` | `recruiter_party_id`, `settlement_id`, `groups`, `is_player_recruiter` | `FiefRecruitmentManager` | 世界日志、部队 UI |
 | `adventurer_recruited` | `settlement_id`, `unit_id`, `unit_name` | `AdventurerRecruitmentManager` | 世界日志、村庄 UI |
+| `adventurers_recruited` | `party_id`, `settlement_id`, `counts`, `total`, `is_player_recruiter` | `AdventurerRecruitmentManager` | 大地图部队图标浮字、提示 |
 | `battle_participants_updated` | `battle_id` | `BattleManager` | 大地图战斗标记/汇总 UI |
 | `entry_added`（WorldLogManager 自定义信号） | `WorldLogEntry` | `WorldLogManager` | 大地图世界日志面板 |
 | `player_encounter_requested` | `encounter_id`, `attacker_party_id`, `target_party_id` | `EncounterManager` | WorldMap 强制遭遇对话 |

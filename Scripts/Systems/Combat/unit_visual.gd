@@ -73,6 +73,10 @@ func rebuild() -> void:
 	var plume_texture_path: String = _plume_texture_path
 	if plume_texture_path.is_empty():
 		plume_texture_path = str(appearance.get("plume_texture_path", ""))
+	# 国王盔与普通头盔缨饰互斥：身份覆盖生效时只隐藏本次表现层的缨饰，
+	# 不修改 appearance/装备；下一次重建若身份失效会自动恢复原缨饰。
+	if not UnitAppearance.get_king_helmet_texture_path(unit_data).is_empty():
+		plume_texture_path = ""
 	_human_visual.rebuild(
 		get_tabard_color(), plume_texture_path, tabard_texture_path
 	)
@@ -111,20 +115,33 @@ func _apply_equipment_visuals() -> void:
 		)
 
 	# 装备头盔优先；没有 HEAD 装备时显示按等级随机并持久化的外观头盔。
-	var head_applied: bool = false
+	var helmet_texture_path: String = ""
+	var helmet_layer: int = 0
+	var helmet_anchor := Vector2(-1.0, -1.0)
 	var head := _equipment_configs.get("HEAD") as EquipmentConfig
 	if head != null and unit_data.equipment.has("HEAD") \
 			and not head.visual_texture_path.is_empty():
-		_human_visual.set_helmet_texture(
-			head.visual_texture_path, head.visual_layer, head.visual_anchor
-		)
-		head_applied = true
-	if not head_applied:
-		var appearance_helmet: String = str(
-			appearance.get("helmet_texture_path", "")
-		)
-		if not appearance_helmet.is_empty():
-			_human_visual.set_helmet_texture(appearance_helmet)
+		helmet_texture_path = head.visual_texture_path
+		helmet_layer = head.visual_layer
+		helmet_anchor = head.visual_anchor
+	else:
+		helmet_texture_path = str(appearance.get("helmet_texture_path", ""))
+	if not helmet_texture_path.is_empty():
+		_apply_helmet_visual(helmet_texture_path, helmet_layer, helmet_anchor)
+
+
+## 国王身份只覆盖“本应显示的头盔”；没有普通头盔时不会凭空添加。
+## 覆盖结果不写入装备或外观数据，身份失效后下一次重建自动恢复原头盔。
+func _apply_helmet_visual(
+	texture_path: String, layer_override: int, anchor_pixels: Vector2
+) -> void:
+	var king_helmet_path: String = UnitAppearance.get_king_helmet_texture_path(
+		unit_data
+	)
+	if not king_helmet_path.is_empty():
+		_human_visual.set_helmet_texture(king_helmet_path)
+		return
+	_human_visual.set_helmet_texture(texture_path, layer_override, anchor_pixels)
 
 
 ## 运行时更新装备视觉配置并重建部件；不修改 UnitData 的装备数据。

@@ -17,6 +17,11 @@ extends Resource
 @export_range(0.0, 1.0, 0.01) var tier2_primary_tabard_chance: float = 0.5
 @export_range(0.0, 1.0, 0.01) var tier3_primary_tabard_chance: float = 1.0
 
+@export_category("Identity Appearance Override")
+## 国王身份对应的头盔外观覆盖。只在原本就会显示头盔时替换贴图；
+## 不写入 UnitData.appearance / 装备数据，身份失效后自动恢复原头盔。
+@export var king_helmet_texture_path: String = ""
+
 
 func get_helmet_texture_paths(tier: int) -> Array[String]:
 	match clampi(tier, 1, 3):

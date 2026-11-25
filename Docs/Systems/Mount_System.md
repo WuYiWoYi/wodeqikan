@@ -48,6 +48,7 @@ inventory:        Array[String]        # 兼容 UI/旧存档的“出现过的 I
 - `remove_item(MOUNT_ID, n)` 从实例列表移除 n 匹。
 - 装备/卸下使用 `UnitManager.equip_mount_instance()` / `unequip_mount()`：
   从持有者移除实例 → 写入 `UnitData.mount_instance`；卸下时原样返还。
+- 村庄贵族冒险者在招募前使用 `UnitManager.equip_detached_mount()` 装备自带实例；该接口只接受未注册单位，招募后仍走正式装备接口。
 - 交易使用实例 ID 列表移动：市场与玩家背包之间不会复制、不会丢失。
 
 ## 4. 外观

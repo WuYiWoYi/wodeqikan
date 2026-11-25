@@ -6,6 +6,83 @@
 
 ---
 
+## 2026-11-24 · 国王盔缨饰、酒馆独立出售与关押期赎买
+
+### 新增
+
+- `LordRansomConfig.captive_wait_hours_min` / `captive_wait_hours_max`（默认 3 / 12）：领主仍被玩家关押时的家族赎买等待。
+- `LordRansomManager` 的 `CAPTIVE` 记录来源：扫描玩家俘虏列表登记 3–12 世界小时等待，生成 `家族赎买请求` 事件。
+- `LordRansomManager.reject_captive_ransom()`：拒绝当前关押期请求，事件结束、领主继续被关押；同一关押周期不再请求。
+- `EventReminder`（`Scripts/UI/WorldMap/event_reminder.gd`）：大地图右侧小型待处理提醒，只读取事件中心可操作事件数量。
+- `TavernPanel.open_sale()` / `sell_requested`：嵌入酒馆点击出售时请求打开独立出售窗口。
+- 测试：`lord_ransom_test` 扩展关押期接受/拒绝/出售失效/详情二次校验/存档往返/提醒；`stage13_tavern_test` 更新独立出售流程。
+
+### 变更
+
+- 国王盔生效时 `UnitVisual` 不创建 `Plume` 部件；身份失效后重建即恢复原缨饰，不修改外观/装备/存档数据。
+- 出售俘虏改为独立 `PrisonerSalePanel`（同一 `TavernPanel` 类的独立窗口），不再嵌套在城镇左侧面板；关闭后恢复城镇信息，暂停原因不变。
+- `EventDetailDialog` 根据事件 `decline_label` / `decline_ends_event` 显示“取消”或“拒绝”；关押期拒绝会结束事件。
+- `EventFeed` 使用事件 `tag` 区分 `[赎回]` 与 `[赎买]`。
+- 赎买/赎回事件来源互斥：出售先移除关押期记录，关押期校验要求领主仍在玩家俘虏列表；出售/释放/转移后旧事件立即消失。
+- 存档 `ransoms` 新增 `source`、`captured_world_seconds`、`declined_world_seconds` 兼容字段，仍为 Schema v8；旧档缺失 `source` 按 `SOLD`。
+
+### 验证
+
+- 已运行并通过：`king_helmet_appearance_test`、`lord_ransom_test`、`stage13_tavern_test`、`main_map_info_test`。
+- 未执行非 headless 视觉验收；独立出售窗口与右侧提醒的实际排版需人工确认。
+
+---
+
+## 2026-11-24 · 国王身份头盔与顶栏图标化
+
+### 新增
+
+- `AppearanceConfig.king_helmet_texture_path`：国王盔外观覆盖资源路径（`头盔_特殊_国王盔.png`）。
+- `UnitAppearance.configure_king_helmet_override()` / `clear_king_helmet_override()` / `get_king_helmet_texture_path()`：表现层只读身份覆盖注册与查询。
+- `WorldContext.is_king_unit()` / `is_king_noble()`：复用 `NobleData.is_king`、`HouseData.leader_noble_id`、`KingdomData.ruling_house_id` / `king_noble_id` / `is_active` 判断国王身份。
+- 测试：`king_helmet_appearance_test`。
+
+### 变更
+
+- `UnitVisual` 头盔表现新增身份覆盖：仅在原本会显示头盔时替换为国王盔；不写入 `appearance`、装备、背包或存档，身份失效后重建即恢复。
+- 大地图顶栏金币、移速改为“图标 + 数值”，新增部队人数条目；三者统一 20×20 图标、字号 15、间距与对齐。
+- 顶栏悬浮事件改挂条目容器，图标与数值共同触发；新增部队人数悬浮明细（可战斗人数 / 伤员 / 俘虏）。
+- 部队人数统计只读玩家部队成员与 `prisoner_unit_ids`，不新增缓存；`main_map_info_test` 同步更新。
+
+### 验证
+
+- 已运行并通过：`king_helmet_appearance_test`、`main_map_info_test`、`family_appearance_test`。
+- 未执行非 headless 视觉验收；图标排版与国王盔观感目前由节点/贴图路径断言覆盖。
+
+---
+
+## 2026-11-24 · 贵族冒险者、NPC 冒险者招募与家族面板
+
+### 新增
+
+- `SettlementData.noble_adventurer_candidate` / `noble_adventurer_spawned`：每村 1 名贵族冒险者，独立于普通候选人上限。
+- `AdventurerCandidateData.is_noble` / `mount_instance` / `unit_data`：贵族类型、自备战马实例与独立单位快照。
+- `AdventurerRecruitmentManager.ensure_noble_candidate()`、`is_noble_recruit_authorized()`、`recruit_normal_candidates_for_party()` 与共享 `_recruit_candidate_into_party()`。
+- `UnitManager.equip_detached_mount()`：为未注册候选人单位装备真实马匹实例。
+- `EventBus.adventurers_recruited`：玩家/NPC 招募成功事实，携带按兵种数量。
+- `Scripts/UI/WorldMap/family_panel.gd`（`FamilyPanel`）：家族入口、部队页、封地页、封地点击定位。
+- `SettlementEconomyConfig.noble_adventurer_unit_config_id`（默认 `infantry_veteran`）。
+- 测试：`noble_adventurer_recruitment_test`、`family_panel_ui_test`。
+
+### 变更
+
+- 贵族冒险者由 `FiefRecruitmentManager.is_authorized_owner()` 判断招募权限；所有权变更立即生效，非拥有者只能查看。
+- 村庄场景将贵族人物按步行呈现，并单独生成 `HorseVisual`；不修改权威 `UnitData` 的骑乘关系，普通候选人接口与数量不变。
+- `AIManager` 在采邑储备为 0 时转入 `ADVENTURER_RECRUIT`，通过统一管理器招募普通候选人；贵族不参与 NPC 招募。
+- 大地图复用 `PartyIcon.show_floating_text()` 显示冒险者招募结果。
+- 顶栏新增 `FamilyButton`，家族面板沿用 `PAUSE_REASON_UI_PANEL` 与现有暂停计数；部队/封地数据每次刷新从权威管理器实时读取。
+- 存档新增兼容字段，不改变顶层结构，仍为 Schema v8；旧档不会重复生成贵族或战马。
+
+### 验证
+
+- 已运行并通过：`noble_adventurer_recruitment_test`、`family_panel_ui_test`、`fief_adventurer_system_test`、`fief_adventurer_ui_test`、`stage13_village_candidates_test`。
+- 未执行非 headless 视觉验收；贵族人物/战马布局目前由位置与节点断言覆盖。
+
 ## 2026-11-24 · 五级战斗经验、俘虏价格与 NPC 领主赎回
 
 ### 新增

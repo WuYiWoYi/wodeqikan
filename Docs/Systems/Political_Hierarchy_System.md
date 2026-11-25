@@ -72,6 +72,8 @@
   - `settlement.owner_noble_id == lord_id`，或
   - 请求者是 `owner_house_id` 家族的领袖。
 - `can_recruit()` 先调用该授权判断；地点面板、事件中心与头人对话共用同一结果，不各自复制规则。
+- 贵族冒险者招募也调用同一 `is_authorized_owner()`，不另写贵族权限规则；所有权变更立即影响下一次招募判断。
+- 家族面板复用 `HouseManager.get_house_nobles()` 与 `SettlementData.owner_house_id` / `owner_noble_id` 实时读取部队和封地，不建立第二套家族成员或封地缓存。
 
 ## 6. 关系与战争
 

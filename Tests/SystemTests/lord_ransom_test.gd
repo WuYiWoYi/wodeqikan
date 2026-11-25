@@ -11,6 +11,8 @@ var _player: PartyData = null
 var _town: SettlementData = null
 var _other_settlement: SettlementData = null
 var _used_noble_ids: Array[String] = []
+## 第一个关押期赎买测试的贵族；接受后领主回到世界，可在后续测试中再次俘虏。
+var _captive_reusable_noble_id: String = ""
 
 
 func _ready() -> void:
@@ -46,6 +48,9 @@ func _run_async() -> void:
 	await _test_sale_and_accept_with_ui()
 	_test_invalid_event_closes_dialog()
 	_test_missing_house_recovers()
+	await _test_captive_request_accept()
+	_test_captive_reject_and_sell()
+	_test_captive_invalidated_by_sale()
 	_test_pending_request_persistence()
 
 
@@ -282,6 +287,314 @@ func _test_missing_house_recovers() -> void:
 
 
 # ---------------------------------------------------------------------------
+# 关押期赎买：领主仍在玩家俘虏队伍中（3–12 游戏小时）
+# ---------------------------------------------------------------------------
+
+
+func _test_captive_request_accept() -> void:
+	var lord := _next_lord_unit()
+	_check(not lord.is_empty(), "找到可关押的 NPC 领主")
+	if lord.is_empty():
+		return
+	var unit := _context.unit_manager.get_unit(str(lord["unit_id"]))
+	var noble := _context.noble_manager.get_noble(str(lord["noble_id"]))
+	_used_noble_ids.append(noble.lord_id)
+	_captive_reusable_noble_id = noble.lord_id
+	_capture_lord(unit, noble)
+
+	_check(
+		_context.lord_ransom_manager.get_lord_state(noble.lord_id) == "WAITING",
+		"领主进入玩家俘虏队伍后登记关押期等待"
+	)
+	var record: Dictionary = _context.lord_ransom_manager.get_record_for_noble(
+		noble.lord_id, LordRansomManager.SOURCE_CAPTIVE
+	)
+	_check(not record.is_empty(), "关押期记录已创建")
+	if record.is_empty():
+		return
+	_check(
+		str(record.get("source", "")) == LordRansomManager.SOURCE_CAPTIVE,
+		"记录来源标记为 CAPTIVE"
+	)
+	var wait_hours: float = (
+		float(record.get("due_world_seconds", 0.0))
+		- float(record.get("captured_world_seconds", 0.0))
+	) / TimeManager.REAL_SECONDS_PER_GAME_HOUR
+	_check(
+		wait_hours >= 3.0 - 0.01 and wait_hours <= 12.0 + 0.01,
+		"关押期赎买等待在 3–12 游戏小时（%.2f）" % wait_hours
+	)
+	_check(
+		_context.event_center.get_events_of_type("RANSOM").is_empty(),
+		"关押后不立即产生赎买事件"
+	)
+
+	_advance_captive_due(noble.lord_id)
+	var events: Array[Dictionary] = _context.event_center.get_events_of_type("RANSOM")
+	_check(events.size() == 1, "关押期结束后生成一条赎买事件")
+	if events.is_empty():
+		return
+	var event: Dictionary = events[0]
+	var ransom_id: String = str(event.get("ransom_id", ""))
+	var gold: int = int(event.get("gold", 0))
+	_check(str(event.get("source", "")) == "CAPTIVE", "事件来源为关押期赎买")
+	_check(str(event.get("tag", "")) == "赎买", "事件显示为赎买而非赎回")
+	_check(
+		str(event.get("title", "")) == "家族赎买请求",
+		"关押期事件标题为家族赎买请求"
+	)
+	_check(
+		str(event.get("detail", "")).contains("俘虏队伍"),
+		"事件详情说明领主仍在玩家俘虏队伍中"
+	)
+	_check(str(event.get("decline_label", "")) == "拒绝", "关押期事件的拒绝文案正确")
+	_check(bool(event.get("decline_ends_event", false)), "拒绝会结束事件")
+	_check(
+		_context.lord_ransom_manager.get_lord_state(noble.lord_id) == "REQUESTED",
+		"关押期记录进入已请求状态"
+	)
+
+	# 右侧小型提醒由真实事件状态驱动，点击可直接打开唯一事件详情。
+	_map.call("_refresh_event_feed_if_needed")
+	var reminder = _map.call("get_event_reminder")
+	_check(reminder != null and reminder.visible, "右侧出现待处理事件提醒")
+	if reminder != null:
+		_check(reminder.get_event_count() == 1, "提醒显示当前待处理事件数")
+		_check(
+			reminder.get_text().contains("有新的事件待处理"),
+			"提醒使用简洁待处理文案"
+		)
+		var reminder_button := reminder.find_child(
+			"EventReminderButton", true, false
+		) as Button
+		_check(reminder_button != null, "提醒包含可点击按钮")
+		if reminder_button != null:
+			reminder_button.pressed.emit()
+			await get_tree().process_frame
+			var dialog = _map.call("get_event_detail_dialog")
+			_check(dialog.visible, "点击提醒直接打开唯一事件详情")
+
+	# 关押期请求存档/读档：保留来源、赎金与唯一事件，不重复触发。
+	var captive_save := _context.to_save_data()
+	TimeManager.restore_world_time(
+		captive_save.world_elapsed_seconds, TimeManager.SPEED_NORMAL
+	)
+	var captive_restored := WorldContext.new()
+	captive_restored.name = "CaptiveRansomRestoredContext"
+	add_child(captive_restored)
+	_check(captive_restored.load_from_save_data(captive_save), "关押期请求可正常读档")
+	var restored_events: Array[Dictionary] = (
+		captive_restored.event_center.get_events_of_type("RANSOM")
+	)
+	_check(restored_events.size() == 1, "关押期请求读档后仍然只有一条")
+	if not restored_events.is_empty():
+		_check(
+			str(restored_events[0].get("ransom_id", "")) == ransom_id,
+			"关押期请求使用稳定 ransom_id"
+		)
+		_check(
+			str(restored_events[0].get("source", "")) == "CAPTIVE",
+			"读档保留关押期来源"
+		)
+		_check(int(restored_events[0].get("gold", 0)) == gold, "读档保留已确定赎金")
+	_check(
+		captive_restored.lord_ransom_manager.get_lord_state(noble.lord_id)
+			== "REQUESTED",
+		"读档保留关押期已请求状态"
+	)
+	var restored_captive_unit := captive_restored.unit_manager.get_unit(unit.unit_id)
+	_check(
+		restored_captive_unit != null and restored_captive_unit.is_prisoner(),
+		"读档后领主仍处于玩家关押状态"
+	)
+	captive_restored.queue_free()
+
+	var gold_before: int = _context.player_profile.gold
+	var accept_button := _map.call("get_event_detail_dialog").find_child(
+		"RansomAcceptButton", true, false
+	) as Button
+	_check(accept_button != null, "关押期详情存在接受按钮")
+	if accept_button == null:
+		return
+	accept_button.pressed.emit()
+	await get_tree().process_frame
+
+	_check(_context.player_profile.gold == gold_before + gold, "接受后支付一次赎金")
+	_check(
+		_context.party_manager.get_prisoner_ids(_player.party_id).is_empty(),
+		"接受后领主离开玩家俘虏队伍"
+	)
+	_check(not unit.is_prisoner(), "接受后领主俘虏状态被清除")
+	_check(
+		_context.event_center.get_events_of_type("RANSOM").is_empty(),
+		"接受后赎买事件结束"
+	)
+	_check(
+		_context.lord_ransom_manager.get_record_for_noble(
+			noble.lord_id, LordRansomManager.SOURCE_CAPTIVE
+		).is_empty(),
+		"接受后关押期记录移除"
+	)
+	var restored := _context.unit_manager.get_unit(unit.unit_id)
+	_check(
+		restored != null and restored.is_alive()
+			and not restored.current_party_id.is_empty(),
+		"接受后领主回到世界"
+	)
+	var gold_after: int = _context.player_profile.gold
+	var again: Dictionary = _context.lord_ransom_manager.accept_ransom(ransom_id)
+	_check(not bool(again.get("success", false)), "已结束的赎买不能再次接受")
+	_check(_context.player_profile.gold == gold_after, "重复接受不重复支付")
+
+	_map.call("_refresh_event_feed_if_needed")
+	_check(
+		not _map.call("get_event_reminder").visible,
+		"没有待处理事件时右侧提醒消失"
+	)
+
+
+func _test_captive_reject_and_sell() -> void:
+	var lord := _next_lord_unit()
+	if lord.is_empty():
+		return
+	var unit := _context.unit_manager.get_unit(str(lord["unit_id"]))
+	var noble := _context.noble_manager.get_noble(str(lord["noble_id"]))
+	_used_noble_ids.append(noble.lord_id)
+	_capture_lord(unit, noble)
+	_advance_captive_due(noble.lord_id)
+	var events: Array[Dictionary] = _context.event_center.get_events_of_type("RANSOM")
+	_check(events.size() == 1, "第二名关押领主生成赎买事件")
+	if events.is_empty():
+		return
+	var event: Dictionary = events[0]
+	_check(
+		_context.lord_ransom_manager.reject_captive_ransom(
+			str(event.get("ransom_id", ""))
+		),
+		"拒绝关押期赎买请求成功"
+	)
+	_check(
+		_context.event_center.get_events_of_type("RANSOM").is_empty(),
+		"拒绝后事件立即结束"
+	)
+	_check(
+		_context.lord_ransom_manager.get_lord_state(noble.lord_id) == "DECLINED",
+		"拒绝记录进入已拒绝状态"
+	)
+	_check(unit.is_prisoner(), "拒绝后领主仍被玩家关押")
+	_check(
+		_context.party_manager.get_prisoner_ids(_player.party_id).has(unit.unit_id),
+		"拒绝后领主仍在玩家俘虏列表"
+	)
+	var gold_before: int = _context.player_profile.gold
+
+	# 同一关押周期内继续推进世界时间，不会重复生成请求。
+	TimeManager.world_elapsed_seconds += TimeManager.REAL_SECONDS_PER_GAME_HOUR * 24.0
+	_context.lord_ransom_manager.tick()
+	_check(
+		_context.event_center.get_events_of_type("RANSOM").is_empty(),
+		"拒绝后同一关押周期不再重复请求"
+	)
+	_check(_context.player_profile.gold == gold_before, "拒绝不支付金币")
+
+	# 拒绝后仍可把领主卖给城镇：关押期记录结束，转为原出售赎回流程。
+	var sold: Dictionary = _context.prisoner_trade_manager.sell_prisoners(
+		_player.party_id, [unit.unit_id], _town.settlement_id
+	)
+	_check(bool(sold.get("success", false)), "拒绝后仍可出售该领主")
+	_check(
+		_context.lord_ransom_manager.get_record_for_noble(
+			noble.lord_id, LordRansomManager.SOURCE_CAPTIVE
+		).is_empty(),
+		"出售后关押期记录被移除"
+	)
+	_check(
+		_context.lord_ransom_manager.get_lord_state(noble.lord_id) == "WAITING",
+		"出售后进入原有 12–48 小时赎回等待"
+	)
+	_advance_to_due(noble.lord_id)
+	var sold_events: Array[Dictionary] = _context.event_center.get_events_of_type("RANSOM")
+	_check(sold_events.size() == 1, "出售后按原有机制生成赎回事件")
+	if not sold_events.is_empty():
+		_check(
+			str(sold_events[0].get("tag", "")) == "赎回",
+			"出售阶段事件显示为赎回而非赎买"
+		)
+		_check(
+			str(sold_events[0].get("source", "")) == "SOLD",
+			"出售阶段事件来源为 SOLD"
+		)
+		# 清理出售赎回事件，避免影响后续"再次关押"与存档测试的事件计数。
+		_context.lord_ransom_manager.accept_ransom(
+			str(sold_events[0].get("ransom_id", ""))
+		)
+
+
+func _test_captive_invalidated_by_sale() -> void:
+	if _captive_reusable_noble_id.is_empty():
+		return
+	var noble := _context.noble_manager.get_noble(_captive_reusable_noble_id)
+	_check(noble != null, "找回可再次俘虏的贵族身份")
+	if noble == null:
+		return
+	var unit := _find_lord_unit(noble.lord_id)
+	_check(unit != null, "找回可再次俘虏的领主")
+	if unit == null:
+		return
+	_capture_lord(unit, noble)
+	_advance_captive_due(noble.lord_id)
+	var events: Array[Dictionary] = _context.event_center.get_events_of_type("RANSOM")
+	var captive_event: Dictionary = {}
+	for candidate: Dictionary in events:
+		if str(candidate.get("source", "")) == "CAPTIVE":
+			captive_event = candidate
+			break
+	_check(not captive_event.is_empty(), "再次关押后生成新的赎买事件")
+	if captive_event.is_empty():
+		return
+	var event: Dictionary = captive_event
+	_map.call("_on_event_feed_selected", str(event.get("event_id", "")))
+	var dialog = _map.call("get_event_detail_dialog")
+	_check(dialog.visible, "关押期赎买详情已打开")
+
+	# 详情打开期间把领主卖给城镇：事件必须立即失效，旧弹窗不能继续领取。
+	var sold: Dictionary = _context.prisoner_trade_manager.sell_prisoners(
+		_player.party_id, [unit.unit_id], _town.settlement_id
+	)
+	_check(bool(sold.get("success", false)), "详情打开期间可以正常出售领主")
+	_check(
+		_context.lord_ransom_manager.get_record_for_noble(
+			noble.lord_id, LordRansomManager.SOURCE_CAPTIVE
+		).is_empty(),
+		"出售后旧关押期请求立即移除"
+	)
+	dialog.refresh_if_needed()
+	_check(not dialog.visible, "领主状态变化后详情弹窗自动关闭")
+	_check(
+		_context.event_center.get_events_of_type("RANSOM").is_empty(),
+		"出售后不会残留可操作的旧赎买事件"
+	)
+	var gold_before: int = _context.player_profile.gold
+	var result: Dictionary = _context.lord_ransom_manager.accept_ransom(
+		str(event.get("ransom_id", ""))
+	)
+	_check(not bool(result.get("success", false)), "旧赎买事件不能继续结算")
+	_check(_context.player_profile.gold == gold_before, "旧事件不重复发放赎金")
+	_check(
+		_context.lord_ransom_manager.get_lord_state(noble.lord_id) == "WAITING",
+		"出售后领主转入原有赎回等待"
+	)
+	# 清理出售赎回事件，避免影响后续存档测试。
+	_advance_to_due(noble.lord_id)
+	for sold_event: Dictionary in _context.event_center.get_events_of_type("RANSOM"):
+		if str(sold_event.get("source", "")) == "SOLD":
+			_context.lord_ransom_manager.accept_ransom(
+				str(sold_event.get("ransom_id", ""))
+			)
+			break
+
+
+# ---------------------------------------------------------------------------
 # 待处理请求存档/读档
 # ---------------------------------------------------------------------------
 
@@ -363,6 +676,41 @@ func _sell_lord(unit: UnitData, noble: NobleData) -> Dictionary:
 	return _context.prisoner_trade_manager.sell_prisoners(
 		_player.party_id, [unit.unit_id], _town.settlement_id
 	)
+
+
+## 把领主从原部队移出并加入玩家俘虏列表；随后 tick 一次登记关押期记录。
+func _capture_lord(unit: UnitData, noble: NobleData) -> void:
+	var party := _context.party_manager.get_party(noble.party_id)
+	if party != null and party.member_unit_ids.has(unit.unit_id):
+		_context.party_manager.remove_member(party.party_id, unit.unit_id)
+	if not unit.current_party_id.is_empty():
+		_context.party_manager.remove_member(unit.current_party_id, unit.unit_id)
+	if unit.is_prisoner():
+		_context.party_manager.remove_prisoner(
+			unit.prisoner_owner_party_id, unit.unit_id
+		)
+	_check(
+		_context.party_manager.add_prisoner(_player.party_id, unit.unit_id),
+		"领主成为玩家俘虏"
+	)
+	_context.lord_ransom_manager.tick()
+
+
+func _advance_captive_due(noble_id: String) -> void:
+	var record: Dictionary = _context.lord_ransom_manager.get_record_for_noble(
+		noble_id, LordRansomManager.SOURCE_CAPTIVE
+	)
+	if record.is_empty():
+		return
+	TimeManager.world_elapsed_seconds = float(record.get("due_world_seconds", 0.0)) + 1.0
+	_context.lord_ransom_manager.tick()
+
+
+func _find_lord_unit(noble_id: String) -> UnitData:
+	for unit: UnitData in _context.unit_manager.get_all_units():
+		if unit != null and unit.noble_id == noble_id:
+			return unit
+	return null
 
 
 func _advance_to_due(noble_id: String) -> void:

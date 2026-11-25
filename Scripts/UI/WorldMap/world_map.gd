@@ -7,8 +7,10 @@ extends Node2D
 const TextureRegion = preload("res://Scripts/Core/World/texture_region_utils.gd")
 const MoveTargetGuideScript = preload("res://Scripts/Systems/WorldMap/move_target_guide.gd")
 const EventCenterPanelScript = preload("res://Scripts/UI/WorldMap/event_center_panel.gd")
+const FamilyPanelScript = preload("res://Scripts/UI/WorldMap/family_panel.gd")
 const EventFeedScript = preload("res://Scripts/UI/WorldMap/event_feed.gd")
 const EventDetailDialogScript = preload("res://Scripts/UI/WorldMap/event_detail_dialog.gd")
+const EventReminderScript = preload("res://Scripts/UI/WorldMap/event_reminder.gd")
 
 const PARTY_INTERACTION_RADIUS: float = 40.0
 const PARTY_INTERACTION_EXIT_RADIUS: float = 64.0
@@ -52,6 +54,16 @@ const STATIONED_PARTY_RADIUS: float = 26.0
 ## 停留部队旗帜条与建筑美术之间的屏幕间距。
 const STATIONED_BAR_GAP: float = 8.0
 
+## 顶栏金币/移速/部队人数使用同一套图标 + 数值表现。
+const TOP_INFO_ICON_GOLD_PATH: String = \
+	"res://art/我的骑砍临时美术/正式美术_其他/UI美术/UI_金币.png"
+const TOP_INFO_ICON_SPEED_PATH: String = \
+	"res://art/我的骑砍临时美术/正式美术_其他/UI美术/UI_移速.png"
+const TOP_INFO_ICON_TROOP_PATH: String = \
+	"res://art/我的骑砍临时美术/正式美术_其他/UI美术/UI_人数.png"
+const TOP_INFO_ICON_SIZE := Vector2(20.0, 20.0)
+const TOP_INFO_ICON_TEXT_GAP: int = 4
+
 ## 大地图镜头模式：默认平滑跟随玩家；按 WASD 后自由移动，直到玩家重新下达移动/跟随指令。
 enum CameraMode {
 	FOLLOW_PLAYER,
@@ -77,6 +89,8 @@ var _ui_root: Control = null
 var _world_time_label: Label = null
 var _money_label: Label = null
 var _party_speed_label: Label = null
+## 顶栏部队人数；与底部部队对话面板的 `_party_troop_label` 相互独立。
+var _top_party_troop_label: Label = null
 var _player_info_label: Label = null
 var _pause_button: Button = null
 var _speed_one_button: Button = null
@@ -92,11 +106,18 @@ var _top_info_signature: String = ""
 ## 主界面事件中心：只读聚合任务/待处理事项。
 var _event_center_panel = null
 var _event_center_pause_active: bool = false
+## 家族面板：只读展示玩家家族贵族与封地，不建立独立政治数据。
+var _family_panel = null
+var _family_pause_active: bool = false
 
 ## 右侧可操作事件框与详情弹窗；只展示 EventCenter 当前有效事件。
 var _event_feed = null
+## 右侧小型待处理提醒；只反映事件中心当前可操作事件数量。
+var _event_reminder = null
 var _event_detail_dialog = null
 var _event_dialog_pause_active: bool = false
+## 独立出售俘虏覆盖层；复用 TavernPanel 的出售逻辑，不嵌套在城镇面板中。
+var _prisoner_sale_panel = null
 
 var _settlement_panel: PanelContainer = null
 ## 地点面板内部的两种内容视图：城镇信息与酒馆内容在同一窗口内切换。
@@ -272,6 +293,8 @@ func _ready() -> void:
 		EventBus.battle_participants_updated.connect(_on_battle_participants_updated)
 	if not EventBus.fief_recruited.is_connected(_on_fief_recruited):
 		EventBus.fief_recruited.connect(_on_fief_recruited)
+	if not EventBus.adventurers_recruited.is_connected(_on_adventurers_recruited):
+		EventBus.adventurers_recruited.connect(_on_adventurers_recruited)
 	if not EventBus.npc_supply_purchased.is_connected(_on_npc_supply_purchased):
 		EventBus.npc_supply_purchased.connect(_on_npc_supply_purchased)
 
@@ -318,6 +341,9 @@ func _exit_tree() -> void:
 	if _event_center_pause_active:
 		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
 		_event_center_pause_active = false
+	if _family_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_family_pause_active = false
 	if _event_dialog_pause_active:
 		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
 		_event_dialog_pause_active = false
@@ -346,6 +372,7 @@ func _process(delta: float) -> void:
 	_update_party_hover()
 	_refresh_encyclopedia_if_needed()
 	_refresh_event_center_if_needed()
+	_refresh_family_panel_if_needed()
 	_refresh_event_feed_if_needed()
 	_last_player_position = _player_party.world_position
 
@@ -922,7 +949,9 @@ func _build_ui() -> void:
 	_build_save_panel()
 	_build_encyclopedia_panel()
 	_build_event_center_panel()
+	_build_family_panel()
 	_build_event_feed()
+	_build_event_reminder()
 	# 市场是覆盖层，最后加入以保证显示在地点/背包面板之上。
 	_build_market_panel()
 	_build_tavern_panel()
@@ -962,11 +991,15 @@ func _build_top_bar() -> void:
 	left.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	content.add_child(left)
 
-	_money_label = _make_top_info_label("金币：0", "MoneyLabel")
-	left.add_child(_money_label)
-
-	_party_speed_label = _make_top_info_label("部队移速：0.0", "PartySpeedLabel")
-	left.add_child(_party_speed_label)
+	_money_label = _add_top_info_entry(
+		left, TOP_INFO_ICON_GOLD_PATH, "MoneyLabel", "0"
+	)
+	_party_speed_label = _add_top_info_entry(
+		left, TOP_INFO_ICON_SPEED_PATH, "PartySpeedLabel", "0.0"
+	)
+	_top_party_troop_label = _add_top_info_entry(
+		left, TOP_INFO_ICON_TROOP_PATH, "PartySizeLabel", "0"
+	)
 
 	var center := HBoxContainer.new()
 	center.name = "TopBarCenter"
@@ -1024,6 +1057,11 @@ func _build_top_bar() -> void:
 	party_button.tooltip_text = "查看玩家部队与士兵详情"
 	party_button.pressed.connect(_on_party_manage_pressed)
 	right.add_child(party_button)
+
+	var family_button := _make_top_bar_button("家族", "FamilyButton")
+	family_button.tooltip_text = "查看家族贵族与封地"
+	family_button.pressed.connect(_on_family_pressed)
+	right.add_child(family_button)
 
 	var inventory_button := _make_top_bar_button("背包", "InventoryButton")
 	inventory_button.tooltip_text = "查看玩家金币与持有物品"
@@ -1102,6 +1140,80 @@ func get_event_center_panel():
 
 
 # ---------------------------------------------------------------------------
+# 家族管理面板
+# ---------------------------------------------------------------------------
+
+
+func _build_family_panel() -> void:
+	_family_panel = FamilyPanelScript.new()
+	_family_panel.name = "FamilyOverlay"
+	_family_panel.visible = false
+	_family_panel.closed.connect(_on_family_closed)
+	_family_panel.settlement_selected.connect(_on_family_settlement_selected)
+	_ui_root.add_child(_family_panel)
+	_family_panel.setup(_context)
+
+
+func open_family_panel() -> bool:
+	if _context == null or _family_panel == null:
+		return false
+	if _family_panel.visible or _battle_transition_started:
+		return false
+	if _has_open_modal(true):
+		return false
+	if not _family_pause_active:
+		TimeManager.push_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_family_pause_active = true
+	_family_panel.open()
+	_set_time_buttons_enabled(false)
+	_update_time_ui()
+	return true
+
+
+func close_family_panel() -> void:
+	if _family_panel != null and _family_panel.visible:
+		_family_panel.close()
+
+
+func _on_family_pressed() -> void:
+	open_family_panel()
+
+
+func _on_family_closed() -> void:
+	if _family_pause_active:
+		TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
+		_family_pause_active = false
+	_refresh_time_buttons()
+	_update_time_ui()
+
+
+func _on_family_settlement_selected(settlement_id: String) -> void:
+	if focus_settlement_on_map(settlement_id):
+		close_family_panel()
+
+
+func _refresh_family_panel_if_needed() -> void:
+	if _family_panel != null and _family_panel.visible:
+		_family_panel.refresh_if_needed()
+
+
+func get_family_panel():
+	return _family_panel
+
+
+## 把镜头定位到地点；复用大地图自由镜头与边界限制，不改变玩家部队。
+func focus_settlement_on_map(settlement_id: String) -> bool:
+	if _context == null or settlement_id.is_empty():
+		return false
+	var settlement := _context.settlement_manager.get_settlement(settlement_id)
+	if settlement == null:
+		return false
+	_camera_mode = CameraMode.FREE_CAMERA
+	camera.position = _clamp_camera_position(settlement.world_position)
+	return true
+
+
+# ---------------------------------------------------------------------------
 # 右侧可操作事件框与详情弹窗
 # ---------------------------------------------------------------------------
 
@@ -1113,6 +1225,16 @@ func _build_event_feed() -> void:
 	_event_feed.event_selected.connect(_on_event_feed_selected)
 	_ui_root.add_child(_event_feed)
 	_event_feed.setup(_context)
+
+
+## 右侧小型提醒：只展示“是否存在待处理事件”，不复制事件数据。
+func _build_event_reminder() -> void:
+	_event_reminder = EventReminderScript.new()
+	_event_reminder.name = "EventReminder"
+	_event_reminder.visible = false
+	_event_reminder.open_requested.connect(_on_event_reminder_pressed)
+	_ui_root.add_child(_event_reminder)
+	_event_reminder.setup(_context)
 
 
 func _build_event_detail_dialog() -> void:
@@ -1128,8 +1250,25 @@ func get_event_feed():
 	return _event_feed
 
 
+func get_event_reminder():
+	return _event_reminder
+
+
 func get_event_detail_dialog():
 	return _event_detail_dialog
+
+
+## 点击提醒：唯一事件直接打开详情，多条时进入事件中心，均由现有事件数据驱动。
+func _on_event_reminder_pressed() -> void:
+	if _context == null:
+		return
+	var events: Array[Dictionary] = _context.event_center.get_actionable_events()
+	if events.is_empty():
+		return
+	if events.size() == 1:
+		_on_event_feed_selected(str(events[0].get("event_id", "")))
+		return
+	open_event_center()
 
 
 func _on_event_feed_selected(event_id: String) -> void:
@@ -1159,6 +1298,8 @@ func _on_event_detail_closed() -> void:
 func _refresh_event_feed_if_needed() -> void:
 	if _event_feed != null:
 		_event_feed.refresh_if_needed()
+	if _event_reminder != null:
+		_event_reminder.refresh_if_needed()
 	if _event_detail_dialog != null:
 		_event_detail_dialog.refresh_if_needed()
 
@@ -1885,13 +2026,73 @@ func _build_tavern_panel() -> void:
 	_tavern_panel.name = "TavernPanel"
 	_tavern_panel.visible = false
 	_tavern_panel.closed.connect(_on_tavern_closed)
+	_tavern_panel.sell_requested.connect(_on_tavern_sell_requested)
 	_settlement_tavern_host.add_child(_tavern_panel)
 	# 嵌入城镇信息面板；不创建遮罩或独立二级窗口。
 	_tavern_panel.setup(_context, true)
 
+	# 独立出售界面：独立遮罩 + 窗口，复用同一套出售业务与视图。
+	_prisoner_sale_panel = TavernPanel.new()
+	_prisoner_sale_panel.name = "PrisonerSalePanel"
+	_prisoner_sale_panel.visible = false
+	_prisoner_sale_panel.closed.connect(_on_prisoner_sale_closed)
+	_prisoner_sale_panel.prisoners_sold.connect(_on_prisoner_sale_completed)
+	_ui_root.add_child(_prisoner_sale_panel)
+	_prisoner_sale_panel.setup(_context, false)
+
 
 func get_tavern_panel() -> TavernPanel:
 	return _tavern_panel
+
+
+func get_prisoner_sale_panel() -> TavernPanel:
+	return _prisoner_sale_panel
+
+
+## 嵌入酒馆只负责发起意图：隐藏城镇面板并打开独立出售界面。
+## 暂停原因仍由地点面板持有，关闭出售界面后回到城镇信息。
+func _on_tavern_sell_requested(settlement_id: String) -> void:
+	if _context == null or _prisoner_sale_panel == null:
+		return
+	var settlement := _context.settlement_manager.get_settlement(settlement_id)
+	if settlement == null:
+		return
+	if _tavern_panel != null:
+		_tavern_panel.reset()
+	_show_settlement_info_view()
+	_settlement_panel.visible = false
+	if not _prisoner_sale_panel.open_sale(settlement):
+		_settlement_panel.visible = true
+		_show_settlement_info_view()
+		return
+	_set_time_buttons_enabled(false)
+	_update_time_ui()
+
+
+func _on_prisoner_sale_closed() -> void:
+	if _inventory_panel != null:
+		_inventory_panel.refresh()
+	if _context == null:
+		return
+	var settlement := _context.settlement_manager.get_settlement(_settlement_latch_id)
+	if settlement == null:
+		if _settlement_pause_active:
+			TimeManager.pop_pause(GameManager.PAUSE_REASON_UI_PANEL)
+			_settlement_pause_active = false
+		_refresh_time_buttons()
+		_update_time_ui()
+		return
+	_show_settlement_info_view()
+	_settlement_panel.visible = true
+	_refresh_settlement_info(settlement)
+	_set_time_buttons_enabled(false)
+	_update_time_ui()
+
+
+func _on_prisoner_sale_completed(_result: Dictionary) -> void:
+	# 出售已由 PrisonerTradeManager 原子结算；这里只刷新只读显示。
+	if _inventory_panel != null:
+		_inventory_panel.refresh()
 
 
 func _on_settlement_tavern_pressed() -> void:
@@ -3601,6 +3802,8 @@ func _open_settlement(settlement: SettlementData) -> void:
 	if _tavern_panel != null:
 		# 打开/切换地点时清理上一次酒馆状态，避免残留出售预览或视图。
 		_tavern_panel.reset()
+	if _prisoner_sale_panel != null and _prisoner_sale_panel.visible:
+		_prisoner_sale_panel.reset()
 	_show_settlement_info_view()
 	_refresh_settlement_info(settlement)
 	_settlement_recruit_status_label.text = ""
@@ -3708,6 +3911,8 @@ func _on_settlement_leave_pressed() -> void:
 		_market_panel.close()
 	if _tavern_panel != null:
 		_tavern_panel.reset()
+	if _prisoner_sale_panel != null and _prisoner_sale_panel.visible:
+		_prisoner_sale_panel.reset()
 	_show_settlement_info_view()
 	_settlement_panel.visible = false
 	if _settlement_pause_active:
@@ -3749,6 +3954,8 @@ func enter_village(settlement_id: String) -> bool:
 	TimeManager.push_pause(GameManager.PAUSE_REASON_SMALL_SCENE)
 	if _tavern_panel != null:
 		_tavern_panel.reset()
+	if _prisoner_sale_panel != null and _prisoner_sale_panel.visible:
+		_prisoner_sale_panel.reset()
 	_show_settlement_info_view()
 	_settlement_panel.visible = false
 	if _settlement_pause_active:
@@ -4045,6 +4252,33 @@ func _on_fief_recruited(
 	if icon == null or not is_instance_valid(icon):
 		return
 	icon.show_floating_text("招募了%d组采邑" % maxi(1, groups))
+
+
+## 玩家或 NPC 在村庄招募冒险者成功：复用部队图标浮动提示。
+## 文本由实际招募到的兵种与数量生成，不在 UI 内推断招募结果。
+func _on_adventurers_recruited(
+	party_id: String,
+	_settlement_id: String,
+	counts: Dictionary,
+	_total: int,
+	_is_player_recruiter: bool
+) -> void:
+	var icon := _party_icons.get(party_id) as PartyIcon
+	if icon == null or not is_instance_valid(icon):
+		return
+	var parts: Array[String] = []
+	for config_id_value: Variant in counts:
+		var count: int = int(counts[config_id_value])
+		if count <= 0:
+			continue
+		var config_id: String = str(config_id_value)
+		var config: UnitConfig = _context.unit_manager.get_unit_config(config_id) \
+			if _context != null else null
+		var unit_name: String = config.display_name if config != null else config_id
+		parts.append("%d 个%s" % [count, unit_name])
+	if parts.is_empty():
+		return
+	icon.show_floating_text("招募了%s" % "、".join(parts))
 
 
 ## NPC 补给采购成功：在部队图标上方浮出一次简要提示，不写玩家世界日志。
@@ -4587,14 +4821,38 @@ func _build_top_info_tooltip() -> void:
 	margin.add_child(_top_info_content)
 
 
-func _make_top_info_label(text: String, node_name: String) -> Label:
-	var label := _make_label(text, 15)
+## 图标与数值同属一个条目；悬浮事件挂在条目容器上，两者共同触发提示。
+func _add_top_info_entry(
+	parent: Control, icon_path: String, node_name: String, initial_text: String
+) -> Label:
+	var entry := HBoxContainer.new()
+	entry.name = "%sEntry" % node_name
+	entry.mouse_filter = Control.MOUSE_FILTER_STOP
+	entry.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	entry.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	entry.add_theme_constant_override("separation", TOP_INFO_ICON_TEXT_GAP)
+	parent.add_child(entry)
+
+	var icon := TextureRect.new()
+	icon.name = "%sIcon" % node_name
+	icon.custom_minimum_size = TOP_INFO_ICON_SIZE
+	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if ResourceLoader.exists(icon_path):
+		icon.texture = load(icon_path) as Texture2D
+	entry.add_child(icon)
+
+	var label := _make_label(initial_text, 15)
 	label.name = node_name
-	label.mouse_filter = Control.MOUSE_FILTER_STOP
-	label.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	label.mouse_entered.connect(_on_top_info_hover.bind(node_name, true))
-	label.mouse_exited.connect(_on_top_info_hover.bind(node_name, false))
+	entry.add_child(label)
+
+	entry.mouse_entered.connect(_on_top_info_hover.bind(node_name, true))
+	entry.mouse_exited.connect(_on_top_info_hover.bind(node_name, false))
 	return label
 
 
@@ -4616,14 +4874,16 @@ func _hide_top_info_tooltip() -> void:
 		_top_info_tooltip.visible = false
 
 
-## 每帧同步金币/移速；数据变化时顶部悬浮提示也随之更新。
+## 每帧同步金币/移速/部队人数；数据变化时顶部悬浮提示也随之更新。
 func _update_top_info() -> void:
 	if _context == null or _player_party == null:
 		return
 	if _money_label != null:
-		_money_label.text = "金币：%d" % _context.player_profile.gold
+		_money_label.text = str(_context.player_profile.gold)
 	if _party_speed_label != null:
-		_party_speed_label.text = "部队移速：%.1f" % _get_party_speed(_player_party)
+		_party_speed_label.text = "%.1f" % _get_party_speed(_player_party)
+	if _top_party_troop_label != null:
+		_top_party_troop_label.text = str(_get_party_troop_counts()["total"])
 	if _top_info_hover_kind.is_empty():
 		return
 	_refresh_top_info_tooltip()
@@ -4639,10 +4899,16 @@ func _refresh_top_info_tooltip() -> void:
 		return
 
 	var lines: Array[String] = []
-	if _top_info_hover_kind == "MoneyLabel":
-		lines = _top_info_money_lines()
-	else:
-		lines = _top_info_speed_lines()
+	match _top_info_hover_kind:
+		"MoneyLabel":
+			lines = _top_info_money_lines()
+		"PartySpeedLabel":
+			lines = _top_info_speed_lines()
+		"PartySizeLabel":
+			lines = _top_info_troop_lines()
+		_:
+			_hide_top_info_tooltip()
+			return
 
 	var signature: String = "%s|%s|%s" % [
 		"ALT" if _alt_detail_active else "NORMAL",
@@ -4721,6 +4987,44 @@ func _top_info_speed_lines() -> Array[String]:
 	return lines
 
 
+## 玩家部队人数统计：可战斗 / 伤员 / 俘虏互斥，不把伤兵或俘虏算作可战斗。
+## 总人数 = 可战斗 + 伤员（已永久死亡的单位不属于当前部队）。
+func _get_party_troop_counts() -> Dictionary:
+	var combat: int = 0
+	var wounded: int = 0
+	if _context != null and _player_party != null:
+		for unit_id: String in _player_party.member_unit_ids:
+			var unit := _context.unit_manager.get_unit(unit_id)
+			if unit == null:
+				continue
+			if unit.is_wounded():
+				wounded += 1
+			elif unit.is_alive():
+				combat += 1
+	var prisoners: int = (
+		_player_party.prisoner_unit_ids.size() if _player_party != null else 0
+	)
+	return {
+		"combat": combat,
+		"wounded": wounded,
+		"prisoners": prisoners,
+		"total": combat + wounded,
+	}
+
+
+func _top_info_troop_lines() -> Array[String]:
+	var counts: Dictionary = _get_party_troop_counts()
+	var lines: Array[String] = []
+	lines.append("部队")
+	lines.append("")
+	lines.append("可战斗人数 %d" % int(counts.get("combat", 0)))
+	lines.append("")
+	lines.append("伤员 %d" % int(counts.get("wounded", 0)))
+	lines.append("")
+	lines.append("俘虏 %d" % int(counts.get("prisoners", 0)))
+	return lines
+
+
 func _format_signed_amount(amount: int) -> String:
 	return "+%d" % amount if amount >= 0 else "-%d" % absi(amount)
 
@@ -4788,6 +5092,8 @@ func _has_open_modal(ignore_settlement: bool = false) -> bool:
 		or (_inventory_panel != null and _inventory_panel.visible)
 		or (_market_panel != null and _market_panel.visible)
 		or (_event_center_panel != null and _event_center_panel.visible)
+		or (_family_panel != null and _family_panel.visible)
+		or (_prisoner_sale_panel != null and _prisoner_sale_panel.visible)
 		or (_event_detail_dialog != null and _event_detail_dialog.visible)
 	)
 

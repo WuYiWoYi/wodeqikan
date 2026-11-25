@@ -112,11 +112,13 @@ interval = refill_base_interval
 
 ## 8. AI 领主
 
-- `AIManager` 在战略决策分频中检查非玩家、存活领主：部队人数低于 `ai_lord_recruit_threshold`（默认 12）时，寻找最近的、自己拥有的、有储备的村庄。
-- 找到后设置 `LordData.current_state = "RECRUITING"` 与 `current_target_settlement_id`，部队前往该村。
+- `AIManager` 在战略决策分频中检查非玩家、存活领主：部队人数低于 `ai_lord_recruit_threshold`（默认 12）时，优先寻找最近的、自己拥有的、有储备的村庄。
+- 找到后设置 `LordData.current_state = "RECRUITING"`、`current_goal = "FIEF_RECRUIT"` 与 `current_target_settlement_id`，部队前往该村。
 - 抵达后调用同一个 `recruit_group()`；成功或失败都清除 `RECRUITING` 状态，恢复普通 AI。
 - `RECRUITING` 期间部队战术 AI 跳过，避免巡逻/追击覆盖征召目标。
 - AI 征召同样消耗储备、人口、繁荣度，并写世界日志；日志按事件事实生成，不重复记录。
+- 若没有可用采邑储备，但自有村庄仍有普通冒险者候选人且部队付得起费用，AI 改为 `current_goal = "ADVENTURER_RECRUIT"`，抵达后调用 `AdventurerRecruitmentManager.recruit_normal_candidates_for_party()`。所有权通过 `is_authorized_owner()` 判断；贵族冒险者不参与 NPC 招募。
+- 玩家或 NPC 成功招募冒险者都会发出 `EventBus.adventurers_recruited`；大地图复用 `PartyIcon.show_floating_text()` 显示“招募了 N 个兵种”提示，与采邑征召共享同一套表现。
 
 ## 9. 持久化
 
@@ -129,6 +131,7 @@ interval = refill_base_interval
 
 - `Tests/SystemTests/fief_adventurer_system_test.tscn`：归属校验、6 人编制与马匹、储备/人口/繁荣度/税收、失败回滚、日志、AI 征召、存档往返。
 - `Tests/SystemTests/fief_adventurer_ui_test.tscn`：地图面板入口、村庄对话入口、按钮状态、浮动提示、非自有封地隐藏。
+- `Tests/SystemTests/noble_adventurer_recruitment_test.tscn`：采邑为 0 时 AI 普通冒险者招募分支、NPC 事件与贵族排除。
 
 ## 11. 未实现
 

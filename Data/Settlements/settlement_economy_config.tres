@@ -25,5 +25,6 @@ adventurer_refresh_interval = 144.0
 adventurer_recruit_cost = 1
 adventurer_initial_count = 2
 adventurer_unit_config_id = "infantry_militia"
+noble_adventurer_unit_config_id = "infantry_veteran"
 default_tax_base = 20
 ai_lord_recruit_threshold = 12

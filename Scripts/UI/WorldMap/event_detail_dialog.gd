@@ -173,7 +173,7 @@ func _build() -> void:
 	_decline_button.text = "取消"
 	_decline_button.focus_mode = Control.FOCUS_NONE
 	_decline_button.custom_minimum_size = Vector2(88.0, 34.0)
-	_decline_button.pressed.connect(close)
+	_decline_button.pressed.connect(_on_decline_pressed)
 	actions.add_child(_decline_button)
 
 	_accept_button = Button.new()
@@ -202,8 +202,27 @@ func _refresh(event: Dictionary) -> void:
 	_gold_label.text = "赎金：%d 金币" % int(event.get("gold", 0))
 	_body_label.text = str(event.get("detail", ""))
 	_status_label.text = ""
+	_decline_button.text = str(event.get("decline_label", "取消"))
 	_accept_button.disabled = _accepting or not bool(event.get("actionable", false))
 	_decline_button.disabled = _accepting
+
+
+## 出售赎回的“取消”只关闭弹窗；关押期赎买的“拒绝”还必须结束事件。
+## 是否结束事件由事件数据（decline_ends_event）决定，UI 不判断来源类型。
+func _on_decline_pressed() -> void:
+	if _accepting:
+		return
+	var event: Dictionary = {}
+	if _context != null and _context.event_center != null:
+		event = _context.event_center.get_event(_event_id)
+	if event.is_empty():
+		close()
+		return
+	if bool(event.get("decline_ends_event", false)):
+		var ransom_id: String = str(event.get("ransom_id", ""))
+		if not ransom_id.is_empty() and _context.lord_ransom_manager != null:
+			_context.lord_ransom_manager.reject_captive_ransom(ransom_id)
+	close()
 
 
 func _on_accept_pressed() -> void:

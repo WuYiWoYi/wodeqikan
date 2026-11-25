@@ -245,24 +245,32 @@ func _test_tavern_menu_and_selling() -> void:
 	_check(placeholder != null and placeholder.visible, "雇佣兵信息占位界面显示")
 	(_tavern.find_child("TavernMercenaryBackButton", true, false) as Button).pressed.emit()
 
-	# 进入出售界面。
+	# 点击出售俘虏：退出嵌入酒馆层级，打开独立出售界面。
 	var sell_button := _tavern.find_child(
 		"TavernSellPrisonersButton", true, false
 	) as Button
 	sell_button.pressed.emit()
-	_check(_tavern.is_sell_view_visible(), "出售俘虏界面显示")
+	var sale_panel := _map.call("get_prisoner_sale_panel") as TavernPanel
+	_check(sale_panel != null and sale_panel.visible, "出售俘虏打开独立界面")
+	_check(sale_panel.is_sell_view_visible(), "独立界面直接显示出售视图")
+	_check(sale_panel.is_sale_only(), "独立界面不显示酒馆菜单")
+	_check(not _settlement_panel.visible, "出售时不再嵌套在城镇左侧面板内")
+	_check(not _tavern.visible, "嵌入酒馆内容已退出")
+	if sale_panel == null:
+		return
+
 	var gold_before: int = _context.player_profile.gold
 	var prisoner_before := _context.party_manager.get_prisoner_ids(_player.party_id)
 	_check(prisoner_before.size() == 2, "右侧显示玩家当前俘虏")
 
 	var first_id: String = prisoner_before[0]
-	var row := _tavern.find_child(
+	var row := sale_panel.find_child(
 		"TavernPlayer_%s" % first_id, true, false
 	) as Button
 	_check(row != null, "右侧每名俘虏有卖出按钮")
 	row.pressed.emit()
 	_check(
-		_tavern.find_child("TavernBuyer_%s" % first_id, true, false) != null,
+		sale_panel.find_child("TavernBuyer_%s" % first_id, true, false) != null,
 		"卖出后移动到城镇买方列表"
 	)
 	_check(_context.player_profile.gold == gold_before, "未确认前金币不变")
@@ -272,15 +280,15 @@ func _test_tavern_menu_and_selling() -> void:
 	)
 
 	# 一键重置恢复初始状态。
-	(_tavern.find_child("TavernSellResetButton", true, false) as Button).pressed.emit()
+	(sale_panel.find_child("TavernSellResetButton", true, false) as Button).pressed.emit()
 	_check(
-		_tavern.find_child("TavernPlayer_%s" % first_id, true, false) != null,
+		sale_panel.find_child("TavernPlayer_%s" % first_id, true, false) != null,
 		"重置后俘虏回到玩家列表"
 	)
 
 	# 确认出售。
-	(_tavern.find_child("TavernPlayer_%s" % first_id, true, false) as Button).pressed.emit()
-	(_tavern.find_child("TavernSellConfirmButton", true, false) as Button).pressed.emit()
+	(sale_panel.find_child("TavernPlayer_%s" % first_id, true, false) as Button).pressed.emit()
+	(sale_panel.find_child("TavernSellConfirmButton", true, false) as Button).pressed.emit()
 	var expected_gold: int = _context.prisoner_trade_manager.get_sell_price(
 		_context.unit_manager.get_unit(first_id)
 	)
@@ -298,12 +306,18 @@ func _test_tavern_menu_and_selling() -> void:
 		"确认后 Unit 进入出售状态"
 	)
 	_check(
-		(_tavern.find_child("TavernPlayer_%s" % first_id, true, false)) == null,
+		(sale_panel.find_child("TavernPlayer_%s" % first_id, true, false)) == null,
 		"确认后界面刷新移除已售俘虏"
 	)
 
-	# 离开酒馆恢复城镇信息面板。
-	(_tavern.find_child("TavernSellBackButton", true, false) as Button).pressed.emit()
+	# 关闭独立界面：回到城镇信息面板，而不是重新进入酒馆。
+	(sale_panel.find_child("TavernSellBackButton", true, false) as Button).pressed.emit()
+	_check(not sale_panel.visible, "关闭后独立出售界面隐藏")
+	_check(_settlement_panel.visible, "关闭后恢复城镇信息面板")
+	_check(not _tavern.visible, "关闭后不重新嵌入酒馆视图")
+
+	# 再次进入酒馆并离开，验证原有返回流程仍然正常。
+	tavern_button.pressed.emit()
 	(_tavern.find_child("TavernLeaveButton", true, false) as Button).pressed.emit()
 	_check(not _tavern.visible, "离开酒馆后关闭界面")
 	_check(_settlement_panel.visible, "离开酒馆后恢复城镇信息面板")

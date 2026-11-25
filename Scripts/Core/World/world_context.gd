@@ -81,14 +81,55 @@ var _static_configs_registered: bool = false
 func _ready() -> void:
 	_wire_managers()
 	register_static_configs()
+	_register_king_appearance_override()
 	if not TimeManager.world_tick.is_connected(world_simulation.on_world_tick):
 		TimeManager.world_tick.connect(world_simulation.on_world_tick)
 
 
 func _exit_tree() -> void:
+	UnitAppearance.clear_king_helmet_override(self)
 	world_log_manager.dispose()
 	if TimeManager.world_tick.is_connected(world_simulation.on_world_tick):
 		TimeManager.world_tick.disconnect(world_simulation.on_world_tick)
+
+
+## 国王盔覆盖只依赖静态外观配置与当前政治身份，由本世界显式注册。
+func _register_king_appearance_override() -> void:
+	var texture_path: String = appearance_config.king_helmet_texture_path \
+		if appearance_config != null else ""
+	UnitAppearance.configure_king_helmet_override(
+		self, texture_path, Callable(self, "is_king_unit")
+	)
+
+
+## 单位当前是否具有国王身份。只读取现有政治数据，不修改任何状态：
+## 家族领袖 + 王国统治家族 + 国王标记 + 王国仍有效。
+func is_king_unit(unit: UnitData) -> bool:
+	if unit == null:
+		return false
+	var noble_id: String = unit.noble_id
+	# 玩家角色单位本身没有 noble_id；身份统一由玩家贵族承担。
+	if noble_id.is_empty() and unit.is_player_character:
+		noble_id = player_lord_id
+	return is_king_noble(noble_id)
+
+
+func is_king_noble(noble_id: String) -> bool:
+	if noble_id.is_empty():
+		return false
+	var noble := noble_manager.get_noble(noble_id)
+	if noble == null or not noble.alive or not noble.is_king:
+		return false
+	if noble.house_id.is_empty():
+		return false
+	var house := house_manager.get_house(noble.house_id)
+	if house == null or house.leader_noble_id != noble_id:
+		return false
+	var kingdom := kingdom_manager.get_kingdom_for_house(house.house_id)
+	if kingdom == null or not kingdom.is_active:
+		return false
+	return kingdom.ruling_house_id == house.house_id \
+		and kingdom.king_noble_id == noble_id
 
 
 func get_player_party() -> PartyData:
@@ -716,7 +757,8 @@ func _wire_managers() -> void:
 		settlement_manager,
 		id_generator,
 		family_registry,
-		economy_config
+		economy_config,
+		fief_recruitment_manager
 	)
 	ai_manager.setup(
 		unit_manager,
@@ -730,7 +772,8 @@ func _wire_managers() -> void:
 		fief_recruitment_manager,
 		economy_config,
 		supply_manager,
-		market_manager
+		market_manager,
+		adventurer_recruitment_manager
 	)
 	world_simulation.bind(
 		unit_manager,

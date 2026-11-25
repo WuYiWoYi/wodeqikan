@@ -1,9 +1,9 @@
 # 当前开发状态
 
 **更新日期：** 2026-11-24
-**当前阶段：** 阶段 13 后续：五级战斗经验、俘虏价格与 NPC 领主赎回已完成
-**整体状态：** 阶段 0–13 的阶段性目标均已交付；阶段 2/3/4/7 的长期路线仍有明确未做项。存档 Schema v8。
-**最近变更：** 士兵有效伤害/击杀经验与五级 HP 成长、按兵种 tier 的俘虏价格与领主统一价、领主出售后的家族赎回生命周期、右侧纵向事件框与详情弹窗、Schema v7 → v8 迁移。
+**当前阶段：** 阶段 13 后续：国王盔缨饰联动、酒馆独立出售、关押期赎买与右侧待处理提醒已完成
+**整体状态：** 阶段 0–13 的阶段性目标均已交付；阶段 2/3/4/7 的长期路线仍有明确未做项。存档 Schema v8（本次仅新增兼容字段，未升版）。
+**最近变更：** 国王盔显示期间隐藏普通头盔缨饰并在身份失效后恢复；酒馆出售俘虏改为独立界面；NPC 领主在玩家俘虏队伍中时家族按 3–12 世界小时发起赎买（出售后仍为 12–48 小时赎回）；大地图右侧新增由事件状态驱动的待处理提醒。此前国王盔覆盖、顶栏图标、贵族冒险者与家族面板已完成。
 **读取提示：** 只有任务涉及“当前进度、已有实现、下一步”时才读本文件。系统规则读 `Docs/Systems/*.md`；历史细节读 [Archive/Status_History.md](../Archive/Status_History.md) 或 [04_Change_Log.md](../04_Change_Log.md)。
 
 **状态标记：**
@@ -28,7 +28,7 @@
 | 4 基础战斗 | 部分实现 | 实时/多方战斗、离屏小时结算、中途加入、增援、队形、结算已实现；士气、高级指挥、寻路、AI 撤退未做 |
 | 5 战斗结算与表现 | 已实现 | BattleResult、玩家角色、攻击规则、骑乘、动画、撤退、奖励、控制权转移 |
 | 6 村庄/经济/大地图 | 已实现 | 村庄小场景、对话、背包/金币/工资统计、三级兵种/晋升、世界日历、世界日志、弓箭手、大地图交互 |
-| 7 封地与政治经济 | 部分实现 | 封地所有权、采邑征召、冒险者招募、人口/税收缓存、贵族/家族/王国已实现；任务、训练、外交、城堡攻防、领地转让、军团、世界战争未做 |
+| 7 封地与政治经济 | 部分实现 | 封地所有权、采邑征召、普通/贵族冒险者招募、NPC 冒险者招募、家族面板、人口/税收缓存、贵族/家族/王国已实现；任务、训练、外交、城堡攻防、领地转让、军团、世界战争未做 |
 | 8 战场/增援/政治/地图/百科 | 已实现 | 1800×1024 战场、增援、Noble/House/Kingdom、5000×3000 地图、三级百科、Schema v5 |
 | 9 地点布局与旗帜 | 已实现 | 9 个地点按王国/家族聚类，部队内部旗帜放大 |
 | 10 战后追击/AI 助攻/大地图交互 | 已实现 | 战后冷却与追击恢复、AI 加入既有战斗、增援部署、行动意图悬浮、二次确认 |
@@ -37,19 +37,22 @@
 | 13 伤兵/俘虏/大地图展示 | 已实现 | 家族旗帜与停留部队旗帜条、伤兵判定与顺序治疗、俘虏分配/接收、酒馆出售、Schema v7 |
 | 13 后续：主界面信息与百科 | 已实现 | 顶栏金币/移速与 ALT 明细、建筑面板 UI 权限、事件中心（只读聚合）、百科分类/详情/敌对势力、暂停计数 |
 | 13 后续：经验/价格/赎回 | 已实现 | 五级战斗经验与 HP 成长、兵种 tier 定价、NPC 领主出售与家族赎回、右侧事件框/详情弹窗、Schema v8 |
+| 13 后续：贵族/NPC 招募/家族 | 已实现 | 贵族冒险者（三级 + 战马）、拥有者权限、NPC 普通冒险者招募、冒险者招募浮动提示、家族面板部队/封地与定位 |
+| 13 后续：国王盔/顶栏图标 | 已实现 | 国王身份头盔外观覆盖与动态回退、国王盔期间隐藏缨饰、顶栏金币/移速/部队人数图标数值、部队人数悬浮明细 |
+| 13 后续：酒馆/关押期赎买/提醒 | 已实现 | 独立出售俘虏界面、玩家关押期 3–12 小时家族赎买、拒绝与自动失效、原有 12–48 小时出售赎回、右侧待处理提醒 |
 
 ## 2. 已实现能力（按系统）
 
 - **世界与时间**：`WorldContext` + `WorldSimulation`；`WorldTime` 固定 0.1 秒 tick；暂停原因按引用计数嵌套；世界从 1103-01-01 起，1x 为 6 秒/游戏小时；5000×3000 大地图、9 个地点。详见 [Time_System.md](../Systems/Time_System.md)。
-- **单位与部队**：`UnitData`/`PartyData` 纯数据；三级兵种（10/50、20/100、25/180）；五级战斗经验（新兵…百战精锐，阈值 100/300/500/1000，累计 HP +0/+5/+15/+30/+50）与等级独立于 tier；装备/马匹骑乘；玩家角色是普通 Unit；新游戏玩家部队 15 人（含 3 名弓箭手、4 名骑乘）；部队管理面板提供士兵/俘虏双列列表、战斗经验文本等级、坐骑与晋升操作。详见 [Unit_System.md](../Systems/Unit_System.md)、[Party_System.md](../Systems/Party_System.md)。
+- **单位与部队**：`UnitData`/`PartyData` 纯数据；三级兵种（10/50、20/100、25/180）；五级战斗经验（新兵…百战精锐，阈值 100/300/500/1000，累计 HP +0/+5/+15/+30/+50）与等级独立于 tier；装备/马匹骑乘；玩家角色是普通 Unit；新游戏玩家部队 15 人（含 3 名弓箭手、4 名骑乘）；部队管理面板提供士兵/俘虏双列列表、战斗经验文本等级、坐骑与晋升操作；国王身份使用独立国王盔外观覆盖，不写入装备或存档。详见 [Unit_System.md](../Systems/Unit_System.md)、[Party_System.md](../Systems/Party_System.md)。
 - **战斗**：`BattleSession` 多战斗注册表；屏幕战斗与离屏 AI 战斗并行；离屏战斗每游戏小时结算；增援加入既有会话；1800×1024 战场；360°定向矩形攻击、多人围攻、实体最小间距；有效伤害 +1 经验、击杀额外 +10；统一 `BattleResultData`；玩家撤退、控制权转移、经验/金币/战利品；按 tier 负伤、俘虏池分配。详见 [Combat_System.md](../Systems/Combat_System.md)、[Wounded_Prisoner_System.md](../Systems/Wounded_Prisoner_System.md)。
-- **大地图与 AI**：直线移动、跟随、视野、统一遭遇判定、玩家追击接触、战后冷却；玩家移动目标标记与动态虚线；商队/治安队/强盗/家族骑士 AI；多战斗标记与按 `side_index` 汇总；地点家族旗帜与停留部队旗帜条；WASD 自由镜头；左 Alt 详细悬浮；顶栏居中世界时间、金币/移速与 ALT 明细；事件中心入口；建筑面板打开时仍可打开百科/部队/背包/事件但禁用时间控制。详见 [World_Map_System.md](../Systems/World_Map_System.md)、[AI_System.md](../Systems/AI_System.md)。
-- **经济与补给**：玩家/共享背包、金币、三级工资统计（**不自动扣除**）；每日收支预览复用工资与税收缓存（不结算）；马匹独立实例与逐匹交易；村庄（面包/草料）与城镇（含马匹）市场；每日补给结算与 NPC 低补给采购；城镇酒馆内嵌地点面板并出售俘虏，价格按兵种 tier（5/20/60）与 NPC 领主统一价（100）。详见 [Inventory_Economy_System.md](../Systems/Inventory_Economy_System.md)、[Mount_System.md](../Systems/Mount_System.md)、[Supply_System.md](../Systems/Supply_System.md)、[Wounded_Prisoner_System.md](../Systems/Wounded_Prisoner_System.md)。
-- **政治与封地**：Noble/House/Kingdom 层级、领袖死亡选举、战争传播、统一关系查询与敌对势力聚合查询、强盗对所有政治家族敌对；封地所有权、统一征召授权 `is_authorized_owner()`、采邑储备/成组征召、村庄冒险者候选人、税收缓存（**只缓存不结算**）。详见 [Political_Hierarchy_System.md](../Systems/Political_Hierarchy_System.md)、[Fief_Recruitment_System.md](../Systems/Fief_Recruitment_System.md)、[Adventurer_Recruitment_System.md](../Systems/Adventurer_Recruitment_System.md)。
-- **地点与村庄**：村庄小场景、头人对话、越界倒计时、采邑/候选人入口；城镇市场与酒馆；城镇/城堡仍无独立小场景。详见 [Village_System.md](../Systems/Village_System.md)、[Settlement_System.md](../Systems/Settlement_System.md)。
+- **大地图与 AI**：直线移动、跟随、视野、统一遭遇判定、玩家追击接触、战后冷却；玩家移动目标标记与动态虚线；商队/治安队/强盗/家族骑士 AI；多战斗标记与按 `side_index` 汇总；地点家族旗帜与停留部队旗帜条；WASD 自由镜头；左 Alt 详细悬浮；顶栏居中世界时间、金币/移速/部队人数图标数值与 ALT 明细；事件中心与家族入口；右侧事件框、小型待处理提醒与详情弹窗；建筑面板打开时仍可打开百科/部队/家族/背包/事件但禁用时间控制；采邑与冒险者招募统一浮动提示。详见 [World_Map_System.md](../Systems/World_Map_System.md)、[AI_System.md](../Systems/AI_System.md)。
+- **经济与补给**：玩家/共享背包、金币、三级工资统计（**不自动扣除**）；每日收支预览复用工资与税收缓存（不结算）；马匹独立实例与逐匹交易；村庄（面包/草料）与城镇（含马匹）市场；每日补给结算与 NPC 低补给采购；城镇酒馆菜单嵌入地点面板，出售俘虏打开独立界面；价格按兵种 tier（5/20/60）与 NPC 领主统一价（100）。详见 [Inventory_Economy_System.md](../Systems/Inventory_Economy_System.md)、[Mount_System.md](../Systems/Mount_System.md)、[Supply_System.md](../Systems/Supply_System.md)、[Wounded_Prisoner_System.md](../Systems/Wounded_Prisoner_System.md)。
+- **政治与封地**：Noble/House/Kingdom 层级、领袖死亡选举、战争传播、统一关系查询与敌对势力聚合查询、强盗对所有政治家族敌对；封地所有权、统一征召授权 `is_authorized_owner()`、采邑储备/成组征召、村庄普通与贵族冒险者候选人、NPC 普通冒险者招募、税收缓存（**只缓存不结算**）；大地图家族面板只读展示家族贵族与封地。详见 [Political_Hierarchy_System.md](../Systems/Political_Hierarchy_System.md)、[Fief_Recruitment_System.md](../Systems/Fief_Recruitment_System.md)、[Adventurer_Recruitment_System.md](../Systems/Adventurer_Recruitment_System.md)。
+- **地点与村庄**：村庄小场景、头人对话、越界倒计时、采邑/候选人入口；贵族冒险者以步行人物+独立战马呈现，普通人选不受影响；城镇市场与酒馆；城镇/城堡仍无独立小场景。详见 [Village_System.md](../Systems/Village_System.md)、[Settlement_System.md](../Systems/Settlement_System.md)。
 - **存档**：JSON + `schema_version`（当前 v8）、临时文件 + 校验 + `.bak` 替换、跨进程读写；保存五级经验/等级折算、领主身份、赎回记录；战斗会话与待确认俘虏份额不进入存档。详见 [Save_System.md](../Systems/Save_System.md)。
-- **赎回与事件 UI**：NPC 领主出售后按世界时间等待，到期生成可接受/取消的家族赎回请求；接受支付一次赎金并复用/重建领主部队。大地图右侧纵向事件框展示可操作事件，详情弹窗逐帧校验，失效即关闭。详见 [Lord_Ransom_System.md](../Systems/Lord_Ransom_System.md)、[World_Map_System.md](../Systems/World_Map_System.md)。
-- **UI/日志/百科**：世界日志最多 20 条并随 v3 起入档；百科改为一级分类（王国/家族/地点）→ 条目列表 → 二级详情，并显示敌对王国/敌对独立家族；事件中心聚合封地/补给/伤兵/冒险者/赎回等现有状态，任务栏暂为空；大地图日期/时间段、地点面板、部队面板（成员/俘虏列表与缩略图）、背包、市场、内嵌酒馆等程序化 UI。详见 [World_Log_System.md](../Systems/World_Log_System.md)、[Encyclopedia_System.md](../Systems/Encyclopedia_System.md)。
+- **赎回与事件 UI**：NPC 领主出售后按世界时间等待 12–48 小时，生成可接受/取消的家族赎回请求；领主仍被玩家关押时按 3–12 小时生成可接受/拒绝的赎买请求。两种流程共用管理器与事件中心，但来源互斥、等待与拒绝规则不同。接受支付一次赎金并复用/重建领主部队；关押期请求在领主被出售、释放或转移后立即失效。大地图右侧纵向事件框与小型待处理提醒都只读取事件中心；详情弹窗逐帧校验，失效即关闭。详见 [Lord_Ransom_System.md](../Systems/Lord_Ransom_System.md)、[World_Map_System.md](../Systems/World_Map_System.md)。
+- **UI/日志/百科**：世界日志最多 20 条并随 v3 起入档；百科改为一级分类（王国/家族/地点）→ 条目列表 → 二级详情，并显示敌对王国/敌对独立家族；事件中心聚合封地/补给/伤兵/冒险者/赎回等现有状态，任务栏暂为空；家族面板按队伍/封地只读展示并支持点击定位；大地图日期/时间段、地点面板、部队面板（成员/俘虏列表与缩略图）、背包、市场、内嵌酒馆菜单与独立出售窗口等程序化 UI。详见 [World_Log_System.md](../Systems/World_Log_System.md)、[Encyclopedia_System.md](../Systems/Encyclopedia_System.md)。
 
 ## 3. 当前明确未实现 / 下一步
 
@@ -90,8 +93,10 @@
 - 地点布局与 44 像素部队旗帜仅通过自动化尺寸断言验证，实际观感需非 headless 人工验收（KI509/KI516）。
 - 视觉家族 `FAMILY_*` 与政治家族 `HOUSE_*` 依赖 `banner_id` 映射，新家族漏配会回退到阵营关系（KI505）。
 - 俘虏没有容量上限、守卫/忠诚、主动释放；售价按兵种 tier 与领主统一价（不按经验），城镇买家仍无经济模型（KI530/KI531/KI532）。
-- 领主赎回是单一家族的固定请求：无多家族竞价、赎金谈判、拒绝冷却或外交影响；接受后按现有家族模板补兵。
+- 领主赎买/赎回是单一家族的固定请求：无多家族竞价、赎金谈判、额外拒绝冷却或外交影响；关押期拒绝后仅同一关押周期不再请求，接受后按现有家族模板补兵。关押登记在下一次世界 tick 完成，不是捕获瞬间的独立事件回调。
 - NPC 补给采购不预留库存；多名 NPC 同时到达时按顺序扣减（KI527）。
+- 贵族冒险者固定为三级 `infantry_veteran`，不做按家族/村庄的兵种或装备差异化；NPC 只招募普通冒险者，不招募贵族。
+- 家族面板是只读入口，不包含成员调动、封地授予/转让、婚姻、继承或外交操作；贵族与战马分离表现仅通过 headless 尺寸/数据断言验证，实际观感需人工验收。
 - 马匹实例只区分外观，不影响速度/属性/价格（KI525）。
 - 日历为每月 30 天的简化历法，无真实月份/闰年/季节（KI396）。
 - 尚无任务系统：事件中心“已接取任务”始终为空，待处理事项只来自现有系统实时状态（KI517）。
@@ -103,6 +108,9 @@
 - **阶段 13 测试记录**：新增 `wounded_system_test`、`wounded_healing_test`、`stage13_village_candidates_test`、`stage13_world_map_ui_test`、`stage13_prisoner_test`、`stage13_prisoner_ui_flow_test`、`stage13_tavern_test`；相关回归测试已通过。
 - **阶段 13 后续测试（2026-11-22）**：新增 `main_map_info_test`（顶栏金币/移速、普通/ALT 悬浮、建筑面板 UI 权限）、`event_center_test`（数据层、列表/详情、刷新、去重）；重写 `encyclopedia_ui_test`（一级分类/二级详情/敌对势力/动态刷新）；`time_calendar_test` 增加暂停计数嵌套断言。已运行并通过：上述测试，以及 `settlement_interaction_test`、`stage13_world_map_ui_test`、`party_panel_test`、`fief_adventurer_ui_test`。
 - **经验/价格/赎回测试（2026-11-24）**：新增 `combat_experience_award_test`（伤害 +1、击杀 +11、无效伤害不发经验、只发给实际攻击者）、`lord_ransom_test`（出售等待/事件/接受一次/取消保留/失效关闭/部队重建/存档往返/异常恢复）、`save_migration_test`（v7→v8 等级折算、v8 不重复折算、缺失 `ransoms`）；更新 `combat_experience_test`、`stat_calculator_test`、`unit_manager_test`、`unit_party_serialization_test`、`unit_tier_wage_test`、`stage13_tavern_test`、`save_persistence_test`、`political_hierarchy_test`。上述测试已运行并通过。
+- **贵族/NPC/家族测试（2026-11-24）**：新增 `noble_adventurer_recruitment_test`（贵族三级身份与真实战马、拥有者拒绝/允许、合并招募、防重复、不复活、存档往返、村庄步行人物+独立战马、NPC 普通冒险者招募与事件）、`family_panel_ui_test`（家族入口/暂停、默认部队页与空状态、玩家排除、正常/被俘/阵亡状态、真实部队摘要、封地分组与实时归属、点击定位）。已运行并通过：上述测试、`fief_adventurer_system_test`、`fief_adventurer_ui_test`、`stage13_village_candidates_test`。
+- **国王盔/顶栏图标测试（2026-11-24）**：新增 `king_helmet_appearance_test`（统治家族领袖显示国王盔、国王盔期间隐藏缨饰、身份失效后恢复普通头盔与缨饰、同家族贵族/普通成员不显示、领袖更替与王国失效/统治家族变化后重建回退、数据未被改写、无普通头盔时不添加）；更新 `main_map_info_test`（金币/移速去文字前缀、三组图标+数值、部队人数实时统计与可战斗/伤员/俘虏悬浮、图标与数值共用条目悬浮）。已运行并通过：上述测试、`family_appearance_test`。
+- **酒馆/关押期赎买/提醒测试（2026-11-24）**：更新 `stage13_tavern_test`（出售俘虏打开独立界面、城镇面板隐藏、关闭后回到城镇信息、不发生重复结算、原有酒馆入口仍可用）；更新 `lord_ransom_test`（关押期 3–12 小时请求、来源标签、接受一次并移出俘虏列表、拒绝结束事件且领主继续被关押、拒绝后仍可出售、出售后关押请求立即失效、详情打开期间状态变化后不能结算、关押期存档往返、右侧提醒随事件增减）。已运行并通过：上述测试、`king_helmet_appearance_test`、`main_map_info_test`。
 - **已知失败**：`Tests/UnitTests/supply_manager_test.tscn` 的“NPC 记录 1 份草料缺口”断言未通过，原因与阶段 13 无关（KI534）。`Tests/UnitTests/unit_visual_test.tscn` 的马腿枢轴/贴图可见性断言仍失败，与本次经验、价格和赎回改动无关。
 - **未完成的验收**：非 headless 视觉验收（地点布局、44 像素旗帜、动画观感）尚未记录。
 - **测试策略**：默认只运行验证本次修改的最小测试集（L1–L4），规则见 [03_Design_Conventions.md §10](../03_Design_Conventions.md#10-测试规范)。运行命令见 [Test_Commands.md](Test_Commands.md)。
