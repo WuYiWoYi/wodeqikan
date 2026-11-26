@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="IdentityDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/identity_definition.gd" id="1_identity"]
+
+[resource]
+script = ExtResource("1_identity")
+identity_id = "MERCHANT"
+display_name = "商人"
+category_id = "COMMONER"
+description = "你从推着独轮车赶集的小贩干起，如今有了两辆货车、一间半死不活的铺子和一屁股三角债。你认得每一种货物的行情，也认得每一个赊过账的熟脸——有人还得上，有人这辈子都还不上。你的商队专挑别人不敢走的近道，利润是翻倍的，风险也是翻倍的，上个月刚折了一个伙计，抚恤金还没着落。这天你正在铺子里盘账，一个老主顾推门进来，压低声音说了桩来路不明的大买卖，你手指停在算盘上，抬眼看着他……"
+sort_order = 1
+enabled = true

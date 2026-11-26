@@ -8,6 +8,8 @@ signal scene_change_requested(scene_path: String)
 signal scene_changed(scene_path: String)
 
 const MAIN_MENU_SCENE: String = "res://Scenes/MainMenu/main_menu.tscn"
+## 新游戏身份选择的独立全屏场景。
+const IDENTITY_SELECT_SCENE: String = "res://Scenes/Identity/identity_select.tscn"
 const WORLD_MAP_SCENE: String = "res://Scenes/WorldMap/world_map.tscn"
 const BATTLE_SCENE: String = "res://Scenes/Battle/battle.tscn"
 const VILLAGE_SCENE: String = "res://Scenes/Village/village.tscn"

@@ -38,6 +38,9 @@ const REINFORCEMENT_REAR_DISTANCE: float = 240.0
 const REINFORCEMENT_MIN_SPACING: float = 38.0
 const REINFORCEMENT_PROMPT_DURATION: float = 2.8
 
+## 尸体倒地/留存/淡出时长的唯一配置来源；场景只加载一次并注入所有 UnitActor。
+const CORPSE_CONFIG_PATH: String = "res://Data/Combat/corpse_config.tres"
+
 ## 集群/队形参数集中配置。
 const FORMATION_REFRESH_INTERVAL: float = 0.4
 const NEIGHBOR_REFRESH_INTERVAL: float = 0.3
@@ -62,7 +65,10 @@ var _battle_manager: BattleManager = null
 var _session: BattleSession = null
 var _formation_manager: FormationManager = FormationManager.new()
 var _camera_rig: SceneCameraRig = null
-## 临时箭矢的唯一创建/推进入口；箭矢节点挂在 Characters 下参与 YSort。
+## 由 CORPSE_CONFIG_PATH 加载；测试可在生成单位前替换为自定义时长。
+var _corpse_config: CorpseConfig = null
+## 临时箭矢的唯一创建/推进入口；箭矢节点挂在 Characters 下，
+## 但不属于 UnitActor，不参与角色整体 z 波段。
 var _projectile_manager: Variant = null
 
 ## unit_id -> UnitActor / UnitController
@@ -154,6 +160,7 @@ func _ready() -> void:
 		call_deferred("_abort_to_world_map")
 		return
 
+	_load_corpse_config()
 	_session.status = BattleSession.Status.ACTIVE
 	_player_side = _resolve_player_side()
 	_build_ui()
@@ -252,6 +259,9 @@ func _physics_process(delta: float) -> void:
 		_projectile_manager.advance(delta)
 
 	_process_deaths()
+	# 死亡处理会移除控制器的表现关联，但尸体仍在 Characters 中，
+	# 因此每帧把全部角色（含尸体）按实时 Y 重新分配整体 z 波段。
+	_update_character_sorting()
 	var paused_for_transfer := _handle_controlled_unit_death()
 	_update_alive_label()
 	if not paused_for_transfer:
@@ -386,6 +396,27 @@ func get_session() -> BattleSession:
 
 func get_actor_count() -> int:
 	return _actors.size()
+
+
+func get_corpse_config() -> CorpseConfig:
+	return _corpse_config
+
+
+## 替换尸体表现时长配置。只影响之后开始的倒地表现，不改变已进行中的计时；
+## 测试可在生成单位前注入较短时长，生产由 corpse_config.tres 提供。
+func set_corpse_config(config: CorpseConfig) -> void:
+	_corpse_config = config
+	if _corpse_config != null:
+		_corpse_config.sanitize()
+
+
+func _load_corpse_config() -> void:
+	var loaded: Resource = (
+		load(CORPSE_CONFIG_PATH) if ResourceLoader.exists(CORPSE_CONFIG_PATH) else null
+	)
+	_corpse_config = loaded as CorpseConfig
+	if _corpse_config == null:
+		_corpse_config = CorpseConfig.create_default()
 
 
 func get_controller(unit_id: String) -> UnitController:
@@ -1150,6 +1181,7 @@ func _spawn_reinforcement_party(party_id: String, side_index: int) -> void:
 	_side_controllers[side_index] = controllers
 	_rebuild_enemy_controller_lists()
 	_update_alive_label()
+	_update_character_sorting()
 	_refresh_neighbor_cache()
 	_refresh_target_claims()
 
@@ -1316,6 +1348,7 @@ func _spawn_units() -> void:
 		_enemy_controllers_by_side[side_index] = enemies
 
 	_update_alive_label()
+	_update_character_sorting()
 
 
 func _spawn_side(side_index: int) -> void:
@@ -1356,7 +1389,8 @@ func _create_unit_controller(
 		state,
 		player_side,
 		_visual_equipment_configs(unit),
-		shadows
+		shadows,
+		_corpse_config
 	)
 
 	var controller := UnitController.new()
@@ -1434,6 +1468,41 @@ func _process_deaths() -> void:
 		var controllers := _side_controllers.get(side_index, []) as Array[UnitController]
 		for controller: UnitController in controllers:
 			_handle_controller_death(controller)
+
+
+## 角色整体动态排序：按实时脚底 Y（BattleUnitState 权威位置）给每个 UnitActor
+## 分配唯一 z 波段。角色内部部件保持相对 z，因此跨角色不会出现武器/装备穿插。
+## 尸体不在 _actors 中，但仍作为 Characters 的子节点参与排序。
+func _update_character_sorting() -> void:
+	if characters == null:
+		return
+	var actors: Array[UnitActor] = []
+	for child: Node in characters.get_children():
+		var actor := child as UnitActor
+		if actor != null:
+			actors.append(actor)
+	if actors.is_empty():
+		return
+	actors.sort_custom(_is_actor_sort_before)
+	for index: int in range(actors.size()):
+		actors[index].apply_sort_rank(index)
+
+
+func _is_actor_sort_before(a: UnitActor, b: UnitActor) -> bool:
+	var a_y: float = _character_sort_y(a)
+	var b_y: float = _character_sort_y(b)
+	if not is_equal_approx(a_y, b_y):
+		return a_y < b_y
+	# 相同 Y 时使用稳定节点名，避免每帧反复交换层级。
+	return String(a.name) < String(b.name)
+
+
+func _character_sort_y(actor: UnitActor) -> float:
+	if actor == null:
+		return 0.0
+	if actor.battle_state != null:
+		return actor.battle_state.battle_position.y
+	return actor.position.y
 
 
 func _handle_controller_death(controller: UnitController) -> void:

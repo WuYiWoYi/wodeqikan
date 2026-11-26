@@ -47,9 +47,18 @@ const LEG_PIVOT_DROP_Y: float = 9.0
 const FRONT_LEG_PART_NAMES: Array[String] = ["MountLegFront", "MountLegFront2"]
 const BACK_LEG_PART_NAMES: Array[String] = ["MountLegBack", "MountLegBack2"]
 
+## 骑乘单位死亡时马匹随骑手一同倒地；只倾斜马身 rig，不重建部件。
+const DEATH_COLLAPSE_ANGLE: float = 0.45
+const DEATH_COLLAPSE_SINK: float = 5.0
+const DEATH_COLLAPSE_SQUASH: float = 0.12
+
 var _body_rig: Node2D = null
 var _coat_style_id: String = "brown"
 var _saddle_style_id: String = "saddle_01"
+var _death_pose_locked: bool = false
+var _death_fall_active: bool = false
+var _death_fall_time: float = 0.0
+var _death_fall_duration: float = 0.55
 
 
 ## 按马匹实例的毛色与马鞍重建部件。只替换贴图路径，动画结构保持不变。
@@ -61,6 +70,10 @@ func rebuild(
 	_body_rig = null
 	_coat_style_id = coat_style_id
 	_saddle_style_id = saddle_style_id
+	_death_pose_locked = false
+	_death_fall_active = false
+	_death_fall_time = 0.0
+	_death_fall_duration = 0.55
 	var paths: Dictionary = MountVisualConfig.get_coat_paths(coat_style_id)
 	_add_sprite("MountShadow", SHADOW_MOUNTED_PATH, Layers.MOUNT_SHADOW)
 
@@ -106,7 +119,7 @@ func get_saddle_style_id() -> String:
 func update_locomotion(
 	idle_time: float, run_time: float, blend: float, _delta: float
 ) -> void:
-	if _body_rig == null:
+	if _body_rig == null or _death_pose_locked:
 		return
 	var b: float = clampf(blend, 0.0, 1.0)
 	var idle_phase: float = TAU * idle_time / IDLE_BOB_PERIOD
@@ -197,6 +210,45 @@ func _apply_leg_pose(
 		idle_wave * IDLE_LEG_ROTATION * (1.0 - blend)
 		+ run_extent * reach_rotation
 	)
+
+
+## 死亡倒地：马身 rig 随骑手一同倾斜、下沉并轻微压扁。
+## 只改变表现变换，不移动 UnitActor 世界坐标（排序基准保持脚底位置）。
+func play_death_collapse(duration: float) -> void:
+	if _death_pose_locked or _body_rig == null:
+		return
+	_death_pose_locked = true
+	_death_fall_active = true
+	_death_fall_time = 0.0
+	_death_fall_duration = maxf(duration, 0.001)
+	_apply_death_pose(0.0)
+
+
+func advance_death_animation(delta: float) -> bool:
+	if not _death_fall_active or _body_rig == null:
+		return true
+	_death_fall_time = minf(
+		_death_fall_duration, _death_fall_time + maxf(delta, 0.0)
+	)
+	var t: float = clampf(_death_fall_time / _death_fall_duration, 0.0, 1.0)
+	_apply_death_pose(t)
+	if t >= 1.0:
+		_death_fall_active = false
+		return true
+	return false
+
+
+func _apply_death_pose(t: float) -> void:
+	if _body_rig == null:
+		return
+	var eased: float = t * t * (3.0 - 2.0 * t)
+	_body_rig.rotation = DEATH_COLLAPSE_ANGLE * eased
+	_body_rig.position = Vector2(0.0, DEATH_COLLAPSE_SINK * eased)
+	_body_rig.scale = Vector2(1.0, 1.0 - DEATH_COLLAPSE_SQUASH * eased)
+
+
+func is_death_pose_locked() -> bool:
+	return _death_pose_locked
 
 
 func get_body_rig() -> Node2D:

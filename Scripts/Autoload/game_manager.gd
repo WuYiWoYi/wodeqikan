@@ -23,6 +23,11 @@ const PAUSE_REASON_BATTLE_INTERACTION: StringName = &"battle_encounter_dialogue"
 var game_state: GameState = GameState.BOOT
 var world_context: WorldContext = null
 var player_party_id: String = ""
+## 玩家在新游戏身份选择中确认的结果（会话级）。
+## 当前只保存并随新游戏流程传递，不写入存档，也不改变任何初始化数据；
+## 未来身份差异化初始化读取这两个字段。
+var player_identity_id: String = ""
+var player_identity_category_id: String = ""
 
 ## 小场景（村庄）运行时状态，不进入存档。
 var current_settlement_id: String = ""
@@ -49,8 +54,14 @@ func enter_main_menu() -> void:
 
 
 ## 新游戏：创建初始世界数据并进入大地图。进入大地图后默认暂停。
-func start_new_game() -> bool:
+## identity_id / identity_category_id 由身份选择界面传入；本阶段只保存结果，
+## 不据此改变世界初始化内容。
+func start_new_game(
+		identity_id: String = "", identity_category_id: String = ""
+) -> bool:
 	_teardown_world()
+	player_identity_id = identity_id
+	player_identity_category_id = identity_category_id
 	TimeManager.clear_pauses()
 	TimeManager.start_session()
 	TimeManager.set_base_world_speed(TimeManager.SPEED_PAUSED)
@@ -165,6 +176,8 @@ func _destroy_world_context() -> void:
 		world_context.free()
 	world_context = null
 	player_party_id = ""
+	player_identity_id = ""
+	player_identity_category_id = ""
 	current_settlement_id = ""
 	pending_settlement_latch_id = ""
 	small_scene_return_base_speed = 0.0

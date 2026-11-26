@@ -233,7 +233,7 @@ func _test_arrow_trajectory_and_depth() -> void:
 	)
 	_check(
 		arrow.z_index == UnitActorScript.ACTOR_Z_INDEX,
-		"箭矢与单位使用同一 YSort 地面深度层"
+		"箭矢保持基础地面 z（角色整体波段只作用于 UnitActor）"
 	)
 	var max_height: float = 0.0
 	var ground_y_stable: bool = true

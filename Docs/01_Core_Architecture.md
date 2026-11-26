@@ -353,6 +353,9 @@ Continue / Load Game
 | `player_encounter_requested` | `encounter_id`, `attacker_party_id`, `target_party_id` | `EncounterManager` | WorldMap 强制遭遇对话 |
 | `player_battle_interaction_requested` | `interaction_id`, `battle_id` | `EncounterManager` | WorldMap 加入/离开面板 |
 | `unit_died` | `unit_id`, `party_id` | `BattleManager` / `UnitManager` | UI、统计 |
+| `unit_attack_started` | `unit_id`, `party_id` | `UnitController`（出手瞬间，含空挥） | 命中音效、武器轨迹等表现 |
+| `unit_hit` | `unit_id`, `party_id`, `attacker_unit_id`, `damage`, `killed` | `UnitController`（真实扣血后） | 战斗 UI、统计、音效 |
+| `unit_staggered` | `unit_id`, `party_id`, `duration` | `UnitController`（受击僵直刷新时） | 表现层、调试 |
 | `party_supply_changed` | `party_id`, `is_food_low`, `is_fodder_low` | `SupplyManager` | 大地图 UI、提示 |
 | `npc_supply_purchased` | `party_id`, `bread_count`, `fodder_count` | `AIManager`（经 `MarketManager` 成功后） | 大地图部队图标浮字 |
 | `mercenary_recruited` | `settlement_id`, `party_id`, `mercenary_id`, `unit_id`, `unit_name`, `is_player_recruiter` | `MercenaryManager` | 预留事实通知；当前无订阅者（酒馆直接刷新列表） |

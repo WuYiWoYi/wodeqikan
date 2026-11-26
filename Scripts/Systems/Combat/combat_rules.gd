@@ -98,6 +98,20 @@ static func can_attack(attacker: Variant, target: Variant) -> bool:
 	return can_attack_with_direction(attacker, target, direction)
 
 
+## 攻击有效帧的重新校验：存活、敌对、目标仍在锁定方向的矩形内。
+## 不检查攻击冷却——冷却在出手瞬间已经进入，同一动作不应因此被否决。
+static func is_attack_frame_valid(
+	attacker: Variant, target: Variant, direction: Vector2
+) -> bool:
+	if attacker == null or target == null:
+		return false
+	if not attacker.is_alive() or not target.is_alive():
+		return false
+	if not is_hostile(attacker, target):
+		return false
+	return is_in_attack_area(attacker, target, direction)
+
+
 # ---------------------------------------------------------------------------
 # 远程攻击规则
 # ---------------------------------------------------------------------------

@@ -52,6 +52,13 @@ const MIN_BODY_DISTANCE: float = 28.0
 const EXP_PER_DAMAGE: int = 1
 const EXP_PER_KILL: int = 10
 
+## 受击僵直：统一时长，连续受击只刷新到该值，不做加法叠加。
+## 不按武器/兵种/等级区分，后续平衡调整只需改这里。
+const STAGGER_DURATION: float = 0.24
+## 攻击动画有效帧事件丢失时的安全上限；超过该时间取消待结算攻击，
+## 避免动画被重建/中断后永久挂起。正常风车+戳击约 0.28 秒。
+const PENDING_ATTACK_TIMEOUT: float = 0.6
+
 ## 使用 preload 常量而不是全局类名，保证新脚本首次导入前也能通过编译。
 const CombatRulesScript = preload("res://Scripts/Systems/Combat/combat_rules.gd")
 
@@ -60,6 +67,7 @@ enum AIState {
 	SEEK,
 	APPROACH,
 	ATTACK,
+	STAGGERED,
 }
 
 var unit_id: String = ""
@@ -95,6 +103,16 @@ var _ai_state: AIState = AIState.SEEK
 var _last_attack_direction: Vector2 = Vector2.LEFT
 var _last_attack_target_id: String = ""
 
+## 受击僵直剩余时间；连续受击刷新到 STAGGER_DURATION，不做叠加。
+var _stagger_remaining: float = 0.0
+## 近战攻击的有效帧待结算状态。攻击开始时锁存目标/方向/伤害，
+## 动画到达有效帧后重新校验并结算；被打断/死亡时取消。
+var _has_pending_attack: bool = false
+var _pending_attack_target: UnitController = null
+var _pending_attack_direction: Vector2 = Vector2.ZERO
+var _pending_attack_damage: int = 0
+var _pending_attack_elapsed: float = 0.0
+
 
 func setup(
 	data: UnitData,
@@ -111,6 +129,10 @@ func setup(
 	unit_id = state.unit_id
 	party_id = state.party_id
 	_alive = state.alive and state.battle_hp > 0
+	# 有表现节点时由动画有效帧事件触发伤害；纯数据场景没有动画，
+	# 攻击开始后立即走同一条结算路径（_start_melee_attack 内回退）。
+	if actor != null and is_instance_valid(actor):
+		actor.attack_hit_callback = Callable(self, "_on_attack_hit_frame")
 
 
 func is_alive() -> bool:
@@ -140,6 +162,28 @@ func get_ai_state() -> AIState:
 
 func get_target_unit_id() -> String:
 	return _target.unit_id if _target != null else ""
+
+
+## 受击僵直是否生效；死亡单位不再视为僵直（死亡优先级更高）。
+func is_staggered() -> bool:
+	return is_alive() and _stagger_remaining > 0.0
+
+
+func get_stagger_remaining() -> float:
+	if not is_alive():
+		return 0.0
+	return _stagger_remaining
+
+
+## 是否存在等待有效帧结算的近战攻击；供调试与测试观察。
+func has_pending_attack() -> bool:
+	return _has_pending_attack
+
+
+func get_pending_attack_target_id() -> String:
+	if not _has_pending_attack or _pending_attack_target == null:
+		return ""
+	return _pending_attack_target.unit_id
 
 
 func set_target_claim_counts(counts: Dictionary) -> void:
@@ -264,8 +308,17 @@ func tick(delta: float, enemies: Array[UnitController]) -> void:
 		return
 
 	_attack_cooldown = maxf(0.0, _attack_cooldown - delta)
+	_tick_pending_attack(delta)
 	_is_moving = false
 	_resolve_spatial_overlap()
+
+	# 受击僵直：短暂停止正常移动与索敌/攻击，保留当前目标和手动命令。
+	if _stagger_remaining > 0.0:
+		_stagger_remaining = maxf(0.0, _stagger_remaining - delta)
+		_ai_state = AIState.STAGGERED
+		if _stagger_remaining <= 0.0:
+			_ai_state = AIState.SEEK
+		return
 
 	if _has_manual_move:
 		_ai_state = AIState.APPROACH
@@ -374,8 +427,17 @@ func player_tick(delta: float, direction: Vector2) -> void:
 	if not is_player_controlled or not is_alive():
 		return
 	_attack_cooldown = maxf(0.0, _attack_cooldown - delta)
+	_tick_pending_attack(delta)
 	_is_moving = false
 	_resolve_spatial_overlap()
+
+	# 受击僵直期间不响应移动与手动移动命令；输入不会被缓存，结束需重新按键。
+	if _stagger_remaining > 0.0:
+		_stagger_remaining = maxf(0.0, _stagger_remaining - delta)
+		_ai_state = AIState.STAGGERED
+		if _stagger_remaining <= 0.0:
+			_ai_state = AIState.SEEK
+		return
 
 	if direction.length_squared() > 0.0001:
 		_has_manual_move = false
@@ -400,6 +462,9 @@ func player_attack_at(
 ) -> bool:
 	if not is_player_controlled or not is_alive():
 		return false
+	# 僵直期间不能启动新的攻击动作。
+	if is_staggered():
+		return false
 	if _attack_cooldown > 0.0:
 		return false
 
@@ -418,17 +483,19 @@ func player_attack_at(
 		return _execute_attack(hit_target, direction)
 
 	# 空挥：没有有效目标也正常出手。伤害为 0，但动画与冷却完整生效。
-	_face_attack_direction(direction)
-	_attack_cooldown = maxf(0.05, unit_data.attack_interval)
-	_last_attack_direction = direction
-	_last_attack_target_id = ""
-	_play_attack(direction)
+	_start_free_attack(direction)
 	return true
 
 
-## 结算一次伤害。source 是实际攻击者，用于发放战斗经验；
+## 结算一次真实伤害。source 是实际攻击者，用于发放战斗经验；
+## hit_direction 为攻击者→受击者的命中方向（可省略，回退为双方位置差）。
 ## 目标已经死亡时不再重复扣血或重复判定击杀。
-func apply_damage(amount: int, source: UnitController = null) -> void:
+## 受击白闪/受击动作/僵直只在本函数确认实际扣血后触发。
+func apply_damage(
+	amount: int,
+	source: UnitController = null,
+	hit_direction: Vector2 = Vector2.ZERO
+) -> void:
 	if not is_alive():
 		return
 	var applied: int = maxi(0, amount)
@@ -438,8 +505,18 @@ func apply_damage(amount: int, source: UnitController = null) -> void:
 	var killed: bool = state.battle_hp <= 0
 	if source != null and source != self:
 		source._grant_damage_experience(killed)
+
+	var attacker_id: String = source.unit_id if source != null else ""
+	EventBus.unit_hit.emit(unit_id, party_id, attacker_id, applied, killed)
 	if killed:
+		# 死亡优先级高于受击状态：不进入僵直/受击动作流程。
 		_die()
+		return
+
+	var resolved_direction: Vector2 = hit_direction
+	if resolved_direction.length_squared() < 0.0001 and source != null:
+		resolved_direction = state.battle_position - source.get_position()
+	_begin_stagger(resolved_direction)
 
 
 ## 给攻击者发放伤害/击杀经验；同一目标的死亡只会在 HP 首次归零时判定一次。
@@ -448,6 +525,64 @@ func _grant_damage_experience(killed: bool) -> void:
 		return
 	var amount: int = EXP_PER_DAMAGE + (EXP_PER_KILL if killed else 0)
 	experience_callback.call(unit_id, amount)
+
+
+## 进入/刷新受击僵直。连续受击只把计时重置为 STAGGER_DURATION，不累加；
+## 保留当前战斗目标与手动移动命令，僵直结束后继续原有行为。
+func _begin_stagger(hit_direction: Vector2) -> void:
+	_stagger_remaining = STAGGER_DURATION
+	# 受击打断尚未到达有效帧的攻击动作，表示层同时取消攻击姿态。
+	_cancel_pending_attack()
+	_is_moving = false
+	_ai_state = AIState.STAGGERED
+	if actor != null and is_instance_valid(actor):
+		actor.play_hit_feedback(hit_direction)
+	EventBus.unit_staggered.emit(unit_id, party_id, STAGGER_DURATION)
+
+
+## 动画有效帧回调：动画层只负责发出事件，伤害结算仍由本控制器完成。
+func _on_attack_hit_frame() -> void:
+	_resolve_pending_attack()
+
+
+## 在有效帧结算一次近战攻击。目标可能已经移动/死亡，因此必须重新校验现有规则；
+## 校验不通过则本次攻击落空，不触发任何受击反馈。
+func _resolve_pending_attack() -> bool:
+	if not _has_pending_attack:
+		return false
+	var target: UnitController = _pending_attack_target
+	var direction: Vector2 = _pending_attack_direction
+	var damage: int = _pending_attack_damage
+	# 先清除待结算状态，保证同一戳击最多结算一次，后续中断不会撤销已成立伤害。
+	_cancel_pending_attack()
+	if target == null or not CombatRulesScript.is_attack_frame_valid(
+		self, target, direction
+	):
+		return false
+	_last_attack_target_id = target.unit_id
+	target.apply_damage(damage, self, direction)
+	return true
+
+
+## 攻击动画被重建/中断时的安全取消；正常有效帧会在此之前清除待结算状态。
+func _tick_pending_attack(delta: float) -> void:
+	if not _has_pending_attack:
+		return
+	_pending_attack_elapsed += maxf(0.0, delta)
+	if actor == null or not is_instance_valid(actor) \
+			or not actor.is_attack_animating():
+		_cancel_pending_attack()
+		return
+	if _pending_attack_elapsed >= PENDING_ATTACK_TIMEOUT:
+		_cancel_pending_attack()
+
+
+func _cancel_pending_attack() -> void:
+	_has_pending_attack = false
+	_pending_attack_target = null
+	_pending_attack_direction = Vector2.ZERO
+	_pending_attack_damage = 0
+	_pending_attack_elapsed = 0.0
 
 
 func _die() -> void:
@@ -459,6 +594,9 @@ func _die() -> void:
 	_has_manual_move = false
 	_is_moving = false
 	_ai_state = AIState.SEEK
+	_stagger_remaining = 0.0
+	# 死亡时取消尚未到达有效帧的攻击，避免死亡后补结算伤害。
+	_cancel_pending_attack()
 
 
 # ---------------------------------------------------------------------------
@@ -489,7 +627,8 @@ func _pick_player_attack_target(
 	return best_target
 
 
-## 一次攻击只命中一个目标。冷却属于攻击者，固定在攻击生效时开始。
+## 一次攻击只命中一个目标。攻击开始时锁定方向/目标/伤害与冷却，
+## 实际伤害在动画有效帧回调中重新校验后结算。
 func _execute_attack(target: UnitController, direction: Vector2 = Vector2.ZERO) -> bool:
 	if target == null:
 		return false
@@ -503,13 +642,39 @@ func _execute_attack(target: UnitController, direction: Vector2 = Vector2.ZERO) 
 	if not CombatRulesScript.can_attack_with_direction(self, target, attack_direction):
 		return false
 
-	_face_attack_direction(attack_direction)
-	target.apply_damage(get_attack_damage(), self)
-	_attack_cooldown = maxf(0.05, unit_data.attack_interval)
-	_last_attack_direction = attack_direction
-	_last_attack_target_id = target.unit_id
-	_play_attack(attack_direction)
+	_start_melee_attack(target, attack_direction)
 	return true
+
+
+## 开始一次有目标的近战攻击：锁存目标/方向/伤害，进入冷却并播放动画。
+## 动画有效帧到达前被打断（受击/死亡）则不结算；到达后伤害立即成立且不可撤销。
+func _start_melee_attack(target: UnitController, direction: Vector2) -> void:
+	_cancel_pending_attack()
+	_face_attack_direction(direction)
+	_attack_cooldown = maxf(0.05, unit_data.attack_interval)
+	_last_attack_direction = direction
+	_last_attack_target_id = ""
+	_has_pending_attack = true
+	_pending_attack_target = target
+	_pending_attack_direction = direction
+	# 伤害在出手瞬间按当时状态计算（含骑乘移动加成），与既有数值规则一致。
+	_pending_attack_damage = get_attack_damage()
+	_pending_attack_elapsed = 0.0
+	EventBus.unit_attack_started.emit(unit_id, party_id)
+	if not _play_attack(direction):
+		# 没有动画可等待时走同一条结算路径，保持纯数据场景行为。
+		_resolve_pending_attack()
+
+
+## 空挥：播放完整攻击动作与冷却，但不创建可结算伤害。
+func _start_free_attack(direction: Vector2) -> void:
+	_cancel_pending_attack()
+	_face_attack_direction(direction)
+	_attack_cooldown = maxf(0.05, unit_data.attack_interval)
+	_last_attack_direction = direction
+	_last_attack_target_id = ""
+	EventBus.unit_attack_started.emit(unit_id, party_id)
+	_play_attack(direction)
 
 
 ## 玩家与 AI 共用的唯一弓箭发射入口。
@@ -662,9 +827,10 @@ func _face_attack_direction(direction: Vector2) -> void:
 		actor.set_facing(direction.x)
 
 
-func _play_attack(direction: Vector2) -> void:
+func _play_attack(direction: Vector2) -> bool:
 	if actor != null and is_instance_valid(actor):
-		actor.play_attack(direction)
+		return bool(actor.play_attack(direction))
+	return false
 
 
 func _play_ranged_attack(direction: Vector2) -> void:

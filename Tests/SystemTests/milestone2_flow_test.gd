@@ -7,6 +7,10 @@ extends Node
 
 const TEST_SLOT: String = "__m2_flow__"
 
+const HumanVisualScript = preload(
+	"res://Scripts/Systems/Combat/human_visual.gd"
+)
+
 var _failed: bool = false
 
 
@@ -146,8 +150,18 @@ func _run() -> void:
 	var defender_hp_before: int = first_defender.state.battle_hp
 	var attacker_unit := context.unit_manager.get_unit(first_attacker.unit_id)
 	var attacker_world_hp: int = attacker_unit.current_hp
-	await get_tree().physics_frame
-	await get_tree().physics_frame
+	if first_attacker.is_player_controlled:
+		first_attacker.player_attack_at(
+			first_defender.get_position(), [first_defender]
+		)
+	else:
+		# 2 秒足以结束既有冷却，并让目标（已在 15 像素内）进入攻击。
+		first_attacker.tick(2.0, [first_defender])
+	_check(
+		first_defender.state.battle_hp == defender_hp_before,
+		"攻击前摇/戳击未到有效帧时不提前扣血"
+	)
+	_advance_melee_hit(first_attacker)
 	_check(first_defender.state.battle_hp < defender_hp_before, "实时攻击减少战斗 HP")
 	_check(attacker_unit.current_hp == attacker_world_hp, "实时攻击不写回 UnitData")
 
@@ -255,6 +269,18 @@ func _find_party_by_name(context: WorldContext, party_name: String) -> PartyData
 		if party.party_name == party_name:
 			return party
 	return null
+
+
+## 伤害现在发生在长矛戳击的有效帧；测试直接推进动画，避免依赖真实帧率。
+func _advance_melee_hit(controller: UnitController) -> void:
+	if controller == null or controller.actor == null:
+		return
+	controller.actor.advance_attack_animation(
+		HumanVisualScript.SPEAR_WINDUP_TIME
+	)
+	controller.actor.advance_attack_animation(
+		HumanVisualScript.SPEAR_THRUST_TIME
+	)
 
 
 func _check(condition: bool, message: String) -> void:

@@ -63,7 +63,7 @@ WorldContext（一局游戏，跨场景常驻；持有全部世界管理器）
 
 | 领域 | 文档 |
 |---|---|
-| 世界、时间、场景 | [World_Map_System.md](Systems/World_Map_System.md)、[Time_System.md](Systems/Time_System.md)、[Scene_System.md](Systems/Scene_System.md) |
+| 世界、时间、场景、新游戏入口 | [World_Map_System.md](Systems/World_Map_System.md)、[Time_System.md](Systems/Time_System.md)、[Scene_System.md](Systems/Scene_System.md)、[Identity_Selection_System.md](Systems/Identity_Selection_System.md) |
 | 单位、部队、雇佣兵 | [Unit_System.md](Systems/Unit_System.md)、[Party_System.md](Systems/Party_System.md)、[Mercenary_System.md](Systems/Mercenary_System.md) |
 | 战斗、伤兵/俘虏、玩家被俘、领主赎回 | [Combat_System.md](Systems/Combat_System.md)、[Wounded_Prisoner_System.md](Systems/Wounded_Prisoner_System.md)、[Captivity_System.md](Systems/Captivity_System.md)、[Lord_Ransom_System.md](Systems/Lord_Ransom_System.md) |
 | AI、政治层级、领主 | [AI_System.md](Systems/AI_System.md)、[Political_Hierarchy_System.md](Systems/Political_Hierarchy_System.md)、[Lord_System.md](Systems/Lord_System.md) |

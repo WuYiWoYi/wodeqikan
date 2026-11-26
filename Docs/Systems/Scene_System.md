@@ -9,7 +9,8 @@
 
 | 场景 | 路径 | 用途 |
 |---|---|---|
-| MainMenu | `res://Scenes/MainMenu/main_menu.tscn` | 新游戏、读档、设置、退出 |
+| MainMenu | `res://Scenes/MainMenu/main_menu.tscn` | 新游戏入口、读档、设置、退出 |
+| IdentitySelect | `res://Scenes/Identity/identity_select.tscn` | 新游戏身份选择（独立全屏） |
 | WorldMap | `res://Scenes/WorldMap/world_map.tscn` | 战略层世界模拟与部队操作 |
 | Battle | `res://Scenes/Battle/battle.tscn` | 实时战斗 |
 | Village | `res://Scenes/Village/village.tscn` | 村庄探索与交互 |
@@ -138,6 +139,7 @@ Milestone 1 已验证：
 | 场景 | WorldTime | SceneTime |
 |---|---:|---:|
 | 主菜单 | 0 | 无 |
+| 身份选择 | 0（仍处于主菜单暂停原因下） | 无 |
 | 大地图 | 由 `TimeManager` 基础倍率决定 | 无 |
 | 小场景探索 | 0 | 1.0 |
 | 小场景对话 | 0 | 1.0 |
@@ -156,7 +158,8 @@ Milestone 1 已验证：
 |---|---|
 | 场景路径常量 | 已实现 |
 | `change_scene` | 已实现（无过渡动画） |
-| MainMenu | 已实现（新游戏/继续/读取/设置/退出） |
+| MainMenu | 已实现（新游戏入口/继续/读取/设置/退出） |
+| IdentitySelect | 已实现（全屏类别/身份/最终确认；最终确认前不建世界） |
 | WorldMap | 已实现（地图/图标/时间/交互/保存/追逐焦点/悬浮信息） |
 | Village | 已实现（玩家、村庄头人、对话、越界倒计时） |
 | Town / Castle | 空场景占位 |

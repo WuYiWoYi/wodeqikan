@@ -180,10 +180,12 @@ func _build_settings_panel() -> void:
 	column.add_child(close_button)
 
 
+## 新游戏先切换到独立的身份选择场景；最终确认后才交给 GameManager 创建世界。
 func _on_new_game_pressed() -> void:
 	_status_label.text = ""
-	if not GameManager.start_new_game():
-		_status_label.text = "新游戏创建失败，请查看日志。"
+	var error: Error = SceneManager.change_scene(SceneManager.IDENTITY_SELECT_SCENE)
+	if error != OK:
+		_status_label.text = "无法打开身份选择界面，请查看日志。"
 
 
 func _on_continue_pressed() -> void:

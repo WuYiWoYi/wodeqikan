@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="IdentityDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/identity_definition.gd" id="1_identity"]
+
+[resource]
+script = ExtResource("1_identity")
+identity_id = "NOBLE_SECOND_SON"
+display_name = "没落贵族的次子"
+category_id = "NOBLE"
+description = "城堡还在，但屋顶漏雨；姓氏还响，但钱袋空空。作为次子，你继承不到领地，也轮不到你掌旗，父亲把仅剩的体面全押在了长子身上，而你分到的只有一柄锈迹斑斑的长剑和一句“出去闯闯吧”。你从小跟老骑士学剑，也跟账房先生学会了看账本，知道家里欠着谁的钱、哪块地早就典了出去。临走那天母亲塞给你一枚旧银戒，说这是她当年的嫁妆，实在不行就当了换顿饭——你捏着戒指站在岔路口，还没想好往哪走……"
+sort_order = 0
+enabled = true

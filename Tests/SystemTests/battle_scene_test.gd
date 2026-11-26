@@ -3,6 +3,10 @@ extends Node
 ## 运行：
 ##   Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/battle_scene_test.tscn
 
+const HumanVisualScript = preload(
+	"res://Scripts/Systems/Combat/human_visual.gd"
+)
+
 var _failed: bool = false
 var _context: WorldContext = null
 var _battle_scene: Node2D = null
@@ -146,8 +150,8 @@ func _run() -> void:
 	)
 	# headless 的根 Viewport 尺寸不保证等于窗口尺寸，实际分辨率由非 headless 探针截图验证。
 
-	# 士兵根节点保持 z_index = 0 以便 Characters 层做 Y 排序；
-	# 实际画布层级 = Characters.z + 根节点 z + 部件相对 z。
+	# 士兵根节点由 BattleScene 按 Y 写入整体 z 波段；
+	# 实际画布层级 = Characters.z + 根节点 z + 部件相对 z，必须高于战场背景。
 	var characters_layer := _battle_scene.get_node("World/Characters") as CanvasItem
 	var characters_z: int = characters_layer.z_index if characters_layer != null else 0
 	var mounted_visual_found: bool = false
@@ -227,9 +231,22 @@ func _run() -> void:
 		var defender_hp_before: int = first_defender.state.battle_hp
 		var attacker_unit := _context.unit_manager.get_unit(first_attacker_id)
 		var attacker_hp_before: int = attacker_unit.current_hp
-		await get_tree().physics_frame
-		await get_tree().physics_frame
-		_check(first_defender.state.battle_hp < defender_hp_before, "自动索敌后造成伤害")
+		if first_controller.is_player_controlled:
+			first_controller.player_attack_at(
+				first_defender.get_position(), [first_defender]
+			)
+		else:
+			# 2 秒足以结束既有冷却，并让目标（已在 15 像素内）进入攻击。
+			first_controller.tick(2.0, [first_defender])
+		_check(
+			first_defender.state.battle_hp == defender_hp_before,
+			"攻击前摇/戳击未到有效帧时不提前扣血"
+		)
+		_advance_melee_hit(first_controller)
+		_check(
+			first_defender.state.battle_hp < defender_hp_before,
+			"攻击有效帧造成伤害"
+		)
 		_check(attacker_unit.current_hp == attacker_hp_before, "战斗伤害仍不写回 UnitData")
 
 	# 直接清空敌方战斗 HP，验证死亡移除与胜利判定。
@@ -308,6 +325,18 @@ func _find_party_by_name(party_name: String) -> PartyData:
 		if party.party_name == party_name:
 			return party
 	return null
+
+
+## 伤害现在发生在长矛戳击的有效帧；测试直接推进动画，避免依赖真实帧率。
+func _advance_melee_hit(controller: UnitController) -> void:
+	if controller == null or controller.actor == null:
+		return
+	controller.actor.advance_attack_animation(
+		HumanVisualScript.SPEAR_WINDUP_TIME
+	)
+	controller.actor.advance_attack_animation(
+		HumanVisualScript.SPEAR_THRUST_TIME
+	)
 
 
 func _check(condition: bool, message: String) -> void:

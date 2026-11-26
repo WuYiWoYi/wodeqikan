@@ -41,7 +41,11 @@ Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/visual_probe.tscn
 Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/locomotion_probe.tscn
 Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/party_preview_probe.tscn
 Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/main_menu_probe.tscn
+Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/identity_select_probe.tscn
+Godot_v4.6.1-stable_win64.exe --path . res://Tests/_debug/sort_probe.tscn
 ```
+
+`sort_probe` 用真实骑乘/步兵模型做像素级遮挡对比：`banded`（角色 z 波段）应 0 处穿插，`legacy`（所有角色 z=0）可复现旧问题；输出 `user://sort_probe*.png`。
 
 ## 说明
 

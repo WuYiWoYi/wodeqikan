@@ -35,6 +35,20 @@ signal player_encounter_requested(
 )
 signal player_battle_interaction_requested(interaction_id: String, battle_id: String)
 signal unit_died(unit_id: String, party_id: String)
+## 近战攻击动作开始（含空挥）；音效等表现可据此触发挥击反馈。
+## 此时尚未结算伤害，有效帧由 UnitController 单独处理。
+signal unit_attack_started(unit_id: String, party_id: String)
+## 单位实际受到伤害后广播；killed 表示本次伤害使其失去战斗能力。
+## 只在真实扣血后发出，未命中/0 伤害不会触发。
+signal unit_hit(
+	unit_id: String,
+	party_id: String,
+	attacker_unit_id: String,
+	damage: int,
+	killed: bool
+)
+## 单位进入/刷新受击僵直；duration 为本次刷新的统一僵直时长。
+signal unit_staggered(unit_id: String, party_id: String, duration: float)
 
 ## 封地征召成功的事实。招募方、村庄与组数由业务接口产生，不来自按钮本身。
 signal fief_recruited(

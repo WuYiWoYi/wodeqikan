@@ -6,6 +6,135 @@
 
 ---
 
+## 2026-11-26 · 角色整体动态排序修正（替代 CanvasGroup 方案）
+
+### 根因
+
+- 画布 `z_index` 是全局排序键：同一角色内部部件使用不同负 z（右手武器 -10、身体 -50、左腿 -80），不同角色的部件会按绝对 z 交错，后排角色的武器可以压过前排角色的身体。
+- YSort 只在相同 z 的节点之间按 Y 排序，无法覆盖不同相对 z 的部件；`CanvasGroup` 的子节点仍按各自 z 进入全局 z 分层，实测不能把整个角色合成一个排序单位（窗口像素探针：旧方案仍为后排武器盖住前排身体）。
+
+### 变更
+
+- `UnitActor`：移除 `VisualRoot` CanvasGroup，`UnitVisual` 恢复为角色根节点的直接子节点；新增 `apply_sort_rank()`、`get_sort_rank()`、`get_part_canvas_z()` 与 `SORT_Z_STRIDE = 72` / `SORT_Z_MAX_RANK = 54`。角色根节点按名次获得 `rank × 72` 的 z 波段，内部 `VisualLayers` 相对 z 完全不变。
+- `BattleScene`：新增 `_update_character_sorting()`，每物理帧收集 `World/Characters` 下全部 `UnitActor`（含尸体），按权威 `BattleUnitState.battle_position.y` 升序排名；相同 Y 使用稳定节点名打破平局；初始生成与增援加入后立即重排。尸体位置冻结，但仍持续参与排序。
+- 波段间隔 72 大于内部非影子层级跨度 70，保证“前排最低部件 > 后排最高部件”；不修改任何单件武器/装备的层级，也不新增逐 Sprite 排序逻辑。
+- 正常移动、攻击、受击、倒地、尸体留存与淡出期间只有角色根节点 z 整体变化；淡出透明度仍只作用于完整角色子树，影子继续使用 `World/Shadows` 独立层。
+- 测试：更新 `battle_corpse_visual_test`（前后/骑乘/尸体全部非影子部件两两层级断言、交叉移动翻转、波段间隔大于内部跨度、内部层级不变），并新增窗口像素探针 `Tests/_debug/sort_probe.tscn`：用真实骑乘/步兵模型比较“仅前排”和“前后同时可见”的画面，波段方案 0 处穿插，旧方案可复现 93 处穿插。
+
+### 验证
+
+- 已运行并通过：`battle_corpse_visual_test`（93 条断言）。
+- 窗口像素探针 `sort_probe`：PASS（banded violations = 0，legacy violations = 93）。
+- 已运行并通过：`battle_scene_test`、`player_control_test`、`milestone2_flow_test`、`melee_attack_timing_test`、`archer_scene_test`、`archer_battle_test`、`battle_reinforcement_test`、`battle_cluster_test`、`battle_formation_test`、`battle_result_delay_test`、`battle_retreat_test`。
+- 既有失败（与本次无关）：`unit_visual_test` 的 4 条马前腿2/后腿2 idle 枢轴精确位置断言。
+
+---
+
+## 2026-11-26 · 死亡倒地尸体表现与完整角色动态层级
+
+### 变更
+
+- `UnitActor`：新增独立表现状态机 `CorpseState`（`NONE / FALLING / LINGERING / FADING`）。`play_death()` 不再立即 `queue_free`，而是播放倒地 → 留存 → 淡出后再清理；尸体期间 `_process` 只推进尸体计时，不接收移动/攻击/AI 状态；角色位置在死亡瞬间冻结，名称、生命条、选中圈隐藏，死亡叉号不再叠画在尸体上。
+- `HumanVisual`：新增 `play_death_fall()` / `advance_death_animation()`，锁定死亡姿态并在 `UpperBody` 上平滑旋转/下沉；倒地期间取消攻击、受击动作与白闪，待机/跑动/受击动画不再覆盖。
+- `HorseVisual`：新增 `play_death_collapse()` / `advance_death_animation()`，马身 rig 随骑手一同旋转、下沉并轻微压扁。
+- `UnitVisual`：新增 `play_death_fall()`、`advance_death_animation()`、`capture_corpse_shadow_alpha()`、`set_corpse_alpha()`；淡出通过 `modulate.a` 覆盖完整视觉子树（人物、装备、武器、盾牌、马匹），独立影子按记录的基础透明度同步乘算，不使用共享材质。
+- 新增 `CorpseConfig` Resource（`Data/Combat/corpse_config.tres`），集中提供倒地/留存/淡出时长；战斗场景加载一次并注入所有 `UnitActor`，避免多处硬编码。
+- 完整角色动态排序：~~每个 `UnitActor` 新增 `VisualRoot`（`CanvasGroup`，z_index = 0）包裹整个 `UnitVisual` 子树，使人物、武器、装备与马匹作为一个原子绘制项按角色脚底 Y 参与 `World/Characters` 的动态排序~~。**（已过时：CanvasGroup 不会隔离子级 z，像素探针仍可复现后排武器压过前排身体；见上一条「角色整体动态排序修正」。）**
+- `BattleScene`：加载尸体配置并传入 `UnitActor.setup()`；死亡处理仍只调用 `play_death()` 并从 `_actors` 移除，`get_actor_count()` 不含尸体，结算逻辑不变。
+- 测试：新增 `battle_corpse_visual_test`（倒地持续且区别于受击、留存/淡出时长由配置驱动、淡出覆盖人物/武器/马匹/影子、清理无残留、尸体参与排序且位置稳定、尸体不参与战斗、结算不受影响、骑乘尸体、内部层级保持、朝向镜像、受击对照）。
+
+### 验证
+
+- 已运行并通过：`battle_corpse_visual_test`（88 条断言）、`battle_scene_test`、`player_control_test`、`milestone2_flow_test`、`melee_attack_timing_test`、`archer_scene_test`、`archer_battle_test`、`battle_reinforcement_test`、`battle_cluster_test`、`battle_formation_test`、`battle_result_delay_test`、`battle_retreat_test`。
+- 既有失败（与本次无关）：`unit_visual_test` 的 4 条马前腿2/后腿2 idle 枢轴精确位置断言。
+- 未验证：无头环境无法确认倒地重量感与淡出视觉效果；角色整体排序已由窗口像素探针验证，但正式战斗观感仍需人工验收。退出时 `resources still in use` 与既有战斗场景测试一致，仍为已知既有告警。
+
+---
+
+## 2026-11-26 · 近战攻击有效帧与受击反馈
+
+### 变更
+
+- `HumanVisual`：戳击阶段进度达到 `SPEAR_HIT_FRAME_RATIO = 0.6` 时发出一次 `attack_hit_frame`；新增受击动作（`UpperBody` 后仰/倾斜，按朝向镜像换算）、`cancel_attack_animation()` 与 `get_melee_hit_frame_time()`。
+- `UnitVisual` / `UnitActor`：转发有效帧事件；`UnitActor` 新增 `play_hit_feedback()`、白闪强度衰减与 `attack_hit_callback`；`play_attack()` 返回是否成功启动动画。
+- `UnitController`：近战攻击改为“出手时锁存目标/方向/伤害并进入冷却 → 有效帧回调中经 `CombatRules.is_attack_frame_valid()` 重新校验 → `apply_damage()` 结算”。每次攻击最多结算一次；有效帧前受击/死亡取消待结算攻击，有效帧后伤害不撤销；`PENDING_ATTACK_TIMEOUT = 0.6s` 兜底。
+- 新增受击僵直 `STAGGER_DURATION = 0.24s` 与 `AIState.STAGGERED`：停止移动、不能启动新攻击，连续受击刷新不叠加，死亡优先；不修改基础属性。
+- `apply_damage(amount, source, hit_direction)` 新增受击方向参数；只在真实扣血后触发白闪/受击动作/僵直。
+- `Shaders/faction_tabard.gdshader` 扩展为统一士兵材质（`use_faction_color`、`flash_amount`）；每个 `UnitVisual` 使用独立材质实例，罩袍保留阵营材质并同步白闪，影子不参与。
+- `EventBus` 新增 `unit_attack_started`、`unit_hit`、`unit_staggered`。
+- 测试：新增 `melee_attack_timing_test`（前摇/戳击前半无伤害、有效帧一次结算、未命中无反馈、有效帧前后打断、僵直、连续受击、死亡优先、骑马白闪与材质隔离、受击方向、事件契约）；`battle_scene_test` / `milestone2_flow_test` / `player_control_test` 改为手动推进到有效帧；`combat_attack_rules_test` 适配受击僵直。
+
+### 验证
+
+- 已运行并通过：`melee_attack_timing_test`、`battle_scene_test`、`milestone2_flow_test`、`player_control_test`、`combat_attack_rules_test`、`unit_controller_test`、`archer_battle_test`、`archer_scene_test`、`battle_reinforcement_test`、`battle_formation_test`、`battle_cluster_test`、`battle_retreat_test`。
+- 既有失败（与本次无关）：`unit_visual_test` 的 4 条马前腿2/后腿2 idle 枢轴精确位置断言；`battle_side_result_test` 的「玩家部队全员伤亡」与 `wounded_system_test` 的「玩家角色保持永久死亡规则」仍按玩家被俘规则接入前的语义校验。
+
+---
+
+## 2026-11-26 · 身份选择取消「完成选择」按钮
+
+### 变更
+
+- 删除二级身份页的 `CompleteSelectionButton` 及其点击处理；二级页只保留「返回」。
+- 点击任意具体身份按钮立即进入最终确认页，不再经过任何中间确认按钮；流程改为：类别 → 具体身份 → 最终确认 → 开始游戏。
+- 确认页「返回修改」改为回到一级类别页；类别与身份选择保留，再次点击具体身份直接重新进入确认页。
+- 测试与探针同步：`identity_selection_ui_test` 新增「无完成选择/确认选择/下一步按钮」断言并改为即时确认流程；`identity_select_probe` 点击身份后直接截取确认页。
+
+### 验证
+
+- 已运行并通过：`identity_selection_ui_test`、`main_menu_ui_test`、`milestone1_flow_test`。
+- 已运行非 headless `identity_select_probe`，检查 1920×1080 的类别/身份/确认页与 1280×720 的二级页截图：二级页无「完成选择」或「下一步」，只有身份按钮与「返回」。
+
+---
+
+## 2026-11-26 · 身份选择全屏化与最终确认
+
+### 新增
+
+- `Scenes/Identity/identity_select.tscn` + `Scripts/UI/Identity/identity_select.gd`：独立全屏身份选择场景，包含渐变/暖光背景、独立按钮样式、一级纵向类别、二级纵向身份与可滚动选项区。
+- 最终确认页：按真实选择状态生成「类别 → 身份」完整路径，提供「返回修改」与「最终确认」两个纵向按钮。
+- `SceneManager.IDENTITY_SELECT_SCENE`。
+- 测试：重写 `identity_selection_ui_test` 覆盖全屏场景、纵向布局、确认路径与最终提交流程。
+
+### 变更
+
+- 主菜单「新游戏」不再在主菜单内弹出覆盖面板，而是切换场景；主菜单场景被释放，身份选择完全全屏独立。
+- 删除 `Scripts/UI/MainMenu/identity_select_panel.gd`；`main_menu.gd` 只负责切换场景。
+- ~~二级页「确认身份」拆分为「完成选择」与最终确认页的「最终确认」；「完成选择」只进入确认页，不创建世界或存档。~~（已被同日「身份选择取消完成选择按钮」取代：点击身份直接进入确认页。）
+- 返回上下文：最终确认返回二级页并保留身份；二级返回一级时保留类别高亮，再次进入同一类别恢复身份；切换类别才清除具体身份。
+- 确认路径改为由选择状态动态生成，为未来多层选择预留追加点。
+- 身份 ID / 类别 ID 的会话级传递与「不改变初始化数据」保持不变，Schema 仍为 v10。
+
+### 验证
+
+- 已运行并通过：`identity_selection_ui_test`、`main_menu_ui_test`、`milestone1_flow_test`。
+- 已运行非 headless `identity_select_probe`，检查 1920×1080 与 1280×720 下的一级/二级/确认页截图：全屏无主菜单残留、选项纵向、底部按钮未被裁切。
+
+---
+
+## 2026-11-26 · 新游戏身份选择
+
+### 新增
+
+- `IdentityDefinition`、`IdentityCategoryDefinition`（`Scripts/Config/`）与 `Data/Identity/Categories/*.tres`、`Data/Identity/Identities/*.tres`：类别/身份 ID、名称、背景故事、排序、启用开关。
+- `IdentityCatalog`（`Scripts/Config/identity_catalog.gd`）：只读扫描默认目录注册配置，校验重复 ID、缺失类别与非法字段。
+- `IdentitySelectPanel`（`Scripts/UI/MainMenu/identity_select_panel.gd`）：一级类别 + 二级身份的覆盖式选择面板，配置驱动生成按钮。
+- `GameManager.player_identity_id` / `player_identity_category_id`：会话级身份选择结果；`start_new_game()` 新增两个可选参数。
+- 测试：`identity_selection_ui_test`。
+
+### 变更
+
+- 主菜单「新游戏」不再直接调用 `GameManager.start_new_game()`，先进入身份选择；确认后才创建世界并进入大地图。
+- 一级/二级返回、类别切换均清空具体身份选择；确认前不创建 `WorldContext`、不写存档。
+- 身份选择不改变金币、装备、士兵、出生点或任何初始化数据，也不新增存档字段；`schema_version` 保持 v10。
+
+### 验证
+
+- 已运行并通过：`identity_selection_ui_test`、`main_menu_ui_test`。
+- 未执行非 headless 视觉验收；故事区排版与长文本换行需人工确认。
+
+---
+
 ## 2026-11-25 · 雇佣兵美术、独立招募、战败清理与玩家被俘
 
 ### 新增

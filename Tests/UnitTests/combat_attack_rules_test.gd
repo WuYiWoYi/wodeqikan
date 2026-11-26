@@ -70,6 +70,8 @@ func _test_multi_attackers_same_target() -> void:
 	var attacker_hp_before: Array[int] = []
 	for attacker: UnitController in attackers:
 		attacker_hp_before.append(attacker.state.battle_hp)
+	# 受击后短暂僵直：先推进到僵直结束，再验证可以正常反击。
+	target.tick(UnitController.STAGGER_DURATION + 0.01, attackers)
 	target.tick(0.01, attackers)
 	var total_loss: int = 0
 	for i: int in range(attackers.size()):
@@ -103,6 +105,15 @@ func _test_player_surrounded_can_attack() -> void:
 		attacker.tick(0.01, [player])
 	_check(player.state.battle_hp == 300 - 60, "玩家被三名敌人同时攻击")
 	_check(player.is_alive(), "玩家仍可战斗")
+	_check(player.is_staggered(), "玩家受击后进入短暂僵直")
+	_check(
+		not player.player_attack_at(attackers[0].get_position(), attackers),
+		"僵直期间不能启动新的攻击"
+	)
+
+	# 僵直结束后恢复反击能力。
+	player.player_tick(UnitController.STAGGER_DURATION + 0.01, Vector2.ZERO)
+	_check(not player.is_staggered(), "僵直结束后恢复正常状态")
 
 	var target_hp_before: int = attackers[0].state.battle_hp
 	_check(

@@ -1,9 +1,9 @@
 # 当前开发状态
 
-**更新日期：** 2026-11-25
-**当前阶段：** 雇佣兵美术/独立招募、战败清理、玩家被俘与逃脱迭代已完成
-**整体状态：** 阶段 0–13 的阶段性目标均已交付；阶段 2/3/4/7 的长期路线仍有明确未做项。存档 Schema v10（新增玩家被俘状态、逃脱计时与保护期）。
-**最近变更：** 雇佣兵按 Tier 使用独立罩袍，无赖骑士拥有专属缨饰且不使用家族长矛；酒馆招募改为独立界面，左侧列表 + 右侧真实 UnitVisual 预览；战斗结算后无成员部队从大地图彻底移除，只剩伤兵的部队保留；玩家战败后角色成为胜利方真实俘虏，原部队失去控制，镜头跟随押送方；所有俘虏按世界时间独立恢复，满血后按配置概率逃脱并在押送方附近重建单成员玩家部队，2 游戏小时 AI 保护；顶栏显示真实玩家 HP，左侧被俘面板展示状态。
+**更新日期：** 2026-11-26
+**当前阶段：** 新游戏身份选择流程已接入；雇佣兵美术/独立招募、战败清理、玩家被俘与逃脱迭代已完成
+**整体状态：** 阶段 0–13 的阶段性目标均已交付；阶段 2/3/4/7 的长期路线仍有明确未做项。存档 Schema v10（新增玩家被俘状态、逃脱计时与保护期）；身份选择不新增存档字段。
+**最近变更：** 小地图战斗新增死亡倒地与尸体表现：阵亡单位先播放倒地动画，再按 `CorpseConfig` 留存并整体淡出，淡出覆盖人物/装备/武器/马匹/影子，尸体期间不参与战斗且结算不变。完整角色动态层级改为角色级 z 波段：`BattleScene` 每物理帧按脚底 Y 给全部角色（含尸体）分配唯一名次，`UnitActor.z_index = rank × 72`，内部 `VisualLayers` 相对层级保持不变；此前尝试的 CanvasGroup 方案经像素探针验证无法隔离子级 z，已移除。此前：新游戏身份选择、近战攻击有效帧与受击反馈、雇佣兵美术/独立招募、战败清理、玩家被俘与逃脱。
 **读取提示：** 只有任务涉及“当前进度、已有实现、下一步”时才读本文件。系统规则读 `Docs/Systems/*.md`；历史细节读 [Archive/Status_History.md](../Archive/Status_History.md) 或 [04_Change_Log.md](../04_Change_Log.md)。
 
 **状态标记：**
@@ -42,12 +42,13 @@
 | 13 后续：酒馆/关押期赎买/提醒 | 已实现 | 独立出售俘虏界面、玩家关押期 3–12 小时家族赎买、拒绝与自动失效、原有 12–48 小时出售赎回、右侧待处理提醒 |
 | 14 地图操作/雇佣兵/经济 | 已实现 | 单击 1x / 双击 2x、到达自动暂停与暂停提示、酒馆雇佣兵招募、全局雇佣兵池、雇佣兵装备锁定、普通士兵换装、统一招募价格/工资/初始金币、Schema v9 |
 | 14 后续：雇佣兵美术/战败/被俘 | 已实现 | Tier 罩袍与无赖骑士缨饰、独立招募 UI 与真实预览、战败空部队清理、玩家被俘、俘虏恢复、逃脱与 2 小时保护、顶栏 HP/被俘面板、Schema v10 |
+| 14 后续：新游戏身份选择 | 已实现 | 独立全屏场景、两级纵向选择与滚动、点击身份即进入最终确认（无中间按钮）、动态路径展示、返回修改回一级并保留状态、最终确认前不初始化世界；无身份差异化初始化 |
 
 ## 2. 已实现能力（按系统）
 
 - **世界与时间**：`WorldContext` + `WorldSimulation`；`WorldTime` 固定 0.1 秒 tick；暂停原因按引用计数嵌套；世界从 1103-01-01 起，1x 为 6 秒/游戏小时；5000×3000 大地图、9 个地点。详见 [Time_System.md](../Systems/Time_System.md)。
 - **单位与部队**：`UnitData`/`PartyData` 纯数据；三级兵种（10/50、20/100、25/180）；五级战斗经验（新兵…百战精锐，阈值 100/300/500/1000，累计 HP +0/+5/+15/+30/+50）与等级独立于 tier；装备/马匹骑乘；玩家角色是普通 Unit；新游戏玩家部队 15 人（含 3 名弓箭手、4 名骑乘）；部队管理面板提供士兵/俘虏双列列表、战斗经验文本等级、坐骑与晋升操作，普通士兵可逐槽位换装，雇佣兵显示锁定提示且数据层拒绝换装；国王身份使用独立国王盔外观覆盖，不写入装备或存档。详见 [Unit_System.md](../Systems/Unit_System.md)、[Party_System.md](../Systems/Party_System.md)、[Mercenary_System.md](../Systems/Mercenary_System.md)。
-- **战斗**：`BattleSession` 多战斗注册表；屏幕战斗与离屏 AI 战斗并行；离屏战斗每游戏小时结算；增援加入既有会话；1800×1024 战场；360°定向矩形攻击、多人围攻、实体最小间距；有效伤害 +1 经验、击杀额外 +10；统一 `BattleResultData`；玩家撤退、控制权转移、经验/金币/战利品；按 tier 负伤、俘虏池分配；玩家侧战败时角色进入俘虏池；结算后无成员部队从世界移除，只剩伤兵的部队保留。详见 [Combat_System.md](../Systems/Combat_System.md)、[Wounded_Prisoner_System.md](../Systems/Wounded_Prisoner_System.md)。
+- **战斗**：`BattleSession` 多战斗注册表；屏幕战斗与离屏 AI 战斗并行；离屏战斗每游戏小时结算；增援加入既有会话；1800×1024 战场；360°定向矩形攻击、多人围攻、实体最小间距；长矛近战在戳击有效帧结算伤害（每次攻击最多一次，前摇/戳击前半无伤害），受击白闪/受击动作/0.24s 僵直，统一 `unit_attack_started`/`unit_hit`/`unit_staggered` 事件；阵亡后先倒地再按 `CorpseConfig` 留存/淡出，尸体不参与战斗与结算；每个角色按脚底 Y 获得唯一 z 波段（`rank × 72`），全部非影子部件随角色整体排序，内部部件层级保持；有效伤害 +1 经验、击杀额外 +10；统一 `BattleResultData`；玩家撤退、控制权转移、经验/金币/战利品；按 tier 负伤、俘虏池分配；玩家侧战败时角色进入俘虏池；结算后无成员部队从世界移除，只剩伤兵的部队保留。详见 [Combat_System.md](../Systems/Combat_System.md)、[Wounded_Prisoner_System.md](../Systems/Wounded_Prisoner_System.md)。
 - **大地图与 AI**：直线移动、跟随、视野、统一遭遇判定、玩家追击接触、战后冷却；玩家移动目标标记与动态虚线；商队/治安队/强盗/家族骑士 AI；多战斗标记与按 `side_index` 汇总；地点家族旗帜与停留部队旗帜条；WASD 自由镜头；左 Alt 详细悬浮；顶栏居中世界时间、金币/移速/部队人数图标数值与 ALT 明细；事件中心与家族入口；右侧事件框、小型待处理提醒与详情弹窗；建筑面板打开时仍可打开百科/部队/家族/背包/事件但禁用时间控制；采邑与冒险者招募统一浮动提示。详见 [World_Map_System.md](../Systems/World_Map_System.md)、[AI_System.md](../Systems/AI_System.md)。
 - **经济与补给**：玩家/共享背包、金币、三级工资（1/3/7，**不自动扣除**）；每日收支预览复用工资与税收缓存（不结算）；马匹独立实例与逐匹交易；村庄（面包/草料）与城镇（含马匹）市场；每日补给结算与 NPC 低补给采购；城镇酒馆菜单嵌入地点面板，出售俘虏打开独立界面；俘虏价格按兵种 tier（5/20/60）与 NPC 领主统一价（100）；普通招募 Tier1 = 5、Tier3 = 400，采邑征召不耗金币；雇佣兵 Tier2 基础 35 / Tier3 80，经验加价 +0/+10/+30，坐骑 +30，日薪 4/9；新游戏初始金币 10000。价格唯一来源为 `RecruitmentConfig`，工资唯一来源为 `UnitConfig`。详见 [Inventory_Economy_System.md](../Systems/Inventory_Economy_System.md)、[Mercenary_System.md](../Systems/Mercenary_System.md)、[Mount_System.md](../Systems/Mount_System.md)、[Supply_System.md](../Systems/Supply_System.md)、[Wounded_Prisoner_System.md](../Systems/Wounded_Prisoner_System.md)。
 - **政治与封地**：Noble/House/Kingdom 层级、领袖死亡选举、战争传播、统一关系查询与敌对势力聚合查询、强盗对所有政治家族敌对；封地所有权、统一征召授权 `is_authorized_owner()`、采邑储备/成组征召、村庄普通与贵族冒险者候选人、NPC 普通冒险者招募、税收缓存（**只缓存不结算**）；大地图家族面板只读展示家族贵族与封地。详见 [Political_Hierarchy_System.md](../Systems/Political_Hierarchy_System.md)、[Fief_Recruitment_System.md](../Systems/Fief_Recruitment_System.md)、[Adventurer_Recruitment_System.md](../Systems/Adventurer_Recruitment_System.md)。
@@ -56,6 +57,7 @@
 - **地点与村庄**：村庄小场景、头人对话、越界倒计时、采邑/候选人入口；贵族冒险者以步行人物+独立战马呈现，普通人选不受影响；城镇市场与酒馆；城镇/城堡仍无独立小场景。详见 [Village_System.md](../Systems/Village_System.md)、[Settlement_System.md](../Systems/Settlement_System.md)。
 - **存档**：JSON + `schema_version`（当前 v10）、临时文件 + 校验 + `.bak` 替换、跨进程读写；保存五级经验/等级折算、领主身份、赎回记录、全局雇佣兵池/外观快照与 `is_mercenary` 身份、玩家被俘状态/恢复与逃脱计时/保护期；战斗会话与待确认俘虏份额不进入存档。详见 [Save_System.md](../Systems/Save_System.md)。
 - **赎回与事件 UI**：NPC 领主出售后按世界时间等待 12–48 小时，生成可接受/取消的家族赎回请求；领主仍被玩家关押时按 3–12 小时生成可接受/拒绝的赎买请求。两种流程共用管理器与事件中心，但来源互斥、等待与拒绝规则不同。接受支付一次赎金并复用/重建领主部队；关押期请求在领主被出售、释放或转移后立即失效。大地图右侧纵向事件框与小型待处理提醒都只读取事件中心；详情弹窗逐帧校验，失效即关闭。详见 [Lord_Ransom_System.md](../Systems/Lord_Ransom_System.md)、[World_Map_System.md](../Systems/World_Map_System.md)。
+- **新游戏身份选择**：主菜单「新游戏」通过 `SceneManager` 切换到独立全屏场景 `Scenes/Identity/identity_select.tscn`，主菜单场景被释放；一级按配置纵向生成贵族/平民，二级按类别纵向生成身份按钮（超过 3 个时只滚动选项区）并在上方展示背景故事，使用 `ButtonGroup`、金色边框与「当前选择」标签明确选中状态；点击任意具体身份立即进入最终确认页，没有「完成选择」等中间按钮；确认页按真实状态生成「类别 → 身份」路径，「返回修改」回到一级类别页并保留类别/身份；只有「最终确认」调用 `GameManager.start_new_game()` 并传递身份 ID/类别 ID，此前不创建 `WorldContext`、不启动世界时间、不写存档，当前不改变世界初始化数据。详见 [Identity_Selection_System.md](../Systems/Identity_Selection_System.md)。
 - **UI/日志/百科**：世界日志最多 20 条并随 v3 起入档；百科改为一级分类（王国/家族/地点）→ 条目列表 → 二级详情，并显示敌对王国/敌对独立家族；事件中心聚合封地/补给/伤兵/冒险者/赎回等现有状态，任务栏暂为空；家族面板按队伍/封地只读展示并支持点击定位；大地图日期/时间段、地点面板、部队面板（成员/俘虏列表与缩略图）、背包、市场、内嵌酒馆菜单与独立出售窗口等程序化 UI。大地图左键单击/双击判定、玩家到达自动暂停与“已暂停”提示也已接入。详见 [World_Log_System.md](../Systems/World_Log_System.md)、[Encyclopedia_System.md](../Systems/Encyclopedia_System.md)。
 
 ## 3. 当前明确未实现 / 下一步
@@ -69,7 +71,7 @@
 5. **装备与物品**：装备商店/获取途径、物品使用、战利品入包（普通士兵换装 UI 已实现）。
 6. **寻路与地形**：大地图道路加成/地形阻挡；战斗寻路、更复杂阵型与冲锋。
 7. **招募与旧档**：用正式招募替换临时测试兵力；旧存档补员策略。
-8. **正式美术与动画**：士兵/马匹正式素材、头盔/盾牌/缨饰/罩袍、弓与箭、地图与地点图标、受击/死亡动画。
+8. **正式美术与动画**：士兵/马匹正式素材、头盔/盾牌/缨饰/罩袍、弓与箭、地图与地点图标；受击与死亡已有程序化表现，正式逐帧/骨骼动画未做。
 9. **高级战斗**：玩家手动选择加入方、键盘部队指令、士气、多部队协同、AI 撤退；玩家被俘/逃脱已实现，永久死亡后的重开/继承流程仍未做。
 10. **存档后续**：自动存档、v1→v2 完整迁移、跨实体引用统一校验、随机种子入档。
 11. **离屏战斗平衡**：伤兵/俘虏、士气、撤退、更长时限；小时中间态展示。
@@ -109,6 +111,8 @@
 - 尚无任务系统：事件中心“已接取任务”始终为空，待处理事项只来自现有系统实时状态（KI517）。
 - 事件中心不保存历史或“已处理”状态；条件消失后条目直接移除（KI518）。
 - 移速 ALT 明细目前只有基础移速与大地图系数，移动结算尚无动态加成/惩罚（KI519）。
+- 近战受击反馈当前只有白闪、身体后仰与僵直：没有受击位移、武器轨迹、命中音效资源；有效帧比例/僵直时长/白闪时长需结合实际观感继续调整。
+- 死亡倒地/尸体留存/淡出已通过自动化状态与层级断言，但倒地重量感与淡出视觉效果无法在 headless 下验证；默认时长（倒地 0.55s / 留存 6.0s / 淡出 1.2s）仍为暂定平衡值。角色整体排序已用窗口像素探针验证无穿插，仍需在正式战斗中人工确认观感；排序名次上限 55，同屏角色更多时需压缩内部层级跨度或拆分绘制。退出时 `resources still in use` 告警与既有战斗场景测试一致。
 
 ## 5. 测试与验收
 
@@ -121,7 +125,10 @@
 - **地图/雇佣兵/经济测试（2026-11-25）**：新增 `mercenary_system_test`（初始池/类型/经验/价格、玩家招募与装备锁、失败回滚、增长与容量、NPC 低优先级、流转、存档往返、旧档初始化）；更新 `world_map_input_test`（单击/双击、到达自动暂停、暂停提示）、`party_panel_test`（普通士兵换装、雇佣兵锁定与数据层拒绝）、`stage13_tavern_test`（酒馆雇佣兵列表与原子招募）、`fief_adventurer_system_test` / `noble_adventurer_recruitment_test`（统一价格、Tier3 初始 2 级、AI 预算）、`save_migration_test` / `save_persistence_test` / `unit_tier_wage_test` / `party_economy_ui_test` / `lord_ransom_test` / `political_hierarchy_test`（Schema v9、工资 1/3/7、初始金币）。已运行并通过：上述测试，以及 `unit_manager_test`、`unit_party_serialization_test`、`mount_instance_test`、`mounted_unit_test`、`ai_manager_test`、`player_party_expansion_test`、`world_map_move_target_test`、`world_map_layout_test`、`town_market_ui_test`、`event_center_test`、`stage13_prisoner_test`、`milestone1_restart_test`、`stage13_world_map_ui_test`、`world_map_milestone6_test`、`settlement_interaction_test`、`main_menu_ui_test`、`fief_adventurer_ui_test`、`main_map_info_test`。
 - **已修复的既有测试偏差（2026-11-25）**：`player_control_test` 的“玩家部队全员伤亡”改为校验“阵亡 + 伤兵 = 全员且存活者为 0”，与伤兵系统一致；`milestone2_flow_test` 补上攻击确认面板与战后俘虏选择（确认不接收）流程，再进入战斗与返回大地图。
 - **雇佣兵美术/被俘测试（2026-11-25）**：新增 `captivity_escape_test`（战败被俘、装备/HP 保留、原部队禁用、押送方接收、被俘 UI/顶栏 HP/时间权限、俘虏小时恢复、存档往返、满血逃脱、单成员部队重建、落点距离/边界、2 小时保护、保护期后 AI 恢复拦截）；更新 `mercenary_system_test`（Tier 罩袍、无家族长矛、无赖骑士专属缨饰、预览/招募外观一致）、`stage13_tavern_test`（独立招募界面、真实预览、原子招募、关闭恢复）、`milestone2_flow_test` / `battle_scene_test` / `save_persistence_test`（战败空部队移除）、`save_migration_test` / `save_persistence_test` / `lord_ransom_test` / `political_hierarchy_test`（Schema v10）。已运行并通过上述测试，以及 `player_control_test`、`stage13_prisoner_test`、`world_map_input_test`、`main_map_info_test`、`stage13_world_map_ui_test`、`ai_encounter_flow_test`、`player_encounter_test`。
-- **已知失败**：`Tests/UnitTests/supply_manager_test.tscn` 的“NPC 记录 1 份草料缺口”断言未通过，原因与阶段 13 无关（KI534）。`Tests/UnitTests/unit_visual_test.tscn` 的马腿枢轴/贴图可见性断言仍失败。`Tests/SystemTests/encounter_dialogue_ui_test.tscn` 的“圆形内部旗帜放大且不改变圆形底盘”仍失败：`party_marker_style.tres` 的 `flag_max_size = 52` 超出该测试旧上限 `18*2+4 = 40`，与本轮被俘/雇佣兵改动无关。
+- **新游戏身份选择测试（2026-11-26）**：新增 `identity_selection_ui_test`（主菜单释放与全屏场景进入、全屏尺寸、一/二级纵向布局、故事切换、选中状态、点击身份立即进入确认页、不存在「完成选择/确认选择/下一步」中间按钮、动态路径与修改同步、返回修改回一级并保留状态、切换类别清空、最终确认前无世界/无存档、最终确认 ID 传递并进入 WorldMap）。已运行并通过：`identity_selection_ui_test`、`main_menu_ui_test`、`milestone1_flow_test`。已运行 `identity_select_probe` 并检查 1920×1080 与 1280×720 截图，二级页只有身份按钮与「返回」，布局无裁切。
+- **近战有效帧/受击反馈测试（2026-11-26）**：新增 `melee_attack_timing_test`（前摇/戳击前半无伤害、有效帧一次结算、目标移出范围无白闪/僵直、有效帧前打断无伤害且取消动画、有效帧后伤害不撤销、僵直禁止移动/攻击并恢复、连续受击刷新不叠加、死亡优先、骑马白闪覆盖人马且材质按角色隔离、受击方向随朝向镜像、事件时序）；更新 `battle_scene_test` / `milestone2_flow_test` / `player_control_test`（手动推进到有效帧）、`combat_attack_rules_test`（僵直后反击）。已运行并通过：上述测试、`unit_controller_test`、`archer_battle_test`、`archer_scene_test`、`battle_reinforcement_test`、`battle_formation_test`、`battle_cluster_test`、`battle_retreat_test`。
+- **死亡尸体/动态层级测试（2026-11-26）**：新增 `battle_corpse_visual_test`（倒地持续且明显区别于受击、留存/淡出由 `CorpseConfig` 驱动、淡出覆盖人物/武器/马匹/影子、清理无节点与影子残留、尸体留在 Characters 且位置稳定、尸体与存活角色全部非影子部件保持整体层级、前中后角色两两层级、骑乘与步兵、交叉移动翻转、波段间隔大于内部跨度、尸体不参与战斗与统计、胜利结算不受影响、朝向镜像、受击对照）；已运行并通过上述测试，以及 `battle_scene_test`、`player_control_test`、`milestone2_flow_test`、`melee_attack_timing_test`、`archer_scene_test`、`archer_battle_test`、`battle_reinforcement_test`、`battle_cluster_test`、`battle_formation_test`、`battle_result_delay_test`、`battle_retreat_test`。窗口像素探针 `Tests/_debug/sort_probe.tscn` 用真实骑乘/步兵模型验证：整体排序 0 处穿插，旧方案可复现 93 处。
+- **已知失败**：`Tests/UnitTests/supply_manager_test.tscn` 的“NPC 记录 1 份草料缺口”断言未通过，原因与阶段 13 无关（KI534）。`Tests/UnitTests/unit_visual_test.tscn` 的马腿枢轴/贴图可见性断言仍失败。`Tests/SystemTests/battle_side_result_test.tscn` 的「玩家部队全员伤亡」断言与 `Tests/UnitTests/wounded_system_test.tscn` 的「玩家角色保持永久死亡规则/阵亡后照常移除」断言仍按旧规则校验，而玩家角色战败后现在转为伤兵（被俘）；均与本次近战改动无关。`Tests/SystemTests/encounter_dialogue_ui_test.tscn` 的“圆形内部旗帜放大且不改变圆形底盘”仍失败：`party_marker_style.tres` 的 `flag_max_size = 52` 超出该测试旧上限 `18*2+4 = 40`，与本轮被俘/雇佣兵改动无关。
 - **未完成的验收**：非 headless 视觉验收（地点布局、44 像素旗帜、动画观感）尚未记录。
 - **测试策略**：默认只运行验证本次修改的最小测试集（L1–L4），规则见 [03_Design_Conventions.md §10](../03_Design_Conventions.md#10-测试规范)。运行命令见 [Test_Commands.md](Test_Commands.md)。
 

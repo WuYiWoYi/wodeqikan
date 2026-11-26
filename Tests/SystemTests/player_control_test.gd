@@ -3,6 +3,10 @@ extends Node
 ## 运行：
 ##   Godot_v4.6.1-stable_win64.exe --headless --path . res://Tests/SystemTests/player_control_test.tscn
 
+const HumanVisualScript = preload(
+	"res://Scripts/Systems/Combat/human_visual.gd"
+)
+
 var _failed: bool = false
 var _context: WorldContext = null
 var _scene: BattleScene = null
@@ -153,6 +157,11 @@ func _test_attack() -> void:
 	var hit := _scene.try_player_attack_at(enemy_controller.get_position())
 	_check(hit, "玩家左键攻击命中范围内敌人")
 	_check(
+		enemy_controller.state.battle_hp == hp_before,
+		"攻击前摇/戳击未到有效帧时不提前结算伤害"
+	)
+	_advance_melee_hit(_hero)
+	_check(
 		enemy_controller.state.battle_hp == hp_before - hero_attack,
 		"玩家攻击使用 Unit 最终攻击力"
 	)
@@ -172,6 +181,11 @@ func _test_attack() -> void:
 	_hero.player_tick(_hero.unit_data.attack_interval + 0.01, Vector2.ZERO)
 	var third_hit := _scene.try_player_attack_at(enemy_controller.get_position())
 	_check(third_hit, "攻击间隔结束后可以再次攻击")
+	_check(
+		enemy_controller.state.battle_hp == hp_after_first,
+		"第二次攻击在有效帧前不提前扣血"
+	)
+	_advance_melee_hit(_hero)
 	_check(
 		enemy_controller.state.battle_hp == hp_after_first - hero_attack,
 		"第二次攻击同样使用 Unit 攻击力"
@@ -267,6 +281,7 @@ func _test_control_transfer() -> void:
 		var hp_before := target.state.battle_hp
 		var hit := _scene.try_player_attack_at(target.get_position())
 		_check(hit, "接管后的单位可以攻击敌人")
+		_advance_melee_hit(new_controller)
 		_check(
 			target.state.battle_hp == hp_before - new_controller.unit_data.attack,
 			"接管单位的攻击使用自身属性"
@@ -365,6 +380,19 @@ func _count_player_controlled() -> int:
 func _settle_frames(count: int) -> void:
 	for i: int in range(count):
 		await get_tree().physics_frame
+
+
+## 伤害现在发生在长矛戳击的有效帧；测试直接推进动画，避免依赖真实帧率。
+## 有动画时等待有效帧事件，无动画的纯数据控制器会立即结算，本函数为空操作。
+func _advance_melee_hit(controller: UnitController) -> void:
+	if controller == null or controller.actor == null:
+		return
+	controller.actor.advance_attack_animation(
+		HumanVisualScript.SPEAR_WINDUP_TIME
+	)
+	controller.actor.advance_attack_animation(
+		HumanVisualScript.SPEAR_THRUST_TIME
+	)
 
 
 func _find_party_by_name(party_name: String) -> PartyData:

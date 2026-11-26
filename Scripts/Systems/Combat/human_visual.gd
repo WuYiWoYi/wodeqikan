@@ -8,6 +8,10 @@ extends "res://Scripts/Systems/Combat/part_visual.gd"
 
 const Layers = preload("res://Scripts/Systems/Combat/visual_layers.gd")
 
+## 近战攻击进入有效命中帧时发出；每次攻击动画只发出一次。
+## 本类只负责动画时序与事件，实际伤害由 UnitController 在事件回调中结算。
+signal attack_hit_frame()
+
 const ART_DIR: String = "res://art/我的骑砍临时美术/"
 const SHADOW_FOOT_PATH: String = ART_DIR + "人影子.png"
 const BODY_PATH: String = ART_DIR + "角色身体临时.png"
@@ -53,6 +57,9 @@ const SPEAR_WINDUP_BACK_DISTANCE: float = 2.5
 ## 戳击：沿攻击方向快速伸出。
 const SPEAR_THRUST_TIME: float = 0.14
 const SPEAR_THRUST_FORWARD_DISTANCE: float = 6.0
+## 有效命中帧位于戳击阶段的这个比例处；伤害只在越过该帧后结算。
+## 前摇与戳击前半段只播放动画，不产生任何伤害。
+const SPEAR_HIT_FRAME_RATIO: float = 0.6
 ## 兼容旧名称：旧测试/探针仍用该常量表示戳击阶段时长。
 const SPEAR_THRUST_HOLD_TIME: float = SPEAR_THRUST_TIME
 ## 刺击结束后继续保持攻击姿态的等待时间（秒）。
@@ -73,6 +80,19 @@ const BOW_IDLE_ROTATION: float = 0.0
 
 const WEAPON_FLASH_COLOR: Color = Color(1.7, 1.35, 0.55)
 const WEAPON_NORMAL_COLOR: Color = Color.WHITE
+
+## 受击动作：身体短暂向受击方向后仰。只作用于 UpperBody 变换，
+## 人物、头盔、双腿、武器作为整体一起偏移，不产生图层错位。
+const HIT_REACTION_TIME: float = 0.18
+const HIT_REACTION_OFFSET: float = 4.0
+const HIT_REACTION_TILT: float = 0.09
+
+## 倒地动画：死亡后身体绕脚底枢轴向后倒下，倒地姿态永久保留。
+## UpperBody 的局部正向旋转在人物镜像后视觉上始终朝“背后”倒，
+## 因此无需按朝向切换符号，只需保证人物 scale.x 已按朝向设置。
+const DEATH_FALL_ANGLE: float = 1.25
+## 倒地过程中身体向后方/下方沉降的距离，避免看起来像原地旋转。
+const DEATH_FALL_SINK: float = 2.0
 
 ## 待机/跑动动画参数集中配置。
 const IDLE_BOB_AMPLITUDE: float = 0.8
@@ -124,6 +144,18 @@ var _weapon_back_offset: Vector2 = Vector2.ZERO
 var _weapon_forward_offset: Vector2 = Vector2.ZERO
 var _weapon_sway_target: float = 0.0
 var _weapon_sway_current: float = 0.0
+## 本次攻击是否已经发出有效命中帧；在新攻击开始时重置，防止重复伤害判定。
+var _hit_frame_emitted: bool = false
+## 受击动作剩余时间与局部击退方向（已按人物朝向换算到镜像前的局部坐标）。
+var _hit_time_left: float = 0.0
+var _hit_local_direction: Vector2 = Vector2.ZERO
+## 阵营罩袍材质；用于受击白闪参数同步。家族罩袍/缺失 shader 时为 null。
+var _tabard_material: ShaderMaterial = null
+## 倒地姿态：一旦死亡即锁定，普通待机/跑动/受击动画不再覆盖。
+var _death_pose_locked: bool = false
+var _death_fall_active: bool = false
+var _death_fall_time: float = 0.0
+var _death_fall_duration: float = 0.55
 
 
 func rebuild(
@@ -143,6 +175,14 @@ func rebuild(
 	_weapon_forward_offset = Vector2.ZERO
 	_weapon_sway_target = 0.0
 	_weapon_sway_current = 0.0
+	_hit_frame_emitted = false
+	_hit_time_left = 0.0
+	_hit_local_direction = Vector2.ZERO
+	_tabard_material = null
+	_death_pose_locked = false
+	_death_fall_active = false
+	_death_fall_time = 0.0
+	_death_fall_duration = 0.55
 
 	_add_sprite("FootShadow", SHADOW_FOOT_PATH, Layers.FOOT_SHADOW)
 
@@ -338,10 +378,13 @@ func update_locomotion(
 	idle_time: float,
 	run_time: float,
 	blend: float,
-	_delta: float,
+	delta: float,
 	rider_offset_y: float = 0.0
 ) -> void:
 	if _upper_body == null:
+		return
+	# 死亡倒地姿态一旦锁定，待机/跑动/受击都不再覆盖尸体姿态。
+	if _death_pose_locked:
 		return
 	# 骑乘时整个人物视觉跟随马身；非骑乘时恢复为原始位置。
 	# 朝右的额外水平修正统一由 _mounted_offset() 处理，避免叠加偏移。
@@ -357,11 +400,13 @@ func update_locomotion(
 	)
 	if _mounted:
 		bob *= MOUNTED_RIDER_BOB_SCALE
-	_upper_body.position.y = bob
+	# 每帧从基准位置重新计算，确保受击偏移不会残留到下一帧。
+	_upper_body.position = Vector2(0.0, bob)
 	_upper_body.rotation = (
 		sin(idle_phase * 0.8) * IDLE_TILT_AMPLITUDE * (1.0 - b)
 		+ sin(run_phase) * RUN_TILT_AMPLITUDE * b
 	)
+	_apply_hit_reaction(delta)
 
 	# 头部跟随身体，同时保留极小幅度的独立摆动；头盔与头部同步旋转。
 	var head_sway: float = (
@@ -399,6 +444,125 @@ func _apply_leg_pose(leg: Sprite2D, swing: float) -> void:
 	leg.rotation = swing * RUN_LEG_ROTATION
 
 
+## 受击动作：world_direction 为攻击命中方向（攻击者→受击者）。
+## 身体向相反方向短暂后仰；方向会按人物当前镜像换算到局部坐标。
+func play_hit_reaction(world_direction: Vector2) -> void:
+	var knockback: Vector2 = -world_direction
+	if knockback.length_squared() < 0.0001:
+		knockback = Vector2.RIGHT
+	knockback = knockback.normalized()
+	var facing_scale: float = -1.0 if scale.x < 0.0 else 1.0
+	_hit_local_direction = Vector2(knockback.x * facing_scale, knockback.y)
+	_hit_time_left = HIT_REACTION_TIME
+
+
+## 每帧叠加受击偏移；正常待机/跑动姿态已在调用前重新计算，因此不会残留。
+func _apply_hit_reaction(delta: float) -> void:
+	if _hit_time_left <= 0.0:
+		return
+	_hit_time_left = maxf(0.0, _hit_time_left - maxf(0.0, delta))
+	var strength: float = _hit_time_left / HIT_REACTION_TIME
+	_upper_body.position += (
+		_hit_local_direction * HIT_REACTION_OFFSET * strength
+	)
+	_upper_body.rotation += (
+		_hit_local_direction.x * HIT_REACTION_TILT * strength
+	)
+	if _hit_time_left <= 0.0:
+		_hit_local_direction = Vector2.ZERO
+
+
+func get_hit_reaction_local_direction() -> Vector2:
+	return _hit_local_direction
+
+
+func is_hit_reacting() -> bool:
+	return _hit_time_left > 0.0
+
+
+## 清理受击动作状态；用于 UI 预览等需要干净姿态的场景。
+func reset_hit_reaction() -> void:
+	_hit_time_left = 0.0
+	_hit_local_direction = Vector2.ZERO
+
+
+## 受击打断当前攻击表现：武器立即回到待机姿态，避免继续显示未成立的攻击。
+## 已经结算的伤害不受影响；未到有效帧的伤害由 UnitController 取消。
+func cancel_attack_animation() -> void:
+	_attack_phase = AnimationPhase.IDLE
+	_phase_time = 0.0
+	_hit_frame_emitted = false
+	_weapon_sway_current = 0.0
+	if _weapon_pivot != null:
+		_weapon_pivot.rotation = SPEAR_IDLE_ROTATION
+		_weapon_pivot.position = BODY_WEAPON_ANCHOR
+
+
+func get_melee_hit_frame_time() -> float:
+	return SPEAR_WINDUP_TIME + SPEAR_THRUST_TIME * SPEAR_HIT_FRAME_RATIO
+
+
+# ---------------------------------------------------------------------------
+# 死亡倒地
+# ---------------------------------------------------------------------------
+
+
+## 开始倒地：锁定死亡姿态并取消攻击/受击表现。
+## duration 由 CorpseConfig 统一提供，表现层不自行决定留存/淡出时长。
+func play_death_fall(duration: float) -> void:
+	if _death_pose_locked or _upper_body == null:
+		return
+	_death_pose_locked = true
+	_death_fall_active = true
+	_death_fall_time = 0.0
+	_death_fall_duration = maxf(duration, 0.001)
+	reset_hit_reaction()
+	cancel_attack_animation()
+	set_attack_flash(false)
+	_apply_death_pose(0.0)
+
+
+## 推进倒地动画；返回倒地是否已完成。完成后姿态保持在最后一帧。
+func advance_death_animation(delta: float) -> bool:
+	if not _death_fall_active:
+		return true
+	_death_fall_time = minf(
+		_death_fall_duration, _death_fall_time + maxf(delta, 0.0)
+	)
+	var t: float = clampf(_death_fall_time / _death_fall_duration, 0.0, 1.0)
+	_apply_death_pose(t)
+	if t >= 1.0:
+		_death_fall_active = false
+		return true
+	return false
+
+
+func _apply_death_pose(t: float) -> void:
+	if _upper_body == null:
+		return
+	var eased: float = _ease(clampf(t, 0.0, 1.0))
+	_upper_body.rotation = DEATH_FALL_ANGLE * eased
+	_upper_body.position = Vector2(0.0, DEATH_FALL_SINK * eased)
+
+
+func is_death_fall_active() -> bool:
+	return _death_fall_active
+
+
+func is_death_pose_locked() -> bool:
+	return _death_pose_locked
+
+
+func get_death_fall_progress() -> float:
+	if _death_fall_duration <= 0.0:
+		return 1.0
+	return clampf(_death_fall_time / _death_fall_duration, 0.0, 1.0)
+
+
+func get_tabard_material() -> ShaderMaterial:
+	return _tabard_material
+
+
 func get_upper_body() -> Node2D:
 	return _upper_body
 
@@ -419,10 +583,10 @@ func set_attack_flash(active: bool) -> void:
 
 
 ## 攻击时触发长矛动画；direction 是世界方向，动画会换算到人物局部并考虑整体镜像。
-## 不阻止伤害、不改变冷却，也不重复触发任何伤害。
-func play_attack_animation(direction: Vector2 = Vector2.LEFT) -> void:
+## 返回是否成功启动动画；有效命中帧由 advance_animation 在戳击阶段发出。
+func play_attack_animation(direction: Vector2 = Vector2.LEFT) -> bool:
 	if _weapon_pivot == null:
-		return
+		return false
 	# 人物组朝右时 scale.x = -1；局部方向需要先镜像，旋转后再由组镜像回世界方向。
 	var facing_scale: float = -1.0 if scale.x < 0.0 else 1.0
 	var local_direction := Vector2(direction.x * facing_scale, direction.y)
@@ -439,9 +603,11 @@ func play_attack_animation(direction: Vector2 = Vector2.LEFT) -> void:
 	_windup_start_rotation = _weapon_pivot.rotation
 	_windup_start_position = _weapon_pivot.position
 	_weapon_sway_current = 0.0
+	_hit_frame_emitted = false
 	_attack_phase = AnimationPhase.WINDUP
 	_phase_time = 0.0
 	set_process(true)
+	return true
 
 
 ## 弓箭攻击动画：拉弓 -> 放箭 -> 恢复。只播放表现，不生成箭矢或结算伤害。
@@ -462,6 +628,7 @@ func play_ranged_attack_animation(direction: Vector2 = Vector2.LEFT) -> void:
 	_windup_start_rotation = _weapon_pivot.rotation
 	_windup_start_position = _weapon_pivot.position
 	_weapon_sway_current = 0.0
+	_hit_frame_emitted = false
 	_attack_phase = AnimationPhase.RANGED_DRAW
 	_phase_time = 0.0
 	set_process(true)
@@ -498,6 +665,10 @@ func advance_animation(delta: float) -> void:
 					BODY_WEAPON_ANCHOR + _weapon_forward_offset, thrust_ease
 				)
 			)
+			# 有效命中帧：戳击越过该比例后才允许结算一次伤害。
+			if not _hit_frame_emitted and thrust_t >= SPEAR_HIT_FRAME_RATIO:
+				_hit_frame_emitted = true
+				attack_hit_frame.emit()
 			if thrust_t >= 1.0:
 				_weapon_pivot.position = BODY_WEAPON_ANCHOR + _weapon_forward_offset
 				_attack_phase = AnimationPhase.POST_DELAY
@@ -574,6 +745,8 @@ func advance_animation(delta: float) -> void:
 
 
 func _process(delta: float) -> void:
+	if _death_pose_locked:
+		return
 	if _attack_phase != AnimationPhase.IDLE:
 		advance_animation(delta)
 	elif _weapon_pivot != null:
@@ -643,5 +816,8 @@ func _add_tabard(
 
 	var tabard_material := ShaderMaterial.new()
 	tabard_material.shader = shader
+	tabard_material.set_shader_parameter("use_faction_color", true)
 	tabard_material.set_shader_parameter("faction_color", faction_color)
+	tabard_material.set_shader_parameter("flash_amount", 0.0)
 	tabard.material = tabard_material
+	_tabard_material = tabard_material

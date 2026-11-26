@@ -9,6 +9,14 @@ extends Node2D
 const HumanVisualScript = preload("res://Scripts/Systems/Combat/human_visual.gd")
 const HorseVisualScript = preload("res://Scripts/Systems/Combat/horse_visual.gd")
 
+## 近战攻击进入有效命中帧时转发给 UnitActor；伤害结算由 UnitController 负责。
+signal attack_hit_frame()
+
+## 士兵部件统一使用阵营罩袍 shader；非罩袍部件通过同一 shader 的普通模式显示原色。
+const UNIT_SHADER_PATH: String = "res://Shaders/faction_tabard.gdshader"
+const FLASH_SHADER_PARAM: String = "flash_amount"
+const SHADOW_PART_NAMES: Array[String] = ["FootShadow", "MountShadow"]
+
 const FACTION_COLORS: Dictionary = {
 	"FACTION_PLAYER": Color(0.25, 0.48, 0.88),
 	"FACTION_LOCAL": Color(0.30, 0.55, 0.34),
@@ -35,6 +43,15 @@ var _locomotion_moving: bool = false
 ## 保证任何影子都不会覆盖其他士兵的身体/武器/头部。
 var _shadow_layer: Node2D = null
 var _detached_shadows: Array[Sprite2D] = []
+## 每个 UnitVisual 拥有自己的材质实例：白闪参数只影响当前角色，
+## 不会污染其他角色；材质在 rebuild 后重新绑定到所有部件。
+var _flash_material: ShaderMaterial = null
+var _tabard_material: ShaderMaterial = null
+var _flash_strength: float = 0.0
+## 尸体淡出：人物/马匹通过本节点 modulate 统一降低透明度；
+## 影子已移出本子树，需要保存各自基准 alpha 后单独乘淡出系数。
+var _corpse_alpha: float = 1.0
+var _corpse_shadow_base_alphas: Array[float] = []
 
 
 func setup(data: UnitData, equipment_configs: Dictionary = {}) -> void:
@@ -53,6 +70,9 @@ func setup(data: UnitData, equipment_configs: Dictionary = {}) -> void:
 
 func rebuild() -> void:
 	_ensure_groups()
+	_corpse_alpha = 1.0
+	modulate.a = 1.0
+	_corpse_shadow_base_alphas.clear()
 	if unit_data == null:
 		_release_detached_shadows()
 		_human_visual.clear_parts()
@@ -85,6 +105,7 @@ func rebuild() -> void:
 	var coat_style_id: String = mount.coat_style_id if mount != null else "brown"
 	var saddle_style_id: String = mount.saddle_style_id if mount != null else "saddle_01"
 	_horse_visual.rebuild(coat_style_id, saddle_style_id)
+	_apply_hit_flash_materials()
 	set_mounted(unit_data.is_mounted)
 	set_facing(_facing)
 	_attach_shadows_to_layer()
@@ -277,6 +298,7 @@ func reset_locomotion() -> void:
 	_run_time = 0.0
 	_locomotion_blend = 0.0
 	_locomotion_moving = false
+	reset_hit_reaction()
 	if _horse_visual != null:
 		_horse_visual.update_locomotion(0.0, 0.0, 0.0, 0.0)
 	var rider_offset_y: float = (
@@ -310,9 +332,109 @@ func set_attack_flash(active: bool) -> void:
 		_human_visual.set_attack_flash(active)
 
 
-func play_attack_animation(direction: Vector2 = Vector2.LEFT) -> void:
+## 统一白闪：0 恢复原色，1 全白。人物与马匹的所有可见部件共用本角色的材质实例。
+func set_hit_flash_strength(strength: float) -> void:
+	var clamped: float = clampf(strength, 0.0, 1.0)
+	if is_equal_approx(clamped, _flash_strength):
+		return
+	_flash_strength = clamped
+	if _flash_material != null:
+		_flash_material.set_shader_parameter(FLASH_SHADER_PARAM, clamped)
+	if _tabard_material != null:
+		_tabard_material.set_shader_parameter(FLASH_SHADER_PARAM, clamped)
+
+
+func get_hit_flash_strength() -> float:
+	return _flash_strength
+
+
+# ---------------------------------------------------------------------------
+# 死亡倒地与尸体淡出
+# ---------------------------------------------------------------------------
+
+
+## 开始倒地表现：人物向背后倒下，骑乘单位的马匹同时塌陷。
+## 倒地姿态锁定后，普通待机/跑动/受击动画不会再覆盖。
+func play_death_fall(duration: float) -> void:
+	reset_hit_reaction()
 	if _human_visual != null:
-		_human_visual.play_attack_animation(direction)
+		_human_visual.play_death_fall(duration)
+	if _horse_visual != null:
+		_horse_visual.play_death_collapse(duration)
+
+
+## 推进倒地动画；返回人物与马匹是否都已完成。
+func advance_death_animation(delta: float) -> bool:
+	var human_done: bool = true
+	var horse_done: bool = true
+	if _human_visual != null:
+		human_done = bool(_human_visual.advance_death_animation(delta))
+	if _horse_visual != null:
+		horse_done = bool(_horse_visual.advance_death_animation(delta))
+	return human_done and horse_done
+
+
+## 记录影子当前透明度，作为淡出的基准；尸体淡出只缩放该值，不覆盖影子自身动画。
+func capture_corpse_shadow_alpha() -> void:
+	_corpse_shadow_base_alphas.clear()
+	for sprite: Sprite2D in _detached_shadows:
+		if sprite != null and is_instance_valid(sprite):
+			_corpse_shadow_base_alphas.append(sprite.modulate.a)
+
+
+## 统一尸体透明度：人物、马匹、武器、装备与影子一起淡出。
+## 使用节点 modulate 而不是共享材质，避免影响其他角色。
+func set_corpse_alpha(alpha: float) -> void:
+	var clamped: float = clampf(alpha, 0.0, 1.0)
+	_corpse_alpha = clamped
+	modulate.a = clamped
+	if _corpse_shadow_base_alphas.size() != _detached_shadows.size():
+		capture_corpse_shadow_alpha()
+	for i: int in range(_detached_shadows.size()):
+		var sprite: Sprite2D = _detached_shadows[i]
+		if sprite == null or not is_instance_valid(sprite):
+			continue
+		var base_alpha: float = (
+			_corpse_shadow_base_alphas[i]
+			if i < _corpse_shadow_base_alphas.size() else 1.0
+		)
+		sprite.modulate.a = base_alpha * clamped
+
+
+func get_corpse_alpha() -> float:
+	return _corpse_alpha
+
+
+## 受击时取消当前攻击表现；未到有效帧的伤害由 UnitController 负责取消。
+func cancel_attack_animation() -> void:
+	if _human_visual != null:
+		_human_visual.cancel_attack_animation()
+
+
+func play_hit_reaction(direction: Vector2 = Vector2.ZERO) -> void:
+	if _human_visual != null:
+		_human_visual.play_hit_reaction(direction)
+
+
+func get_hit_reaction_local_direction() -> Vector2:
+	if _human_visual != null:
+		return _human_visual.get_hit_reaction_local_direction()
+	return Vector2.ZERO
+
+
+func is_hit_reacting() -> bool:
+	return _human_visual != null and _human_visual.is_hit_reacting()
+
+
+func reset_hit_reaction() -> void:
+	if _human_visual != null:
+		_human_visual.reset_hit_reaction()
+
+
+func play_attack_animation(direction: Vector2 = Vector2.LEFT) -> bool:
+	if _human_visual == null:
+		return false
+	return bool(_human_visual.play_attack_animation(direction))
 
 
 func play_ranged_attack_animation(direction: Vector2 = Vector2.LEFT) -> void:
@@ -424,3 +546,60 @@ func _ensure_groups() -> void:
 		_horse_visual = HorseVisualScript.new()
 		_horse_visual.name = "HorseVisual"
 		add_child(_horse_visual)
+	if _human_visual.has_signal("attack_hit_frame"):
+		var handler := Callable(self, "_on_human_attack_hit_frame")
+		if not _human_visual.is_connected("attack_hit_frame", handler):
+			_human_visual.connect("attack_hit_frame", handler)
+
+
+## 把本角色专用的白闪材质绑定到人物与马匹的全部可见部件。
+## 影子与阵营罩袍单独处理：影子不闪，罩袍保留自己的阵营材质但同步 flash 参数。
+func _apply_hit_flash_materials() -> void:
+	_tabard_material = null
+	if _flash_material == null:
+		_flash_material = _create_flash_material()
+	_apply_flash_to_group(_human_visual)
+	_apply_flash_to_group(_horse_visual)
+	if _flash_material != null:
+		_flash_material.set_shader_parameter(FLASH_SHADER_PARAM, _flash_strength)
+	if _tabard_material != null:
+		_tabard_material.set_shader_parameter(FLASH_SHADER_PARAM, _flash_strength)
+
+
+func _apply_flash_to_group(group: Node2D) -> void:
+	if group == null or not is_instance_valid(group):
+		return
+	for part_name_value: Variant in group.get_parts().keys():
+		var part_name := str(part_name_value)
+		if SHADOW_PART_NAMES.has(part_name):
+			continue
+		var sprite: Sprite2D = group.get_part(part_name)
+		if sprite == null:
+			continue
+		if part_name == "Tabard":
+			# 占位罩袍使用自己的阵营材质；家族罩袍没有材质，走普通白闪。
+			var tabard_material := sprite.material as ShaderMaterial
+			if tabard_material != null and bool(
+				tabard_material.get_shader_parameter("use_faction_color")
+			):
+				_tabard_material = tabard_material
+				continue
+		if _flash_material != null:
+			sprite.material = _flash_material
+
+
+func _create_flash_material() -> ShaderMaterial:
+	if not ResourceLoader.exists(UNIT_SHADER_PATH):
+		return null
+	var shader := load(UNIT_SHADER_PATH) as Shader
+	if shader == null:
+		return null
+	var flash_material := ShaderMaterial.new()
+	flash_material.shader = shader
+	flash_material.set_shader_parameter("use_faction_color", false)
+	flash_material.set_shader_parameter(FLASH_SHADER_PARAM, _flash_strength)
+	return flash_material
+
+
+func _on_human_attack_hit_frame() -> void:
+	attack_hit_frame.emit()

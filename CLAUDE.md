@@ -1,7 +1,7 @@
 # 我的骑砍 · 开发入口（核心记忆）
 
 > 本文件是每次任务默认读取的**核心记忆**。它只保留项目身份、硬约束、读取规则与文档导航；具体系统规则在 `Docs/Systems/`，易变状态在 `Docs/Development/Current_Status.md`，历史在 `Docs/Archive/` 与 `Docs/04_Change_Log.md`。
-> 最后整理：2026-11-25（雇佣兵美术/独立招募、战败清理、玩家被俘与逃脱完成后）。本文件不替代代码；实现是否存在以当前工程为准。
+> 最后整理：2026-11-26（新游戏身份选择流程接入后）。本文件不替代代码；实现是否存在以当前工程为准。
 
 ## 1. 项目身份
 
@@ -58,6 +58,7 @@
 | NPC 领主出售、赎回等待、赎金事件、右侧事件框 | `Docs/Systems/Lord_Ransom_System.md`、`Wounded_Prisoner_System.md`、`World_Map_System.md` |
 | 大地图移动、视野、标记、跟随、相机、地点交互 | `Docs/Systems/World_Map_System.md` |
 | AI 决策、路线、追击、支援、NPC 补给采购 | `Docs/Systems/AI_System.md` |
+| 新游戏身份选择、身份配置、身份结果传递 | `Docs/Systems/Identity_Selection_System.md` |
 | 时间、暂停栈、日历、倍率 | `Docs/Systems/Time_System.md` |
 | 场景切换、小场景相机、村庄场景 | `Docs/Systems/Scene_System.md`、`Village_System.md` |
 | 地点数据、城镇/城堡、市场/酒馆入口 | `Docs/Systems/Settlement_System.md` |
