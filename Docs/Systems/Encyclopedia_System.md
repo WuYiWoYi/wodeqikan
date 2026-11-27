@@ -1,7 +1,7 @@
 # 百科系统
 
 **状态：** 阶段 13 后重构（一级分类 + 二级详情 + 敌对势力）
-**相关代码：** `Scripts/UI/WorldMap/world_map.gd`
+**相关代码：** `Scripts/UI/WorldMap/world_map_encyclopedia.gd`（覆盖层组件）、`Scripts/UI/WorldMap/world_map.gd`（装配与入口）
 **数据来源：** `KingdomManager`、`HouseManager`、`NobleManager`、`SettlementManager`、`FactionManager`、`FamilyRegistry`
 
 ---

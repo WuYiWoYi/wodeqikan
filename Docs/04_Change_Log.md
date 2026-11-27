@@ -6,6 +6,26 @@
 
 ---
 
+## 2026-11-27 · 大地图 UI 架构审查第一轮：覆盖层登记簿、百科与存档拆出
+
+### 变更
+
+- `world_map.gd` 移除 11 个 `_xxx_pause_active` 布尔与 28 处手动 `pop_pause` 调用，改为 `MapOverlayRegistry` 统一登记覆盖层可见性与暂停原因；`_has_open_modal` 改为登记簿查询，`_exit_tree` 统一 `release_all()`。
+- 新增 `Scripts/UI/WorldMap/map_overlay_registry.gd`、`map_ui_kit.gd`、`world_map_encyclopedia.gd`、`world_map_save_panel.gd`。
+- 百科与存档面板的实现迁入独立组件；`EncyclopediaPanel`、`SavePanel` 等节点名与根公开方法保持兼容，测试未改。
+- `world_map.gd` 5562 → 4762 行；未改变存档结构、世界数据权威、UI 布局与交互规则。
+
+### 验证
+
+- 已运行并通过：`world_map_input_test`、`world_map_layout_test`、`world_map_battle_marker_test`、`world_map_move_target_test`、`world_map_milestone6_test`、`family_panel_ui_test`、`event_center_test`、`lord_ransom_test`、`settlement_interaction_test`、`party_dialogue_test`、`party_attack_confirmation_test`、`player_encounter_test`、`neutral_party_interaction_test`、`party_intent_hover_test`、`battle_occupancy_ui_test`、`stage13_world_map_ui_test`、`stage13_tavern_test`、`town_market_ui_test`、`party_economy_ui_test`、`world_log_ui_test`、`captivity_escape_test`、`fief_adventurer_ui_test`、`player_battle_interaction_test`、`encyclopedia_ui_test`、`main_map_info_test`、`milestone1_test`。
+- 已知既有失败（与本次无关）：`party_panel_test` 断言玩家移速字符串 “150”，当前初始化为 450。
+
+### 文档
+
+- `Encyclopedia_System.md`、`World_Map_System.md`、`Scene_System.md` 更新代码位置；新增 D173。
+
+---
+
 ## 2026-11-27 · 部队旗帜最长边 60 → 48
 
 ### 变更

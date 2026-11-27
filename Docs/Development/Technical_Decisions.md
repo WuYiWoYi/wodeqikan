@@ -3185,3 +3185,22 @@
 **原因：** 圆形失真来自遮罩坐标系与主体坐标系不一致，而不是尺寸参数。把遮罩改到主体相同的局部像素空间可以从根上保证正圆、同心，并消除对贴图裁剪方式（AtlasTexture）与宽高比的隐式依赖。
 
 **影响：** `Shaders/map_flag_circle.gdshader`、`party_icon.gd`、`party_marker_style.gd`（移除仅供旧 UV 模式使用的 `get_flag_clip_uv_radius()`）与 `stage13_world_map_ui_test` 同步；窗口化探针实测 0.5x/1x/2x 黑色描边包围盒分别为 18×18、38×38、76×76，旗帜/描边/白色悬浮描边均保持正圆且同心。存档、移动、AI 与建筑标记未修改。
+
+---
+
+## D173 · 大地图 UI 拆出覆盖层登记簿与独立覆盖层组件（S0–S2）
+
+**日期：** 2026-11-27
+**状态：** 已确定
+
+**决策：**
+
+- 大地图根脚本 `world_map.gd` 保留生命周期、输入路由、玩家指令与公开门面；不再为每个覆盖层保存独立暂停布尔。
+- 新增 `MapOverlayRegistry`：登记覆盖层控件与暂停原因，提供幂等的 `acquire_pause` / `release_pause`、`has_blocking_overlay` 与 `release_all`。共享 `ui_panel` 时仍按覆盖层各自计数。
+- 首批拆出 `WorldMapEncyclopedia`（百科）与 `WorldMapSavePanel`（存档）；组件只负责自身面板显隐，暂停由登记簿持有，写盘仍走 `GameManager`。
+- 新增 `MapUiKit` 提供无状态控件与布局辅助；`world_map.gd` 的同名私有辅助改为委托。
+- 根脚本保留 `_on_encyclopedia_pressed`、`_on_close_encyclopedia_pressed`、`_make_house_badge`、`_on_save_pressed` 等公开/门面方法，关键控件名不变，既有测试无需修改。
+
+**原因：** `world_map.gd` 达 5562 行；暂停账本分散在 11 个 `_xxx_pause_active` 布尔与 28 处手动 `pop_pause` 中，最容易出现暂停泄漏或重复弹出。覆盖层是职责最独立、边界最清晰、可以先拆的部分。
+
+**影响：** `world_map.gd` 降至 4762 行；存档结构、世界数据权威、UI 布局与交互规则均未改变。后续切片继续按同一模式拆顶栏信息、事件覆盖层、时间 UI、相机、悬浮、战斗交互、地点与遭遇面板；不新建 Autoload，不引入全局查找。

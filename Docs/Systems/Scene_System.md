@@ -54,7 +54,7 @@ WorldMap (Node2D)
     └── WorldMapUI
 ```
 
-大地图 UI 通过 `world_map.gd` 程序化构建，关键控件设置稳定名称以便测试。UI 根节点 `mouse_filter = IGNORE`，地图点击由 `_unhandled_input` 接收。
+大地图 UI 由 `world_map.gd` 统一装配（`WorldMapUI` 根节点），独立覆盖层可放在自己的组件脚本中（如百科、存档）；关键控件设置稳定名称以便测试。UI 根节点 `mouse_filter = IGNORE`，地图点击由 `_unhandled_input` 接收。
 
 阶段 6 村庄实际结构：
 
