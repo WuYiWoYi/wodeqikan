@@ -236,7 +236,7 @@ func _test_prisoner_healing() -> void:
 		"玩家角色作为俘虏同样直接获得治疗"
 	)
 
-	# 不使用管理器手动调用：真正让 TimeManager 推进 1 个游戏小时（2x 下约 3 秒），
+	# 不使用管理器手动调用：真正让 TimeManager 推进 1 个游戏小时（2x 下约 1 秒），
 	# 验证“被俘玩家随大地图时间恢复”的完整链路。
 	for party: PartyData in _context.party_manager.get_all_parties():
 		if party != null:
@@ -247,13 +247,15 @@ func _test_prisoner_healing() -> void:
 	TimeManager.clear_pauses()
 	TimeManager.set_base_world_speed(TimeManager.SPEED_DOUBLE)
 	var start_seconds: float = TimeManager.world_elapsed_seconds
+	var hour_seconds: float = CaptivityManager.SECONDS_PER_GAME_HOUR
 	var frames: int = 0
-	while TimeManager.world_elapsed_seconds < start_seconds + 6.2 and frames < 1800:
+	while TimeManager.world_elapsed_seconds < start_seconds + hour_seconds + 0.2 \
+			and frames < 1800:
 		await get_tree().process_frame
 		frames += 1
 	TimeManager.set_base_world_speed(TimeManager.SPEED_PAUSED)
 	_check(
-		TimeManager.world_elapsed_seconds >= start_seconds + 6.0,
+		TimeManager.world_elapsed_seconds >= start_seconds + hour_seconds,
 		"世界时间真实推进到下一个游戏小时"
 	)
 	_check(_hero.current_hp == _hero.max_hp, "满血前按配置恢复俘虏生命值")

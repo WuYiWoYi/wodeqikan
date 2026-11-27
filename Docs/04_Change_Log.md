@@ -6,6 +6,180 @@
 
 ---
 
+## 2026-11-27 · 部队旗帜最长边 60 → 48
+
+### 变更
+
+- `PartyMarkerStyle.flag_max_size` 60 → 48：有效旗帜（30×36）等比放大到最长边 48，精灵实际尺寸 40×48（缩放 4/3）。
+- 旗帜圆形遮罩仍取黑色描边内缘 16.25；局部半径随精灵缩放自动换算（12.1875），正圆、同心、无溢出等规则不变。
+- `marker_radius` 18、`border_width` 2、`outline_width` 2.5、点击/悬浮区域与交互均未改变。
+- `stage13_world_map_ui_test` 按需求断言 `flag_max_size == 48`；`encounter_dialogue_ui_test` 的放大上限恢复为 `marker_radius * 3.0`。
+
+### 验证
+
+- 已运行并通过：`stage13_world_map_ui_test`、`encounter_dialogue_ui_test`。
+
+---
+
+## 2026-11-27 · 修复部队标记圆形失真（AtlasTexture 图集 UV 导致旗帜遮罩变椭圆）
+
+### 根因
+
+- 旗帜遮罩 shader 把 canvas `UV` 当作有效贴图的 0–1 使用，但裁切后的旗帜是 `AtlasTexture`，`UV` 实际是整张图集的归一化坐标（实测 48×48 图集、30×36 有效区域：u≈0.188–0.813，v≈0.125–0.875）。
+- 遮罩因此不再是半径 16.25 的正圆，而是约 52×43 世界像素的椭圆：横向覆盖整个黑色描边并溢出 36 像素圆形标记，视觉上表现为“圆形被拉伸/标记变成椭圆”。圆形底盘与描边本身一直由 `draw_circle`/`draw_arc` 在局部坐标绘制，没有被非等比缩放。
+
+### 变更
+
+- `map_flag_circle.gdshader` 新增 `use_local_circle` 模式：`vertex()` 用 `varying vec2 local_position` 传出画布局部像素坐标，`fragment()` 按显式 `circle_center` / `circle_radius` 裁剪；保留默认 UV 模式供地点徽章等既有调用。
+- `PartyIcon` 的旗帜遮罩改用局部正圆模式：`circle_center = (0, 0)`，`circle_radius = get_flag_clip_radius() / flag_sprite.scale.x`；缩放后世界半径严格等于黑色描边内缘 16.25，与主体、黑色描边、玩家外圈、白色悬浮描边共用同一局部坐标系与圆心。
+- 移除仅供旧 UV 模式使用的 `PartyMarkerStyle.get_flag_clip_uv_radius()`；`flag_max_size 60`、`outline_width 2.5`、`marker_radius 18`、点击/悬浮半径与交互逻辑均未改变。
+- `stage13_world_map_ui_test` 改为断言局部正圆参数、遮罩世界半径、节点/父节点无非等比缩放，并补充 0.5x/1x/2x 相机缩放等比与半径基准检查。
+
+### 决策
+
+- D172：部队旗帜遮罩改用局部像素正圆；地点徽章同类问题记录为 KI546，本次不修改。
+
+### 验证
+
+- 窗口化像素探针（真实渲染 `PartyIcon`，透明背景，临时脚本已删除）：
+  - 黑色描边包围盒：0.5x = 18×18、1x = 38×38、2x = 76×76，宽高比均为 1.000。
+  - 1x 悬浮：黑色描边 38×38、白色悬浮描边 50×50，均为正圆且同心；白色描边外径约 25.8 世界像素。
+  - 复现旧 UV 模式：不透明内容延伸到约 26 世界像素，黑色描边被旗帜覆盖，确认旧实现为椭圆溢出。
+- 已运行并通过：`stage13_world_map_ui_test`、`encounter_dialogue_ui_test`、`main_map_info_test`、`world_map_layout_test`。
+- 未修改建筑徽章，其同类图集 UV 遮罩问题记录为 KI546。
+
+---
+
+## 2026-11-27 · 部队旗帜放大与黑色描边向内加粗
+
+### 变更
+
+- `PartyMarkerStyle.flag_max_size` 52 → 60：部队圆形标记内部旗帜按裁切后有效贴图最长边等比放大，保持原始宽高比；不修改源美术文件。
+- 旗帜圆形遮罩改裁到黑色描边内缘：新增 `get_flag_clip_radius()`（优先 `get_outline_outer_radius() - outline_width`，当前 16.25），`get_flag_clip_uv_radius()` 由其换算；旗帜填满圆内有效区域但不覆盖黑色描边。无描边时回退原边框内缘。
+- 基础黑色描边 1.5 → 2.5，绘制圆心改为 `get_outline_outer_radius() - outline_width * 0.5`：外缘保持加粗前的 18.75（`marker_radius + BASELINE_OUTLINE_WIDTH * 0.5`），加粗只向圆内扩展；新增 `get_outline_outer_radius()` / `get_outline_inner_radius()` 作为统一几何入口。
+- `marker_radius` 18、`border_width` 2、图标位置、点击半径 26、悬浮半径 30 与白色悬浮描边（3 像素，外侧 4 像素）均未改变；建筑与无关 UI 未修改。
+- 无旗帜纹理的回退三角形改用 `get_flag_clip_radius()` 限制半宽。
+- 测试：`stage13_world_map_ui_test` 新增外缘固定 / 向内加粗 / 旗帜裁剪不超过描边内缘 / 实际旗帜精灵等比与遮罩参数断言；`encounter_dialogue_ui_test` 的旗帜放大上限由 `marker_radius * 3.0` 放宽到 `* 3.5`（圆形底盘半径另有独立断言）。
+
+### 决策
+
+- D171：旗帜裁剪绑定黑色描边内缘，描边只向内加粗。
+
+### 验证
+
+- 已运行并通过：`stage13_world_map_ui_test`、`encounter_dialogue_ui_test`、`main_map_info_test`、`world_map_layout_test`。
+- 未运行全项目测试，未做非 headless 视觉验收（旗帜放大观感与描边粗细仍需人工确认）。
+
+---
+
+## 2026-11-27 · 顶栏信息图标 2 倍、移速基准 30 与部队/建筑悬浮描边
+
+### 变更
+
+- 顶栏金币/移速/人数图标由 20×20 放大到 40×40，仍保持等比缩放与最近邻采样；文本字号不变，图标与数值间距 4→6，左侧区域加宽到 360，避免挤压时间与右侧入口。
+- 大地图移速基准由 20 调整为 30：全体部队当前速度 ×1.5，NPC 原始速度统一 ×5/2（商队 200、巡逻 300、强盗 250、家族骑士 275），玩家单列为原始 450 / 有效 36；排序与统一倍率 0.08 不变。
+- 部队圆形标记增加 1.5 像素黑色圆形基础描边；新增 `PartyIcon.set_hovered()` 切换 3 像素白色悬浮描边，位于基础描边外侧，两者同时保留。
+- 建筑新增 `SettlementIcon.set_hovered()`：沿村庄/城镇/城堡原有几何边缘绘制 5 像素白色描边，不影响名称、家族徽章、布局与点击进入。
+- 新增 `WorldMap._update_hover_outline()` 统一识别悬浮目标（部队优先，同一时刻只高亮一个），并用 `_settlement_icons` 注册地点图标；鼠标离开、模态 UI 或战斗切换时立即清除。
+- `WorldMapDefinition.calibration_travel_hours` 由 8.6 改为 5.8；最近地点对行程约 5.8 游戏小时（现实约 11.5 秒）。旧存档仍按存档中的原始 `movement_speed` 读取。
+
+### 验证
+
+- 已运行并通过：`main_map_info_test`（三个图标 40×40、等比/最近邻、顶栏 1280/1920 不重叠、顶栏移速 36.0）、`stage13_world_map_ui_test`（黑色基础描边细于白色悬浮描边、部队/村庄/城堡悬浮与清除、单一目标、部队优先、缩放命中与点击判定不变）、`ai_manager_test`、`world_map_layout_test`（行程 5.76 游戏小时）、`world_map_move_target_test`、`world_map_input_test`（玩家原始 450）、`player_pursuit_encounter_test`、`milestone1_test`、`family_appearance_test`。
+
+---
+
+## 2026-11-27 · 全体部队移速基准由 12 调整为 20
+
+### 变更
+
+- 大地图移速基准由玩家等效 12 调整为 20。NPC 部队原有 `movement_speed` 统一乘以 5/3：商队 80→约 133.3、巡逻 120→200、强盗 100→约 166.7、家族骑士 110→约 183.3；商队 < 强盗 < 家族骑士 < 巡逻队的相对差异与排序不变。
+- 玩家按需求单列：`PLAYER_MOVE_SPEED` 150→300，有效移速 12→24，不参与 5/3 换算。
+- `WorldMapManager.WORLD_MAP_SPEED_SCALE` 保持 0.08；`PartyData.movement_speed` 仍保存原始速度，有效移速 = 原始速度 × 0.08。战斗/小场景 `UnitData.move_speed`、`StatCalculator`、时间流速、AI 与寻路算法均未修改。
+- `WorldMapDefinition.calibration_travel_hours` 由 17.3 改为 8.6；最近地点对行程约 8.6 游戏小时（现实约 17.3 秒）。
+- 旧存档按存档中的原始 `movement_speed` 读取，不按新常量重置。
+
+### 验证
+
+- 已运行并通过：`ai_manager_test`（速度常量与 AI 追击/巡逻/战斗行为）、`world_map_layout_test`（最近地点对行程约 8.65 游戏小时、统一倍率 0.08）、`world_map_move_target_test`、`world_map_input_test`（玩家 300 / NPC 换算后的原始速度）、`main_map_info_test`（顶栏显示 24.0 与 ALT 明细）、`player_pursuit_encounter_test`（追击接触）、`milestone1_test`（100 像素移动到达）、`family_appearance_test`（有效移速 = 原始 × 0.08）、`stage13_world_map_ui_test`（商队有效移速 10.7）、`world_map_milestone6_test`。
+
+---
+
+## 2026-11-27 · 大世界时间流速调整为 2 现实秒 = 1 游戏小时
+
+### 变更
+
+- `TimeManager.REAL_SECONDS_PER_GAME_HOUR` 由 6.0 改为 2.0；`GAME_MINUTES_PER_ELAPSED_SECOND` 由 10.0 改为 30.0。1x 下现实 2 秒 = 1 游戏小时、48 秒 = 1 游戏日；2x 仍按现有倍率翻倍，暂停仍为 0。
+- 只改统一换算常量；`world_elapsed_seconds` 的 0.1 秒固定步长、暂停原因栈、倍率定义、日期/时间段显示、部队移动速度、经济系统均未修改。
+- 直接依赖“1 游戏小时 = N 世界秒”的重复常量同步为 2：`CaptivityManager.SECONDS_PER_GAME_HOUR`、`WoundedHealingManager.SECONDS_PER_GAME_HOUR`、`OffscreenBattleConfig.settlement_interval_world_seconds`（默认值与 `Data/Combat/offscreen_battle_default.tres`）。
+- 移动速度未改，最近地点对的现实行程不变（约 34.6 秒），游戏内行程由约 6 游戏小时变为约 17.3 游戏小时；`WorldMapDefinition.calibration_travel_hours` 同步为 17.3。
+- 测试中的 6 秒/144 秒假定同步更新：`time_calendar_test`、`supply_manager_test`、`wounded_healing_test`、`offscreen_battle_hourly_test`、`world_map_layout_test`、`captivity_escape_test`。
+- 跨读档仍只保存 `world_elapsed_seconds` 与倍率，日期/昼夜位置由新比例重新换算，不新增持久化字段。
+
+### 验证
+
+- 已运行并通过：`time_calendar_test`（含现实 1x/暂停/2x 累积实测）、`main_map_info_test`（昼夜 UI 与新比例同步、暂停/2 倍速/读档）、`world_map_layout_test`、`wounded_healing_test`、`offscreen_battle_hourly_test`、`captivity_escape_test`、`world_map_milestone6_test`、`stage13_world_map_ui_test`、`lord_ransom_test`、`mercenary_system_test`、`wounded_system_test`。
+- `supply_manager_test` 仅保留既有 KI534 失败（“NPC 记录 1 份草料缺口”）；本次时间换算相关断言（跨日、跨 3 天补算）全部通过。
+
+---
+
+## 2026-11-27 · 顶栏昼夜滚动窗口
+
+### 变更
+
+- 新增 `Scripts/UI/WorldMap/day_night_clock.gd`：正方形 `Control` 遮罩（36×36，`clip_contents`），复用 `UI_昼夜.png`（96×48），以 96 像素为周期重复绘制；48→36 等比缩放、最近邻采样。
+- `world_map.gd::_build_top_bar()` 在顶栏精确水平中心创建 `DayNightClock`；`WorldTimeLabel` 改为右对齐并紧贴窗口左侧，左右区域原有元素与功能不变。
+- 映射唯一由 `TimeManager.world_elapsed_seconds` 换算：相位 = `fposmod(秒 / 144 - 0.5, 1)`；12:00 偏移 0、18:00 偏移 24、次日 00:00 偏移 48、06:00 偏移 72、次日 12:00 折回 0。`_update_time_ui()` 在世界时间/倍率变化与读档恢复后刷新。
+- 不新增时间系统、不修改时间流速、不使用现实时间计时器；暂停时世界时间不变，窗口自然停住。
+- `Docs/Systems/World_Map_System.md` 新增 4.5 节并更新 18.1 顶栏布局。
+
+### 验证
+
+- 已运行并通过：`main_map_info_test`（昼夜窗口正方形/居中/裁切/最近邻、12:00/18:00/00:00/06:00/次日 12:00、跨午夜连续、暂停停住、2 倍速同步、读档立即更新，以及原有顶栏与建筑面板权限用例）。
+
+---
+
+## 2026-11-27 · 大地图陆地/海洋/湖泊地表配色
+
+### 变更
+
+- `MapBackground` 新地图绘制改为三区地表：整块世界先铺海洋蓝（`#5a8fae`），再用 `WorldMapDefinition` 边界多边形覆盖草地绿（`#a8c483`），最后绘制比海洋更深的湖泊蓝（`#3c7396`）；海岸线深绿（`#2f7a4a`）、湖岸线深蓝（`#2a5675`）。
+- 陆地网格纹理改为按边界多边形裁切后绘制（`Geometry2D.intersect_polyline_with_polygon`），只在陆地内部出现；海洋保持简洁。网格线段按定义/世界尺寸缓存。
+- 道路颜色由浅灰调深（`#7a7469`），山脉填充/描边略微加深，保证在绿色陆地上仍清晰可辨。
+- 旧存档尺寸不匹配时继续绘制原矩形草地、河流与道路，不改变旧地图观感。
+- 只改绘制层：地图边界、湖泊多边形、地点坐标、道路连接、地形不可通行判定、移动与相机逻辑均未修改。
+
+### 验证
+
+- 已运行并通过：`world_map_layout_test`（尺寸/边界/湖泊/山脉不可通行、道路与时间标定）、`stage13_world_map_ui_test`（大地图场景加载、图标/旗帜/移速 UI）。
+- 非 headless 临时探针截图核对：陆地、海洋、湖泊颜色像素分别为 `#a8c483`、`#5a8fae`、`#3c7396`；海岸线清晰、海洋无网格渗透；探针运行后已删除。
+
+---
+
+## 2026-11-27 · 大地图重建、六方势力与旗帜命名
+
+### 变更
+
+- 新增 `Data/WorldMap/world_map_definition.tres` 与 `Scripts/Config/world_map_definition.gd`：以参考图 1556×1323 为唯一依据，`reference_scale = 5` 推导 7780×6615 世界；保存 63 个地点（38 村庄/8 城镇/17 城堡）、46 条显式道路、46 点不规则边界、11 点湖泊、5 座旋转椭圆山脉、时间标定参数。
+- 新增 `Scripts/Systems/WorldMap/world_terrain.gd`：40 像素 `AStarGrid2D`；边界外、湖泊、山脉不可通行（含 6 像素边距）；目标收敛、折线路径、直线通路检测、缓存与路径平滑。玩家与 NPC 共用。
+- `WorldMapManager`：绑定地形后沿 A* 折线移动，终点变化超过 32 像素重算；无路时原地停止；`WORLD_MAP_SPEED_SCALE` 由 0.5 改为 0.08；旧存档/测试世界保持直线移动。
+- `WorldContext`：`DEFAULT_WORLD_SIZE = 7780×6615`；按世界尺寸装配 `WorldTerrain`，尺寸与定义不一致时回退矩形边界；存档继续保存 `world_size`。
+- `MapBackground`：新地图绘制浅色底、网格、绿色不规则边界与浅绿填充、灰色虚线道路、蓝色描边湖泊、灰色椭圆山脉；道路经 A* 绕行；旧尺寸继续走旧矩形草地/河流/道路绘制。
+- `WorldInitializer`：地点与家族驻地按定义参考坐标生成；六方势力统治者/附庸/民族显式声明；每个 NPC 家族一名贵族、一支 `<简称>骑士` 部队；保留旧世界 9 处地点所有权，其余无主；征召/巡逻点/商队路线改用新坐标与最近可通行点。
+- `KingdomData` 新增可选 `people_name`，仅读档缺失时为空，向后兼容。
+- 旗帜资源统一为 `<家族>旗帜16_16.png`；新增 16 个家族的旗帜/罩袍/盾牌/缨饰/长矛正式美术目录；删除伯克纳旧 `Sprite-0002.png` 并改为 `伯克纳旗帜16_16.png`；修复伯克纳与克里卡旗帜引用；瓦伊拉暂无专属旗帜。
+
+### 验证
+
+- 重写 `world_map_layout_test`：世界尺寸、63 地点唯一/间距≥250/边界内且避开地形、46 道路端点有效、边界/湖泊/山脉不可通行、山脉绕行、无障碍直线、最近地点对约 6 小时、六方势力/18 家族/18 贵族/23 部队/9 处所有权、旗帜资源与命名。
+- 已运行并通过：`world_map_layout_test`、`milestone1_test`、`milestone1_flow_test`、`political_hierarchy_test`、`faction_bandit_hostility_test`、`encyclopedia_ui_test`、`king_helmet_appearance_test`、`family_appearance_test`、`settlement_interaction_test`、`world_map_milestone6_test`、`main_map_info_test`、`world_map_move_target_test`、`battle_reinforcement_test`、`battle_side_result_test`、`encounter_dialogue_ui_test`、`ai_manager_test`、`ai_supply_purchase_test`、`player_pursuit_encounter_test`、`wounded_system_test`、`lord_ransom_test`、`mercenary_system_test`。
+
+### 未决
+
+- 道路移动加成、地图/地点实际观感的人工验收、瓦伊拉专属旗帜、塞洛斯要塞与巴达洛斯要塞旗帜。
+
+---
+
 ## 2026-11-26 · 角色整体动态排序修正（替代 CanvasGroup 方案）
 
 ### 根因

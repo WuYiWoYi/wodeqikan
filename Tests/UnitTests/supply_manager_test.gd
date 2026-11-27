@@ -14,7 +14,8 @@ const MOUNT_PATH: String = "res://Data/Equipment/mount_horse_01.tres"
 const MOUNT_ID: String = "mount_horse_01"
 const BREAD_ID: String = "bread"
 const FODDER_ID: String = "fodder"
-const SECONDS_PER_DAY: float = 144.0
+## 1x 下 2 世界秒 = 1 游戏小时，1 游戏日 = 48 世界秒。
+const SECONDS_PER_DAY: float = 48.0
 
 var _failed: bool = false
 var _units: UnitManager = null

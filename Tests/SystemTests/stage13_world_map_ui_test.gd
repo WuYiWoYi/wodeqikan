@@ -67,6 +67,7 @@ func _run() -> void:
 	_test_stationed_banners()
 	_test_multiple_settlements()
 	_test_speed_display()
+	_test_hover_outlines()
 	_test_party_removal_restores_icon()
 
 
@@ -171,16 +172,100 @@ func _test_party_flag_inside_circle() -> void:
 		return
 	_check(is_equal_approx(style.marker_radius, 18.0), "圆形外径保持 18")
 	_check(is_equal_approx(style.border_width, 2.0), "圆形边框保持 2")
-	_check(style.flag_max_size > 44.0, "圆形内部旗帜进一步放大")
 	_check(
-		style.get_flag_clip_uv_radius() < 0.5,
+		is_equal_approx(style.flag_max_size, 48.0),
+		"圆形内部旗帜最长边按需求为 48 像素"
+	)
+	_check(
+		style.get_flag_clip_radius() > 0.0
+			and style.get_flag_clip_radius() < style.marker_radius,
 		"放大后的旗帜仍被圆形遮罩裁剪"
+	)
+	# 黑色描边加粗只向圆内扩展：外缘保持在加粗前位置，内缘按宽度内收。
+	var baseline_outer: float = (
+		style.marker_radius + PartyMarkerStyle.BASELINE_OUTLINE_WIDTH * 0.5
+	)
+	_check(
+		is_equal_approx(style.get_outline_outer_radius(), baseline_outer),
+		"黑色描边外缘保持在加粗前位置 18.75，不向外扩大"
+	)
+	_check(
+		style.outline_width > PartyMarkerStyle.BASELINE_OUTLINE_WIDTH
+			and is_equal_approx(
+				style.get_outline_inner_radius(),
+				baseline_outer - style.outline_width
+			),
+		"黑色描边只向圆内加粗（当前 %.1f 像素）" % style.outline_width
+	)
+	# 旗帜遮罩裁到描边内缘：填满圆内有效区域，但不会盖住黑色描边。
+	_check(
+		style.get_flag_clip_radius() <= style.get_outline_inner_radius() + 0.001,
+		"旗帜裁剪半径不超过黑色描边内缘"
 	)
 	var icon := _map.find_child(
 		"PartyIcon_%s" % _guard.party_id, true, false
 	) as PartyIcon
 	_check(icon != null and icon.get_marker_radius() == style.marker_radius,
 		"部队图标使用统一圆形尺寸")
+
+	# 实际旗帜精灵：等比放大到 flag_max_size，并由同一遮罩半径裁剪。
+	var player_icon := _map.call("get_party_icon", _player.party_id) as PartyIcon
+	var flag_sprite: Sprite2D = null
+	if player_icon != null:
+		flag_sprite = player_icon.find_child("FamilyFlag", false, false) as Sprite2D
+	_check(flag_sprite != null and flag_sprite.texture != null,
+		"玩家部队显示家族旗帜")
+	if flag_sprite == null or flag_sprite.texture == null:
+		return
+	_check(
+		is_equal_approx(flag_sprite.scale.x, flag_sprite.scale.y),
+		"旗帜等比放大并保持原始宽高比"
+	)
+	var trimmed_size := flag_sprite.texture.get_size()
+	_check(
+		is_equal_approx(
+			maxf(trimmed_size.x, trimmed_size.y) * flag_sprite.scale.x,
+			style.flag_max_size
+		),
+		"旗帜最长边按 flag_max_size 放大"
+	)
+	var mask := flag_sprite.material as ShaderMaterial
+	_check(mask != null, "旗帜使用圆形遮罩材质")
+	if mask != null:
+		# 遮罩必须走局部像素正圆模式：AtlasTexture 的 UV 是图集坐标，
+		# 直接按 UV 计算会把旗帜裁成椭圆。
+		_check(
+			bool(mask.get_shader_parameter("use_local_circle")),
+			"旗帜遮罩使用局部像素正圆模式，不依赖图集 UV"
+		)
+		_check(
+			(mask.get_shader_parameter("circle_center") as Vector2) == Vector2.ZERO,
+			"旗帜遮罩圆心与图标主体同心"
+		)
+		var local_radius: float = float(mask.get_shader_parameter("circle_radius"))
+		_check(local_radius > 0.0, "旗帜遮罩具有有效局部半径")
+		# 精灵等比缩放会把局部半径放大为世界半径；必须与黑边内缘一致。
+		var world_radius: float = local_radius * flag_sprite.scale.x
+		_check(
+			is_equal_approx(world_radius, style.get_flag_clip_radius())
+				and world_radius
+					<= style.get_outline_inner_radius() + 0.001,
+			"遮罩世界半径与黑色描边内缘一致（%.3f）" % world_radius
+		)
+		_check(
+			is_equal_approx(flag_sprite.scale.x, flag_sprite.scale.y),
+			"旗帜遮罩没有非等比缩放"
+		)
+	# 主体、描边与遮罩都绘制在图标局部坐标中；父节点不得引入额外缩放。
+	var entities := _map.get("world_entities") as Node2D
+	_check(
+		entities != null and entities.scale == Vector2.ONE,
+		"部队图标父节点没有非等比缩放"
+	)
+	_check(
+		player_icon.scale == Vector2.ONE,
+		"部队标记节点自身没有缩放"
+	)
 
 
 func _test_stationed_banners() -> void:
@@ -346,6 +431,107 @@ func _test_speed_display() -> void:
 		"停止时仍显示移速"
 	)
 	_map.call("clear_hover_for_test")
+
+
+func _test_hover_outlines() -> void:
+	_move_party_far(_merchant)
+	_move_party_far(_guard)
+	_place_party(_player, Vector2(1600.0, 2200.0))
+	_map.call("clear_hover_outline_for_test")
+
+	var player_icon := _map.call("get_party_icon", _player.party_id) as PartyIcon
+	_check(player_icon != null, "玩家部队图标存在")
+	if player_icon == null:
+		return
+	var style := player_icon.get_marker_style()
+	_check(
+		style != null and style.outline_color == Color(0.0, 0.0, 0.0, 1.0)
+			and style.outline_width > 0.0
+			and style.outline_width < style.hover_outline_width,
+		"部队标记具有细黑色基础描边，且细于悬浮白色描边"
+	)
+	_check(not player_icon.is_hovered(), "默认不显示悬浮描边")
+
+	# 缩放不改变世界坐标命中；圆形绘制在图标本地坐标中，随相机等比同步。
+	var camera := _map.get("camera") as Camera2D
+	if camera != null:
+		var original_zoom := camera.zoom
+		for zoom_value: float in [0.5, 1.0, 2.0]:
+			_map.call("_set_camera_zoom", zoom_value)
+			_check(
+				is_equal_approx(camera.zoom.x, camera.zoom.y),
+				"地图缩放 %.1fx 保持等比，圆形不会变成椭圆" % zoom_value
+			)
+			_check(
+				is_equal_approx(player_icon.get_marker_radius(), style.marker_radius),
+				"地图缩放 %.1fx 不改变圆形半径基准" % zoom_value
+			)
+		_map.call("_set_camera_zoom", 0.5)
+		_map.call("apply_hover_outline_for_test", _player.world_position)
+		_check(player_icon.is_hovered(), "地图缩放后悬浮描边仍能命中目标")
+		var clicked := _map.call("_find_party_at", _player.world_position) as PartyData
+		_check(clicked == _player, "悬浮描边不改变部队点击判定")
+		camera.zoom = original_zoom
+		_map.call("clear_hover_outline_for_test")
+
+	# 部队悬浮：白色描边只作用于当前目标，不同时高亮建筑。
+	_map.call("apply_hover_outline_for_test", _player.world_position)
+	_check(player_icon.is_hovered(), "悬浮部队出现白色描边")
+	_check(
+		_map.call("get_hover_outline_party_id") == _player.party_id,
+		"记录当前悬浮部队"
+	)
+	_check(
+		_map.call("get_hover_outline_settlement_id") == "",
+		"部队悬浮不同时高亮建筑"
+	)
+
+	# 离开后立即清除。
+	_map.call("clear_hover_outline_for_test")
+	_check(not player_icon.is_hovered(), "离开部队后白色描边消失")
+	_check(_map.call("get_hover_outline_party_id") == "", "清除悬浮部队记录")
+
+	# 建筑悬浮：村庄与城堡各切换一次，同一时刻只保留一个。
+	_map.call("apply_hover_outline_for_test", _village.world_position)
+	var village_icon := _map.call(
+		"get_settlement_icon", _village.settlement_id
+	) as SettlementIcon
+	_check(village_icon != null and village_icon.is_hovered(), "悬浮村庄出现白色描边")
+	_check(
+		_map.call("get_hover_outline_settlement_id") == _village.settlement_id,
+		"记录当前悬浮建筑"
+	)
+	_check(_map.call("get_hover_outline_party_id") == "", "建筑悬浮不同时高亮部队")
+
+	_map.call("apply_hover_outline_for_test", _castle.world_position)
+	var castle_icon := _map.call(
+		"get_settlement_icon", _castle.settlement_id
+	) as SettlementIcon
+	_check(castle_icon != null and castle_icon.is_hovered(), "悬浮城堡出现白色描边")
+	_check(
+		village_icon != null and not village_icon.is_hovered(),
+		"同一时刻只高亮一个建筑"
+	)
+
+	# 部队优先于建筑：玩家站在村庄边缘（不进入停留判定）时悬浮村庄坐标。
+	_place_party(_player, _village.world_position + Vector2(28.0, 0.0))
+	_map.call("apply_hover_outline_for_test", _village.world_position)
+	_check(
+		player_icon.is_hovered() and not castle_icon.is_hovered(),
+		"部队悬浮优先于建筑且只保留一个目标"
+	)
+	_check(
+		_map.call("get_hover_outline_settlement_id") == "",
+		"部队优先时清除建筑悬浮描边"
+	)
+
+	_map.call("clear_hover_outline_for_test")
+	_check(
+		not player_icon.is_hovered()
+			and (village_icon == null or not village_icon.is_hovered())
+			and (castle_icon == null or not castle_icon.is_hovered()),
+		"清除后不存在残留悬浮描边"
+	)
 
 
 func _test_party_removal_restores_icon() -> void:

@@ -37,24 +37,24 @@ func _run() -> void:
 	if _player == null or _enemy == null:
 		return
 	_check(
-		is_equal_approx(_player.movement_speed, 150.0),
-		"新游戏玩家速度为 150"
+		is_equal_approx(_player.movement_speed, WorldInitializer.PLAYER_MOVE_SPEED),
+		"新游戏玩家原始速度为 450（等效 36）"
 	)
 	_check(
 		is_equal_approx(_enemy.movement_speed, WorldInitializer.MERCHANT_MOVE_SPEED),
-		"商队移动速度为 80"
+		"商队速度按基准 30 换算"
 	)
 	var guard_party := _find_party_by_name(WorldInitializer.GUARD_PARTY_NAME)
 	var bandit_party := _find_party_by_name(WorldInitializer.BANDIT_PARTY_NAME)
 	_check(
 		guard_party != null
 		and is_equal_approx(guard_party.movement_speed, WorldInitializer.GUARD_MOVE_SPEED),
-		"治安队移动速度为 120"
+		"治安队速度按基准 30 换算"
 	)
 	_check(
 		bandit_party != null
 		and is_equal_approx(bandit_party.movement_speed, WorldInitializer.BANDIT_MOVE_SPEED),
-		"强盗移动速度为 100"
+		"强盗速度按基准 30 换算"
 	)
 
 	GameManager.world_context = _context

@@ -11,6 +11,7 @@ const FamilyPanelScript = preload("res://Scripts/UI/WorldMap/family_panel.gd")
 const EventFeedScript = preload("res://Scripts/UI/WorldMap/event_feed.gd")
 const EventDetailDialogScript = preload("res://Scripts/UI/WorldMap/event_detail_dialog.gd")
 const EventReminderScript = preload("res://Scripts/UI/WorldMap/event_reminder.gd")
+const DayNightClockScript = preload("res://Scripts/UI/WorldMap/day_night_clock.gd")
 
 const PARTY_INTERACTION_RADIUS: float = 40.0
 const PARTY_INTERACTION_EXIT_RADIUS: float = 64.0
@@ -65,8 +66,13 @@ const TOP_INFO_ICON_SPEED_PATH: String = \
 	"res://art/我的骑砍临时美术/正式美术_其他/UI美术/UI_移速.png"
 const TOP_INFO_ICON_TROOP_PATH: String = \
 	"res://art/我的骑砍临时美术/正式美术_其他/UI美术/UI_人数.png"
-const TOP_INFO_ICON_SIZE := Vector2(20.0, 20.0)
-const TOP_INFO_ICON_TEXT_GAP: int = 4
+## 金币/移速/人数图标统一放大到 2 倍（20→40）；文本字号与数值不变。
+const TOP_INFO_ICON_SIZE := Vector2(40.0, 40.0)
+const TOP_INFO_ICON_TEXT_GAP: int = 6
+## 顶栏正中的昼夜窗口边长；取顶栏内容高度（48 - 上下 6 边距）以保持正方形。
+const TOP_BAR_CLOCK_SIZE: float = 36.0
+## 昼夜窗口与世界时间文本之间的间距。
+const TOP_BAR_CLOCK_TEXT_GAP: float = 6.0
 
 ## 大地图镜头模式：默认平滑跟随玩家；按 WASD 后自由移动，直到玩家重新下达移动/跟随指令。
 enum CameraMode {
@@ -94,6 +100,8 @@ var _pending_map_click_position: Vector2 = Vector2.ZERO
 
 var _ui_root: Control = null
 var _world_time_label: Label = null
+## 顶栏正中的昼夜窗口；位置只由 TimeManager 的世界累计时间换算。
+var _day_night_clock = null
 ## 世界时间为 0（基础暂停或任意 UI 暂停）时显示的琥珀色提示。
 var _pause_tip_label: Label = null
 var _money_label: Label = null
@@ -221,6 +229,11 @@ var _alt_detail_active: bool = false
 
 ## 同一场战斗只显示一个标记；参战部队图标暂时隐藏。
 var _party_icons: Dictionary = {}
+## 地点图标：{ settlement_id: SettlementIcon }，供悬浮描边统一切换。
+var _settlement_icons: Dictionary = {}
+## 当前悬浮描边目标；同一时刻最多一个部队或一个建筑。
+var _hover_outline_party_id: String = ""
+var _hover_outline_settlement_id: String = ""
 ## 部队圆形标记样式；缺失资源时使用脚本默认值。
 var _party_marker_style: PartyMarkerStyle = null
 ## 固定屏幕层的地点名称标签：{ settlement_id: SettlementNameTag }。
@@ -282,6 +295,11 @@ func _ready() -> void:
 		return
 
 	map_background.set_world_size(_context.world_size)
+	# 布局定义与地形由 WorldContext 统一装载；旧存档尺寸不匹配时背景层
+	# 会自动回退到旧草地绘制，地点坐标仍按存档恢复。
+	map_background.set_map_definition(
+		_context.world_map_definition, _context.world_terrain
+	)
 	_context.world_map_manager.world_bounds = Rect2(Vector2.ZERO, _context.world_size)
 
 	# 从小场景返回时记录当前站在村口的村庄，供地点面板的进入按钮使用；
@@ -391,6 +409,7 @@ func _process(delta: float) -> void:
 	_check_pending_settlement_interaction()
 	_check_party_interaction()
 	_update_party_hover()
+	_update_hover_outline()
 	_refresh_encyclopedia_if_needed()
 	_refresh_event_center_if_needed()
 	_refresh_family_panel_if_needed()
@@ -712,6 +731,9 @@ func _build_world_entities() -> void:
 		world_entities.remove_child(child)
 		child.queue_free()
 	_party_icons.clear()
+	_settlement_icons.clear()
+	_hover_outline_party_id = ""
+	_hover_outline_settlement_id = ""
 
 	for party: PartyData in _context.party_manager.get_all_parties():
 		var party_icon: PartyIcon = PartyIcon.new()
@@ -739,6 +761,7 @@ func _build_world_entities() -> void:
 		world_entities.add_child(settlement_icon)
 		# 世界层只绘制地点原有美术；家族徽章属于屏幕名称组合。
 		settlement_icon.setup(settlement)
+		_settlement_icons[settlement.settlement_id] = settlement_icon
 
 	world_entities.y_sort_enabled = true
 
@@ -1090,7 +1113,8 @@ func _build_top_bar() -> void:
 	var left := HBoxContainer.new()
 	left.name = "TopBarLeft"
 	left.anchor_bottom = 1.0
-	left.offset_right = 300.0
+	# 图标放大后为三个条目与生命值文本预留更宽的区域，避免挤压。
+	left.offset_right = 360.0
 	left.alignment = BoxContainer.ALIGNMENT_BEGIN
 	left.add_theme_constant_override("separation", 12)
 	left.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1113,21 +1137,36 @@ func _build_top_bar() -> void:
 	_player_hp_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	left.add_child(_player_hp_label)
 
+	# 昼夜窗口占据屏幕水平中心；世界时间文本改为紧贴其左侧，
+	# 保证正方形窗口本身精确居中，同时不与其他顶栏元素重叠。
 	var center := HBoxContainer.new()
 	center.name = "TopBarCenter"
 	center.anchor_left = 0.5
 	center.anchor_right = 0.5
 	center.anchor_bottom = 1.0
-	center.offset_left = -260.0
-	center.offset_right = 260.0
-	center.alignment = BoxContainer.ALIGNMENT_CENTER
+	center.offset_left = -340.0
+	center.offset_right = -TOP_BAR_CLOCK_SIZE * 0.5 - TOP_BAR_CLOCK_TEXT_GAP
+	center.alignment = BoxContainer.ALIGNMENT_END
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	content.add_child(center)
 
 	_world_time_label = _make_label("世界时间", 15)
 	_world_time_label.name = "WorldTimeLabel"
 	_world_time_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_world_time_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	center.add_child(_world_time_label)
+
+	_day_night_clock = DayNightClockScript.new()
+	_day_night_clock.name = "DayNightClock"
+	_day_night_clock.anchor_left = 0.5
+	_day_night_clock.anchor_right = 0.5
+	_day_night_clock.anchor_top = 0.5
+	_day_night_clock.anchor_bottom = 0.5
+	_day_night_clock.offset_left = -TOP_BAR_CLOCK_SIZE * 0.5
+	_day_night_clock.offset_right = TOP_BAR_CLOCK_SIZE * 0.5
+	_day_night_clock.offset_top = -TOP_BAR_CLOCK_SIZE * 0.5
+	_day_night_clock.offset_bottom = TOP_BAR_CLOCK_SIZE * 0.5
+	content.add_child(_day_night_clock)
 
 	var right := HBoxContainer.new()
 	right.name = "TopBarRight"
@@ -2528,6 +2567,51 @@ func _hide_party_hover() -> void:
 		_hover_panel.visible = false
 
 
+## 鼠标悬浮描边：与悬浮面板共用目标识别规则，部队优先于建筑；
+## 同一时刻只高亮一个目标，离开后立即清除。
+func _update_hover_outline() -> void:
+	if _context == null or _player_party == null or _battle_transition_started \
+			or _is_input_blocked():
+		_set_hover_outline("", "")
+		return
+	_apply_hover_outline_at(get_global_mouse_position())
+
+
+func _apply_hover_outline_at(world_position: Vector2) -> void:
+	var party := _find_party_within(world_position, PARTY_HOVER_RADIUS)
+	if party != null and not _stationed_party_ids.has(party.party_id) \
+			and _context.battle_manager.get_battle_for_party(party.party_id) == null:
+		_set_hover_outline(party.party_id, "")
+		return
+	var settlement := _find_settlement_at(world_position)
+	_set_hover_outline("", settlement.settlement_id if settlement != null else "")
+
+
+## 只切换描边状态，不改变图标尺寸、位置、绘制层级或点击判定。
+func _set_hover_outline(party_id: String, settlement_id: String) -> void:
+	if _hover_outline_party_id != party_id:
+		var old_party_icon := _party_icons.get(_hover_outline_party_id) as PartyIcon
+		if is_instance_valid(old_party_icon):
+			old_party_icon.set_hovered(false)
+		_hover_outline_party_id = party_id
+		var new_party_icon := _party_icons.get(party_id) as PartyIcon
+		if is_instance_valid(new_party_icon):
+			new_party_icon.set_hovered(true)
+
+	if _hover_outline_settlement_id != settlement_id:
+		var old_settlement_icon := _settlement_icons.get(
+			_hover_outline_settlement_id
+		) as SettlementIcon
+		if is_instance_valid(old_settlement_icon):
+			old_settlement_icon.set_hovered(false)
+		_hover_outline_settlement_id = settlement_id
+		var new_settlement_icon := _settlement_icons.get(
+			settlement_id
+		) as SettlementIcon
+		if is_instance_valid(new_settlement_icon):
+			new_settlement_icon.set_hovered(true)
+
+
 ## 切换详细模式；鼠标不移动也立即刷新当前悬浮面板。
 func set_alt_detail_active(active: bool) -> void:
 	if _alt_detail_active == active:
@@ -3171,6 +3255,27 @@ func apply_hover_for_test(world_position: Vector2) -> void:
 
 func clear_hover_for_test() -> void:
 	_hide_party_hover()
+
+
+## 测试接口：按世界坐标执行一次悬浮描边目标识别。
+func apply_hover_outline_for_test(world_position: Vector2) -> void:
+	_apply_hover_outline_at(world_position)
+
+
+func clear_hover_outline_for_test() -> void:
+	_set_hover_outline("", "")
+
+
+func get_hover_outline_party_id() -> String:
+	return _hover_outline_party_id
+
+
+func get_hover_outline_settlement_id() -> String:
+	return _hover_outline_settlement_id
+
+
+func get_settlement_icon(settlement_id: String) -> SettlementIcon:
+	return _settlement_icons.get(settlement_id) as SettlementIcon
 
 
 func is_hover_panel_visible() -> bool:
@@ -4986,6 +5091,9 @@ func _on_party_arrived(party_id: String) -> void:
 func _update_time_ui() -> void:
 	if _world_time_label == null:
 		return
+	# 昼夜窗口只读取世界累计时间；暂停时该值不变，滚动也随之停止。
+	if _day_night_clock != null:
+		_day_night_clock.set_world_seconds(TimeManager.world_elapsed_seconds)
 	var effective := TimeManager.get_effective_world_scale()
 	var speed_text := "暂停"
 	if is_equal_approx(effective, TimeManager.SPEED_NORMAL):

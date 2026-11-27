@@ -188,7 +188,9 @@ func _test_battle_blocks_supply_purchase() -> void:
 
 func _test_town_fallback() -> void:
 	# 村庄补给卖光后，AI 应改选更远的城镇。
-	_market.set_stock(_village.settlement_id, "bread", 0)
+	var village_market: MarketData = _market.get_market(_village.settlement_id)
+	if village_market != null:
+		village_market.set_stock("bread", 0)
 	_party.remove_item("bread", _party.get_item_count("bread"))
 	_party.supply_purchase_active = false
 	_party.supply_purchase_settlement_id = ""

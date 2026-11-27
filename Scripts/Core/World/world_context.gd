@@ -5,9 +5,12 @@ extends Node
 ## 生命周期：新游戏/读档时由 GameManager 创建，跨大地图、小场景、战斗场景持续存在；
 ## 返回主菜单时销毁。场景节点只读取这里的实体数据。
 
-## 阶段 8 将世界从 3000×2000 扩展到 5000×3000：
-## 旧地点与部队全部保留在原坐标，新王国位于东侧南北两端。
-const DEFAULT_WORLD_SIZE: Vector2 = Vector2(5000.0, 3000.0)
+## 大地图按参考图像 1556×1323 像素、1 像素 = 5 世界像素重建。
+## 旧存档仍保存 5000×3000：WorldContext 只在尺寸与地图定义一致时
+## 装配地形，旧存档继续使用矩形边界与直线移动，避免强制迁移。
+const DEFAULT_WORLD_SIZE: Vector2 = Vector2(7780.0, 6615.0)
+const WORLD_MAP_DEFINITION_PATH: String = \
+	"res://Data/WorldMap/world_map_definition.tres"
 const UNIT_CONFIG_DIR: String = "res://Data/Units"
 const EQUIPMENT_CONFIG_DIR: String = "res://Data/Equipment"
 const ITEM_CONFIG_DIR: String = "res://Data/Items"
@@ -75,6 +78,10 @@ var world_simulation: WorldSimulation = WorldSimulation.new()
 var world_id: String = ""
 var world_created_at: String = ""
 var world_size: Vector2 = DEFAULT_WORLD_SIZE
+## 地图布局静态定义；只读，不进入存档。
+var world_map_definition: WorldMapDefinition = null
+## 边界/湖泊/山脉寻路；仅新地图尺寸启用，旧存档为 null。
+var world_terrain: WorldTerrain = null
 var player_party_id: String = ""
 ## 玩家领主身份（封地所有权）与玩家角色 UnitData 是两个独立 ID。
 var player_lord_id: String = ""
@@ -89,6 +96,7 @@ var _static_configs_registered: bool = false
 func _ready() -> void:
 	_wire_managers()
 	register_static_configs()
+	_load_world_map_definition()
 	_register_king_appearance_override()
 	if not TimeManager.world_tick.is_connected(world_simulation.on_world_tick):
 		TimeManager.world_tick.connect(world_simulation.on_world_tick)
@@ -103,6 +111,38 @@ func _exit_tree() -> void:
 		TimeManager.world_tick.disconnect(world_simulation.on_world_tick)
 	if EventBus.battle_finished.is_connected(_on_battle_finished):
 		EventBus.battle_finished.disconnect(_on_battle_finished)
+
+
+func _load_world_map_definition() -> void:
+	if world_map_definition != null:
+		return
+	if not ResourceLoader.exists(WORLD_MAP_DEFINITION_PATH):
+		push_warning("大地图定义不存在: %s" % WORLD_MAP_DEFINITION_PATH)
+		return
+	world_map_definition = load(WORLD_MAP_DEFINITION_PATH) as WorldMapDefinition
+	if world_map_definition == null:
+		push_error("无法加载大地图定义: %s" % WORLD_MAP_DEFINITION_PATH)
+
+
+## 按世界尺寸装配地形。只有新地图尺寸才启用真实边界/湖泊/山脉寻路；
+## 旧存档尺寸不匹配时回退到矩形边界与直线移动，不重写任何存档数据。
+func setup_world_terrain(target_world_size: Vector2) -> bool:
+	_load_world_map_definition()
+	world_map_manager.world_bounds = Rect2(Vector2.ZERO, target_world_size)
+	if world_map_definition == null \
+			or target_world_size != world_map_definition.get_world_size():
+		world_terrain = null
+		world_map_manager.bind_terrain(null)
+		return false
+	if world_terrain == null:
+		world_terrain = WorldTerrain.new()
+		if not world_terrain.build(world_map_definition):
+			push_error("大地图地形构建失败")
+			world_terrain = null
+			world_map_manager.bind_terrain(null)
+			return false
+	world_map_manager.bind_terrain(world_terrain)
+	return true
 
 
 ## 国王盔覆盖只依赖静态外观配置与当前政治身份，由本世界显式注册。
@@ -507,7 +547,8 @@ func load_from_save_data(save: SaveData) -> bool:
 	house_manager.load_from_dict(save.houses)
 	kingdom_manager.load_from_dict(save.kingdoms)
 	world_log_manager.load_from_dict(save.world_log)
-	world_map_manager.world_bounds = Rect2(Vector2.ZERO, world_size)
+	# 新地图尺寸装配真实地形；旧存档尺寸回退到矩形边界与直线移动。
+	setup_world_terrain(world_size)
 
 	# v4 -> v5：补齐缺失的家族、贵族归属、部队指挥关系与领袖。
 	_migrate_political_data()

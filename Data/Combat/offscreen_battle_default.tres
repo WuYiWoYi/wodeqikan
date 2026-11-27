@@ -4,7 +4,7 @@
 
 [resource]
 script = ExtResource("1_offscreen")
-settlement_interval_world_seconds = 6.0
+settlement_interval_world_seconds = 2.0
 max_settlement_hours = 48
 base_hourly_casualty_fraction = 0.2
 pressure_scale = 2.0

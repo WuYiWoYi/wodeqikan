@@ -655,8 +655,24 @@ func _next_lord_unit() -> Dictionary:
 		var noble := _context.noble_manager.get_noble(unit.noble_id)
 		if noble == null or not noble.alive or noble.house_id.is_empty():
 			continue
+		_ensure_house_settlement(noble)
 		return {"unit_id": unit.unit_id, "noble_id": noble.lord_id}
 	return {}
+
+
+## 新世界只给五个旧家族保留封地，其余家族没有据点；赎回流程要求
+## 领主家族拥有可返回的地点。测试为被选中的领主临时分配一座无主地点，
+## 只用于构造赎回前提，不改变产品代码的所有权规则。
+func _ensure_house_settlement(noble: NobleData) -> void:
+	if not _context.house_manager.get_house_settlements(noble.house_id).is_empty():
+		return
+	for settlement: SettlementData in _context.settlement_manager.get_all_settlements():
+		if settlement == null or settlement.has_owner():
+			continue
+		settlement.owner_house_id = noble.house_id
+		settlement.owner_noble_id = noble.lord_id
+		_context.house_manager.refresh_settlement_links()
+		return
 
 
 func _sell_lord(unit: UnitData, noble: NobleData) -> Dictionary:

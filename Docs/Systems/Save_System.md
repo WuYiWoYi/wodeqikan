@@ -513,11 +513,11 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 |---|---|---|
 | 顶层 | `nobles` | `{ noble_id: NobleData }`；贵族、爵位、宗主、领袖/国王、部队与存活 |
 | 顶层 | `houses` | `{ house_id: HouseData }`；领袖、贵族、封地、王国、宗主、`banner_id`、玩家家族 |
-| 顶层 | `kingdoms` | `{ kingdom_id: KingdomData }`；统治家族、国王、附庸、敌对、颜色、活动 |
+| 顶层 | `kingdoms` | `{ kingdom_id: KingdomData }`；统治家族、国王、附庸、敌对、颜色、活动、可选 `people_name`（旧档缺失为空） |
 | `SettlementData` | `owner_house_id` | 政治家族归属 |
 | `SettlementData` | `owner_noble_id` | 贵族归属；与 `owner_lord_id` 同步 |
 | `PartyData` | `leader_noble_id` | 指挥该部队的贵族 |
-| 世界 | `world.size` | 新游戏为 5000×3000 |
+| 世界 | `world.size` | 新游戏为 7780×6615；旧存档保留原尺寸，读档按尺寸回退矩形地图 |
 
 ### 19.2 读档顺序与兼容
 

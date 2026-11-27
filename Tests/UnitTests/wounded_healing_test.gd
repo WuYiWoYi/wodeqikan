@@ -8,7 +8,8 @@ extends Node
 ##     res://Tests/UnitTests/wounded_healing_test.tscn
 
 const MILITIA_PATH: String = "res://Data/Units/infantry_militia.tres"
-const SECONDS_PER_HOUR: float = 6.0
+## 1x 下 2 世界秒 = 1 游戏小时（与 TimeManager 一致）。
+const SECONDS_PER_HOUR: float = 2.0
 
 var _failed: bool = false
 var _militia: UnitConfig = null
@@ -164,7 +165,7 @@ func _test_hourly_settlement_and_no_double_settle() -> void:
 	_check(unit.current_hp == 4, "跨多小时按小时累计治疗")
 
 	# 跨小时但未满整小时不结算。
-	_set_world_seconds(SECONDS_PER_HOUR * 4.0 + 2.0)
+	_set_world_seconds(SECONDS_PER_HOUR * 4.0 + 1.0)
 	_check(_healing.tick() == 0, "未到下一个整小时不结算")
 	_check(unit.current_hp == 4, "未满整小时不产生治疗")
 

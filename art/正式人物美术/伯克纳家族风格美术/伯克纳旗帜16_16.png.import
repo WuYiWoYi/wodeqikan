@@ -3,15 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://cu11khrpv3lpa"
-path="res://.godot/imported/Sprite-0002.png-b7084e79f4e1d956416b53e41df57bf9.ctex"
+path="res://.godot/imported/伯克纳旗帜16_16.png-cb084ecdec65f70862e3438bfc09a14e.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://art/正式人物美术/伯克纳家族风格美术/Sprite-0002.png"
-dest_files=["res://.godot/imported/Sprite-0002.png-b7084e79f4e1d956416b53e41df57bf9.ctex"]
+source_file="res://art/正式人物美术/伯克纳家族风格美术/伯克纳旗帜16_16.png"
+dest_files=["res://.godot/imported/伯克纳旗帜16_16.png-cb084ecdec65f70862e3438bfc09a14e.ctex"]
 
 [params]
 

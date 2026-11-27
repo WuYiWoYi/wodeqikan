@@ -32,9 +32,9 @@ func _run() -> void:
 
 	_check(WorldInitializer.create_new_world(_context), "新世界初始化成功")
 	_check(_context.world_id.begins_with("WORLD_"), "世界 ID 使用 WORLD 前缀")
-	_check(_context.world_size == Vector2(5000.0, 3000.0), "世界尺寸为 5000x3000")
-	_check(_context.party_manager.get_all_parties().size() == 12, "生成 12 支部队")
-	_check(_context.settlement_manager.get_all_settlements().size() == 9, "生成 9 个地点")
+	_check(_context.world_size == Vector2(7780.0, 6615.0), "世界尺寸为 7780x6615")
+	_check(_context.party_manager.get_all_parties().size() == 23, "生成 23 支部队")
+	_check(_context.settlement_manager.get_all_settlements().size() == 63, "生成 63 个地点")
 	_check(_context.get_player_party() != null, "玩家部队存在")
 
 	var unique_ids: Dictionary = {}
@@ -42,7 +42,7 @@ func _run() -> void:
 		unique_ids[party.party_id] = true
 	for settlement: SettlementData in _context.settlement_manager.get_all_settlements():
 		unique_ids[settlement.settlement_id] = true
-	_check(unique_ids.size() == 21, "21 个实体 ID 全部唯一")
+	_check(unique_ids.size() == 86, "86 个实体 ID 全部唯一")
 
 	var player := _context.get_player_party()
 	var start_position := player.world_position
@@ -61,22 +61,26 @@ func _run() -> void:
 	_check(_context.world_map_manager.set_party_target(
 		player.party_id, start_position + Vector2(100.0, 0.0)
 	), "玩家可设置移动目标")
-	# 大地图实际速度统一为 PartyData.movement_speed 的 0.5 倍；
-	# 给足 tick 数以确保走完 100 像素。
-	for i: int in range(30):
+	# 大地图实际速度统一为 PartyData.movement_speed 的 0.08 倍；
+	# 450 × 0.08 = 36 世界像素/秒，走完 100 像素约需 28 个 0.1 秒 tick。
+	for i: int in range(120):
 		_context.world_map_manager.update_party_movement(TimeManager.WORLD_TICK_INTERVAL)
 	_check(player.world_position == start_position + Vector2(100.0, 0.0), "玩家到达目标点")
 	_check(player.movement_state == PartyData.MovementState.IDLE, "到达后停止移动")
 
 	_context.world_map_manager.set_party_target(player.party_id, Vector2(-200.0, -200.0))
-	_check(player.target_position == Vector2.ZERO, "目标点被限制在地图边界内")
+	_check(
+		player.target_position != Vector2(-200.0, -200.0)
+			and _context.world_terrain.is_passable(player.target_position),
+		"目标点被限制在可通行边界内"
+	)
 
 	TimeManager.restore_world_time(321.0, TimeManager.SPEED_DOUBLE)
 	var save := _context.to_save_data()
 	_check(save.world_id == _context.world_id, "存档包含世界 ID")
 	_check(save.player_party_id == _context.player_party_id, "存档包含玩家部队 ID")
-	_check(save.parties.size() == 12, "存档包含 12 支部队")
-	_check(save.settlements.size() == 9, "存档包含 9 个地点")
+	_check(save.parties.size() == 23, "存档包含 23 支部队")
+	_check(save.settlements.size() == 63, "存档包含 63 个地点")
 	_check(save.id_counters.size() > 0, "存档包含 ID 计数器")
 	_check(is_equal_approx(save.world_elapsed_seconds, 321.0), "存档包含世界时间")
 
@@ -94,8 +98,8 @@ func _run() -> void:
 	add_child(_second_context)
 	_check(_second_context.load_from_save_data(loaded), "WorldContext 从存档恢复")
 	_check(_second_context.world_id == _context.world_id, "世界 ID 恢复一致")
-	_check(_second_context.party_manager.get_all_parties().size() == 12, "部队数量恢复一致")
-	_check(_second_context.settlement_manager.get_all_settlements().size() == 9, "地点数量恢复一致")
+	_check(_second_context.party_manager.get_all_parties().size() == 23, "部队数量恢复一致")
+	_check(_second_context.settlement_manager.get_all_settlements().size() == 63, "地点数量恢复一致")
 	_check(
 		_second_context.get_player_party().world_position == player.world_position,
 		"玩家位置恢复一致"
@@ -197,7 +201,7 @@ func _run() -> void:
 	await get_tree().process_frame
 
 	var entities := _map.get_node("WorldEntities") as Node2D
-	_check(entities.get_child_count() == 21, "大地图生成 12 个部队图标与 9 个地点图标")
+	_check(entities.get_child_count() == 86, "大地图生成 23 个部队图标与 63 个地点图标")
 	_check(_map.find_child("TopBar", true, false) != null, "大地图时间 UI 已生成")
 	_check(_map.find_child("SettlementPanel", true, false) != null, "地点交互面板已生成")
 

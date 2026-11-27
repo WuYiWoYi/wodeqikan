@@ -68,7 +68,7 @@ func _test_initial_state() -> void:
 			"城镇酒馆不超过容量上限"
 		)
 	_check(
-		_manager.get_stationed_count(_town.settlement_id)
+		_total_stationed_count()
 			+ _manager.get_waiting_count()
 			+ _manager.get_traveling_count()
 			== _manager.get_total_pool_count(),
@@ -204,10 +204,12 @@ func _test_price_rules() -> void:
 
 
 func _test_player_recruitment() -> void:
-	var mercenary := _first_stationed()
-	if mercenary == null:
+	var entry := _first_stationed_entry()
+	if entry.is_empty():
 		_check(false, "存在可招募的驻留雇佣兵")
 		return
+	var mercenary: MercenaryData = entry[0]
+	var tavern: SettlementData = entry[1]
 	var price := _manager.get_recruit_price(mercenary)
 	var expected_wage := _manager.get_daily_wage(mercenary)
 	var gold_before: int = _context.player_profile.gold
@@ -221,7 +223,7 @@ func _test_player_recruitment() -> void:
 
 	var result := _manager.recruit_mercenary_for_player(
 		mercenary_id,
-		_town.settlement_id,
+		tavern.settlement_id,
 		_context.player_profile,
 		_context.player_party_id
 	)
@@ -323,10 +325,12 @@ func _test_player_recruitment() -> void:
 
 
 func _test_failure_paths() -> void:
-	var mercenary := _first_stationed()
-	if mercenary == null:
+	var entry := _first_stationed_entry()
+	if entry.is_empty():
 		_check(false, "失败路径需要驻留雇佣兵")
 		return
+	var mercenary: MercenaryData = entry[0]
+	var tavern: SettlementData = entry[1]
 	var party := _context.get_player_party()
 	var members_before: int = party.member_unit_ids.size()
 	var gold_before: int = _context.player_profile.gold
@@ -335,7 +339,7 @@ func _test_failure_paths() -> void:
 	_context.player_profile.gold = 0
 	var result := _manager.recruit_mercenary_for_player(
 		mercenary.mercenary_id,
-		_town.settlement_id,
+		tavern.settlement_id,
 		_context.player_profile,
 		_context.player_party_id
 	)
@@ -378,19 +382,28 @@ func _test_growth_and_capacity() -> void:
 		_manager.get_total_pool_count() == pool_before + 1,
 		"每 12 游戏小时增加 1 名雇佣兵"
 	)
-	_check(
-		_manager.get_stationed_count(_town.settlement_id)
-			<= _manager.get_tavern_capacity(),
-		"增长后酒馆仍不超过容量"
-	)
-	if _town != null:
+	var towns := _all_tavern_towns()
+	var total_capacity: int = towns.size() * _manager.get_tavern_capacity()
+	for town: SettlementData in towns:
 		_check(
-			_manager.get_stationed_count(_town.settlement_id) == 7,
-			"唯一的城镇酒馆被填满到 7"
+			_manager.get_stationed_count(town.settlement_id)
+				<= _manager.get_tavern_capacity(),
+			"增长后各城镇酒馆不超过容量: %s" % town.display_name
 		)
+	# 继续增长直到超过全部城镇酒馆容量，验证溢出进入待分配池。
+	for i: int in range(60):
+		_manager.tick(interval)
+	_check(
+		_manager.get_total_pool_count() == pool_before + 61,
+		"持续增长按间隔累加雇佣兵总量"
+	)
+	_check(
+		_total_stationed_count() == mini(_manager.get_total_pool_count(), total_capacity),
+		"驻留数量受所有城镇酒馆总容量限制"
+	)
 	_check(
 		_manager.get_waiting_count()
-			== _manager.get_total_pool_count() - 7,
+			== maxi(0, _manager.get_total_pool_count() - total_capacity),
 		"超出容量的雇佣兵留在待分配池"
 	)
 
@@ -456,18 +469,19 @@ func _test_npc_recruitment_priority() -> void:
 	_context.recruitment_config.npc_mercenary_gold_reserve = 0
 	_context.recruitment_config.npc_mercenary_town_radius = 3000.0
 
-	# 玩家正在查看的酒馆不会被 NPC 抢购。
-	var stationed_town := _town if _manager.get_stationed_count(
-		_town.settlement_id
-	) > 0 else _second_town
-	_check(stationed_town != null, "NPC 招募测试需要驻留雇佣兵")
-	if stationed_town == null:
+	# 玩家正在查看的酒馆不会被 NPC 抢购；其他城镇仍可正常招募。
+	var entry := _first_stationed_entry()
+	_check(not entry.is_empty(), "NPC 招募测试需要驻留雇佣兵")
+	if entry.is_empty():
 		return
+	var stationed_town: SettlementData = entry[1]
 	_manager.set_player_viewing_tavern(stationed_town.settlement_id)
-	var pool_before: int = _manager.get_total_pool_count()
+	var viewed_before: int = _manager.get_stationed_count(
+		stationed_town.settlement_id
+	)
 	_manager.tick(_hours_to_seconds(0.11))
 	_check(
-		_manager.get_total_pool_count() == pool_before,
+		_manager.get_stationed_count(stationed_town.settlement_id) == viewed_before,
 		"玩家正在查看的酒馆不会被 NPC 抢购"
 	)
 
@@ -575,11 +589,32 @@ func _test_old_save_initialization() -> void:
 # ---------------------------------------------------------------------------
 
 
-func _first_stationed() -> MercenaryData:
-	if _town == null:
-		return null
-	var stationed := _manager.get_stationed_mercenaries(_town.settlement_id)
-	return stationed[0] if not stationed.is_empty() else null
+## 返回首个“驻留雇佣兵 + 其所在城镇”；新世界有多座城镇，雇佣兵会分散驻留。
+func _first_stationed_entry() -> Array:
+	for town: SettlementData in _all_tavern_towns():
+		var stationed := _manager.get_stationed_mercenaries(town.settlement_id)
+		if not stationed.is_empty():
+			return [stationed[0], town]
+	return []
+
+
+func _all_tavern_towns() -> Array[SettlementData]:
+	var towns: Array[SettlementData] = []
+	for settlement: SettlementData in _context.settlement_manager.get_all_settlements():
+		if settlement != null \
+				and settlement.settlement_type == SettlementData.SettlementType.TOWN:
+			towns.append(settlement)
+	towns.sort_custom(func(a: SettlementData, b: SettlementData) -> bool:
+		return a.settlement_id < b.settlement_id
+	)
+	return towns
+
+
+func _total_stationed_count() -> int:
+	var total: int = 0
+	for town: SettlementData in _all_tavern_towns():
+		total += _manager.get_stationed_count(town.settlement_id)
+	return total
 
 
 func _first_normal_unit(party: PartyData) -> UnitData:

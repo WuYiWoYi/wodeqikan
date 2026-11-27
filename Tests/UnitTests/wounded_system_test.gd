@@ -225,11 +225,12 @@ func _test_player_character_death_rule() -> void:
 	if session == null:
 		return
 	_set_all_units_zero_hp(session)
-	_battle.finish_battle(session.battle_id, BattleSession.BattleResult.DEFENDER_VICTORY)
+	# 玩家获胜时不触发被俘规则，玩家角色沿用永久死亡。
+	_battle.finish_battle(session.battle_id, BattleSession.BattleResult.ATTACKER_VICTORY)
 	var result := session.final_result
 	_check(
 		result.get_party_casualties(player.party_id) == 1,
-		"玩家角色保持永久死亡规则"
+		"玩家获胜时玩家角色保持永久死亡规则"
 	)
 	_check(
 		_units.get_unit(hero.unit_id) == null and player.member_unit_ids.is_empty(),

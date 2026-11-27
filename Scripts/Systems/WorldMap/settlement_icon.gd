@@ -9,14 +9,30 @@ extends Node2D
 const VILLAGE_NAME_ANCHOR_RADIUS: float = 28.0
 const CASTLE_NAME_ANCHOR_RADIUS: float = 40.0
 const TOWN_NAME_ANCHOR_RADIUS: float = 44.0
+## 鼠标悬浮白色描边：略粗，沿建筑原有几何边缘绘制在填充层之下。
+const HOVER_OUTLINE_WIDTH: float = 5.0
+const HOVER_OUTLINE_COLOR: Color = Color(1.0, 1.0, 1.0, 0.95)
 
 var settlement: SettlementData = null
+var _hovered: bool = false
 
 
 func setup(data: SettlementData) -> void:
 	settlement = data
 	position = data.world_position if data != null else Vector2.ZERO
 	queue_redraw()
+
+
+## 仅切换悬浮白色描边；不改变建筑几何、名称、徽章或点击区域。
+func set_hovered(value: bool) -> void:
+	if _hovered == value:
+		return
+	_hovered = value
+	queue_redraw()
+
+
+func is_hovered() -> bool:
+	return _hovered
 
 
 ## 名称层使用：返回原有建筑顶部到名称组合底部的视觉半径。
@@ -35,6 +51,9 @@ func _draw() -> void:
 		return
 
 	draw_circle(Vector2(0.0, 8.0), 15.0, Color(0.0, 0.0, 0.0, 0.22))
+	# 先画更粗的白色描边，再由建筑填充覆盖内侧一半，留下轮廓外侧的白色光晕。
+	if _hovered:
+		_draw_hover_outline()
 	match settlement.settlement_type:
 		SettlementData.SettlementType.CASTLE:
 			_draw_castle()
@@ -42,6 +61,51 @@ func _draw() -> void:
 			_draw_town()
 		_:
 			_draw_village()
+
+
+## 与下方建筑绘制使用同一套几何；只描边不填充。
+func _draw_hover_outline() -> void:
+	match settlement.settlement_type:
+		SettlementData.SettlementType.CASTLE:
+			_outline_rect(Rect2(-20.0, -10.0, 40.0, 24.0))
+			_outline_rect(Rect2(-24.0, -24.0, 10.0, 16.0))
+			_outline_rect(Rect2(14.0, -24.0, 10.0, 16.0))
+		SettlementData.SettlementType.TOWN:
+			_outline_rect(Rect2(-24.0, -8.0, 48.0, 22.0))
+			_outline_rect(Rect2(-31.0, -18.0, 7.0, 14.0))
+			_outline_rect(Rect2(24.0, -18.0, 7.0, 14.0))
+			_outline_polygon(PackedVector2Array([
+				Vector2(-28.0, -8.0), Vector2(-12.0, -30.0), Vector2(4.0, -8.0)
+			]))
+			_outline_polygon(PackedVector2Array([
+				Vector2(-2.0, -8.0), Vector2(14.0, -26.0), Vector2(30.0, -8.0)
+			]))
+		_:
+			_outline_rect(Rect2(-16.0, -4.0, 32.0, 18.0))
+			_outline_polygon(PackedVector2Array([
+				Vector2(-21.0, -4.0), Vector2(0.0, -24.0), Vector2(21.0, -4.0)
+			]))
+
+
+func _outline_rect(rect: Rect2) -> void:
+	_outline_polygon(PackedVector2Array([
+		rect.position,
+		Vector2(rect.end.x, rect.position.y),
+		rect.end,
+		Vector2(rect.position.x, rect.end.y),
+	]))
+
+
+func _outline_polygon(points: PackedVector2Array) -> void:
+	var count: int = points.size()
+	if count < 2:
+		return
+	for i: int in range(count):
+		var start: Vector2 = points[i]
+		var end: Vector2 = points[(i + 1) % count]
+		draw_line(start, end, HOVER_OUTLINE_COLOR, HOVER_OUTLINE_WIDTH, true)
+		# 圆点补足折线拐角，保证描边连续。
+		draw_circle(start, HOVER_OUTLINE_WIDTH * 0.5, HOVER_OUTLINE_COLOR)
 
 
 ## 修改前的村庄美术：土墙 + 红屋顶 + 门洞，保持不变。

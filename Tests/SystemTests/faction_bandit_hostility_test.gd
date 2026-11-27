@@ -30,21 +30,23 @@ func _run() -> void:
 		return
 
 	var bandit := _find_party(WorldInitializer.BANDIT_PARTY_NAME)
-	var burknania_king := _find_party(WorldInitializer.BURKNANIA_KING_PARTY_NAME)
-	var burknania_knight := _find_party(WorldInitializer.BURKNANIA_KNIGHT_PARTY_NAME)
-	var olin_king := _find_party(WorldInitializer.OLIN_KING_PARTY_NAME)
+	# 新世界每个 familia 只有一支骑士部队：统治家族“伯克纳骑士”由国王指挥，
+	# 同王国的巴里骑士是附庸贵族；洛里亚克骑士为另一王国统治者。
+	var burknania_king := _find_party(WorldInitializer.BURKNANIA_KNIGHT_PARTY_NAME)
+	var burknania_knight := _find_party(WorldInitializer.BARI_KNIGHT_PARTY_NAME)
+	var loriak_king := _find_party("洛里亚克骑士")
 	var olin_knight := _find_party(WorldInitializer.OLIN_KNIGHT_PARTY_NAME)
 	var player := _context.get_player_party()
 	var merchant := _find_party(WorldInitializer.TEST_ENEMY_PARTY_NAME)
 	var guard := _find_party(WorldInitializer.GUARD_PARTY_NAME)
 	_check(
 		bandit != null and burknania_king != null and burknania_knight != null
-			and olin_king != null and olin_knight != null and player != null
+			and loriak_king != null and olin_knight != null and player != null
 			and merchant != null and guard != null,
 		"测试所需部队存在"
 	)
 	if bandit == null or burknania_king == null or burknania_knight == null \
-			or olin_king == null or olin_knight == null or player == null \
+			or loriak_king == null or olin_knight == null or player == null \
 			or merchant == null or guard == null:
 		return
 
@@ -52,7 +54,7 @@ func _run() -> void:
 	_check(
 		factions.get_party_relation(bandit.party_id, burknania_king.party_id)
 			== FactionManager.Relation.HOSTILE,
-		"强盗 vs 伯克纳王国贵族：敌对"
+		"强盗 vs 伯克纳国王：敌对"
 	)
 	_check(
 		factions.get_party_relation(bandit.party_id, burknania_knight.party_id)
@@ -60,14 +62,14 @@ func _run() -> void:
 		"强盗 vs 伯克纳附庸贵族：敌对"
 	)
 	_check(
-		factions.get_party_relation(bandit.party_id, olin_king.party_id)
+		factions.get_party_relation(bandit.party_id, loriak_king.party_id)
 			== FactionManager.Relation.HOSTILE,
-		"强盗 vs 奥林王国贵族：敌对"
+		"强盗 vs 洛里亚克国王：敌对"
 	)
 	_check(
 		factions.get_party_relation(bandit.party_id, olin_knight.party_id)
 			== FactionManager.Relation.HOSTILE,
-		"强盗 vs 奥林附庸贵族：敌对"
+		"强盗 vs 洛里亚克附庸贵族：敌对"
 	)
 	_check(
 		factions.get_party_relation(bandit.party_id, player.party_id)
@@ -98,9 +100,33 @@ func _run() -> void:
 		"同一王国的不同家族贵族：友好"
 	)
 	_check(
-		factions.get_party_relation(burknania_king.party_id, olin_king.party_id)
+		factions.get_party_relation(burknania_king.party_id, loriak_king.party_id)
+			== FactionManager.Relation.NEUTRAL,
+		"不同王国未宣战时：中立"
+	)
+	_check(
+		_context.kingdom_manager.declare_war(
+			WorldInitializer.KINGDOM_BURKNANIA_ID, WorldInitializer.KINGDOM_LORIAK_ID
+		),
+		"可声明王国战争"
+	)
+	_check(
+		factions.get_party_relation(burknania_king.party_id, loriak_king.party_id)
 			== FactionManager.Relation.HOSTILE,
-		"伯克纳王国 vs 奥林王国：保持原有敌对"
+		"伯克纳王国 vs 洛里亚克王国：宣战后敌对"
+	)
+	_check(
+		factions.get_party_relation(burknania_knight.party_id, olin_knight.party_id)
+			== FactionManager.Relation.HOSTILE,
+		"战争传播到双方附庸家族"
+	)
+	_context.kingdom_manager.end_war(
+		WorldInitializer.KINGDOM_BURKNANIA_ID, WorldInitializer.KINGDOM_LORIAK_ID
+	)
+	_check(
+		factions.get_party_relation(burknania_king.party_id, loriak_king.party_id)
+			== FactionManager.Relation.NEUTRAL,
+		"停战后恢复中立"
 	)
 	_check(
 		factions.get_party_relation(merchant.party_id, player.party_id)

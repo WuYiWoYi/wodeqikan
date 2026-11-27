@@ -98,7 +98,10 @@ func _run() -> void:
 	)
 	_map.call("_set_camera_zoom", 1.5)
 
-	# 连线起点实时跟随部队图标。
+	# 连线起点实时跟随部队图标。临时将移速置零，避免世界 tick
+	# 在同一帧内推进部队导致比较基准漂移。
+	var speed_before: float = _player.movement_speed
+	_player.movement_speed = 0.0
 	_player.world_position = Vector2(980.0, 680.0)
 	if player_icon != null:
 		player_icon.position = _player.world_position
@@ -107,6 +110,7 @@ func _run() -> void:
 		guide.get_start_position().distance_to(_player.world_position) < 0.01,
 		"连线起点跟随玩家部队实时位置"
 	)
+	_player.movement_speed = speed_before
 
 	# 停止/抵达后清理。
 	_context.world_map_manager.stop_party(_player.party_id)

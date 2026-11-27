@@ -45,10 +45,22 @@ func _ready() -> void:
 func _run() -> void:
 	_militia = load(MILITIA_PATH) as UnitConfig
 	_check(_militia != null, "加载民兵配置")
-	_check(is_equal_approx(WorldInitializer.PLAYER_MOVE_SPEED, 150.0), "玩家速度为 150")
-	_check(is_equal_approx(WorldInitializer.MERCHANT_MOVE_SPEED, 80.0), "商队速度为 80")
-	_check(is_equal_approx(WorldInitializer.GUARD_MOVE_SPEED, 120.0), "治安队速度为 120")
-	_check(is_equal_approx(WorldInitializer.BANDIT_MOVE_SPEED, 100.0), "强盗速度为 100")
+	_check(
+		is_equal_approx(WorldInitializer.PLAYER_MOVE_SPEED, 450.0),
+		"玩家原始速度为 450（等效 36）"
+	)
+	_check(
+		is_equal_approx(WorldInitializer.MERCHANT_MOVE_SPEED, 80.0 * 2.5),
+		"商队速度按基准 30 换算"
+	)
+	_check(
+		is_equal_approx(WorldInitializer.GUARD_MOVE_SPEED, 120.0 * 2.5),
+		"治安队速度按基准 30 换算"
+	)
+	_check(
+		is_equal_approx(WorldInitializer.BANDIT_MOVE_SPEED, 100.0 * 2.5),
+		"强盗速度按基准 30 换算"
+	)
 	if _militia == null:
 		return
 
@@ -962,9 +974,17 @@ func _destroy_party(party: PartyData) -> void:
 
 
 func _move_all_to_targets() -> void:
-	# 大步长可能在本次 tick 末尾精确到达目标，下一次 tick 才转为 IDLE。
-	for i: int in range(4):
+	# 大地图移动系数为 0.08，单次 10 秒推进不足以跨越大距离；
+	# 循环推进直到所有部队待命，保留精确到达语义。
+	for i: int in range(600):
 		_map.update_party_movement(10.0)
+		var all_idle: bool = true
+		for party: PartyData in _parties.get_all_parties():
+			if party.movement_state == PartyData.MovementState.MOVING:
+				all_idle = false
+				break
+		if all_idle:
+			return
 
 
 func _check(condition: bool, message: String) -> void:

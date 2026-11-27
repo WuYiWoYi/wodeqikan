@@ -108,10 +108,15 @@ func _run() -> void:
 	_check(result != null, "生成统一结果")
 	if result != null:
 		_check(result.winning_side_index == 1, "获胜侧为敌方")
+		# 玩家战败时玩家角色转为伤兵（被俘前提），不计入永久伤亡。
 		_check(
 			result.get_party_casualties(_player.party_id)
-				== WorldInitializer.PLAYER_TOTAL_MEMBER_COUNT,
-			"玩家部队全员伤亡"
+				== WorldInitializer.PLAYER_TOTAL_MEMBER_COUNT - 1,
+			"玩家部队除玩家角色外全员伤亡"
+		)
+		_check(
+			result.get_party_wounded(_player.party_id) == 1,
+			"玩家角色转为伤兵/俘虏"
 		)
 		_check(
 			result.get_party_casualties(_ally.party_id) == 2,

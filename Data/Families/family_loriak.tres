@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="FamilyConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/family_config.gd" id="1_familyconfig"]
+
+[resource]
+script = ExtResource("1_familyconfig")
+family_id = "FAMILY_LORIAK"
+display_name = "洛里亚克家族"
+primary_color = Color(0.88, 0.75, 0.13, 1)
+secondary_color = Color(0.25, 0.25, 0.25, 1)
+banner_texture_path = "res://art/正式人物美术/洛里亚克家族风格美术/洛里亚克旗帜16_16.png"
+tabard_primary_texture_path = "res://art/正式人物美术/洛里亚克家族风格美术/洛里亚克风格罩袍_主.png"
+tabard_secondary_texture_path = "res://art/正式人物美术/洛里亚克家族风格美术/洛里亚克风格罩袍_副.png"
+leader_plume_texture_path = "res://art/正式人物美术/洛里亚克家族风格美术/洛里亚克风格缨饰.png"
+spear_texture_path = "res://art/正式人物美术/洛里亚克家族风格美术/洛里亚克风格长矛.png"

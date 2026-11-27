@@ -49,7 +49,7 @@ func _run() -> void:
 
 
 func _test_family_configs() -> void:
-	_check(_context.family_registry.get_all_configs().size() == 5, "注册五个家族")
+	_check(_context.family_registry.get_all_configs().size() == 18, "注册十八个家族")
 	var bari := _context.family_registry.get_config(WorldInitializer.FAMILY_BARI_ID)
 	var moxixi := _context.family_registry.get_config(
 		WorldInitializer.FAMILY_MOXIXI_ID
@@ -81,10 +81,12 @@ func _test_named_villages() -> void:
 
 
 func _test_family_parties() -> void:
-	for party_name: String in [
-		WorldInitializer.BARI_KNIGHT_PARTY_NAME,
-		WorldInitializer.MOXIXI_KNIGHT_PARTY_NAME,
+	for entry: Array in [
+		[WorldInitializer.BARI_KNIGHT_PARTY_NAME, WorldInitializer.BARI_LORD_NAME],
+		[WorldInitializer.MOXIXI_KNIGHT_PARTY_NAME, WorldInitializer.MOXIXI_LORD_NAME],
 	]:
+		var party_name: String = entry[0]
+		var leader_name: String = entry[1]
 		var party := _find_party(party_name)
 		_check(party != null, "创建家族骑士部队：%s" % party_name)
 		if party == null:
@@ -99,7 +101,7 @@ func _test_family_parties() -> void:
 		var leader := _context.party_manager.get_leader_unit(party.party_id)
 		_check(leader != null, "家族领袖是部队成员")
 		if leader != null:
-			_check(leader.display_name == party_name, "领袖名称正确")
+			_check(leader.display_name == leader_name, "领袖名称正确")
 			_check(leader.family_id == party.family_id, "领袖记录家族")
 			_check(leader.is_mounted, "家族领袖骑乘")
 			_check(_config_tier(leader) == 3, "家族领袖为三级兵种")
@@ -383,8 +385,8 @@ func _test_unified_world_map_speed() -> void:
 	player.current_order = PartyData.OrderType.MOVE
 	_context.world_map_manager.update_party_movement(1.0)
 	_check(
-		is_equal_approx(player.world_position.x, 900.0 + player.movement_speed * 0.5),
-		"大地图实际移动速度统一为数据速度的 0.5 倍"
+		is_equal_approx(player.world_position.x, 900.0 + player.movement_speed * 0.08),
+		"大地图实际移动速度统一为数据速度的 0.08 倍"
 	)
 	_check(
 		is_equal_approx(player.movement_speed, WorldInitializer.PLAYER_MOVE_SPEED),

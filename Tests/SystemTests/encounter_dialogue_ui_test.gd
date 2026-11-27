@@ -68,7 +68,7 @@ func _test_marker_style() -> void:
 	)
 	_check(
 		style.flag_max_size > 30.0
-		and style.flag_max_size <= style.marker_radius * 2.0 + 4.0,
+		and style.flag_max_size <= style.marker_radius * 3.0,
 		"圆形内部旗帜放大且不改变圆形底盘"
 	)
 	var player_icon := _map.find_child(

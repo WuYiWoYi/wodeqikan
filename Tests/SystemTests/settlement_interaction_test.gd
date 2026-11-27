@@ -44,7 +44,7 @@ func _run() -> void:
 	_player = _context.get_player_party()
 	_village = _find_settlement(WorldInitializer.BARI_VILLAGE_NAME)
 	_other_village = _find_settlement(WorldInitializer.MOXIXI_VILLAGE_NAME)
-	_castle = _find_settlement("灰石城堡")
+	_castle = _find_settlement("灰石堡垒")
 	_check(
 		_player != null and _village != null and _other_village != null
 			and _castle != null,
@@ -179,7 +179,7 @@ func _test_castle_and_town() -> void:
 	_town = _context.settlement_manager.create_settlement(
 		"测试城镇",
 		SettlementData.SettlementType.TOWN,
-		Vector2(2800.0, 300.0),
+		_village.world_position + Vector2(600.0, 300.0),
 		WorldInitializer.PLAYER_FACTION_ID,
 		60,
 		50

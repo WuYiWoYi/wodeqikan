@@ -43,7 +43,7 @@ func _run() -> void:
 	_merchant = _find_party("河畔商队")
 	_guard = _find_party("北境巡逻队")
 	_village = _find_settlement("巴里")
-	_castle = _find_settlement("灰石城堡")
+	_castle = _find_settlement("灰石堡垒")
 	_check(_player != null and _merchant != null and _guard != null, "找到测试部队")
 	_check(_village != null and _castle != null, "找到测试地点")
 	if _player == null or _merchant == null or _guard == null:

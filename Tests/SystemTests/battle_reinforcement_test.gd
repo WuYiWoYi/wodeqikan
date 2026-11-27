@@ -36,15 +36,16 @@ func _run() -> void:
 
 	var player := _context.get_player_party()
 	var bandits := _find_party_by_name("山道强盗")
+	# 新世界每个家族单支部队：伯克纳骑士由国王指挥，巴里骑士为同王国附庸。
 	var burknania_knights := _find_party_by_name(WorldInitializer.BURKNANIA_KNIGHT_PARTY_NAME)
-	var burknania_king := _find_party_by_name(WorldInitializer.BURKNANIA_KING_PARTY_NAME)
+	var burknania_ally := _find_party_by_name(WorldInitializer.BARI_KNIGHT_PARTY_NAME)
 	_check(
 		player != null and bandits != null and burknania_knights != null
-			and burknania_king != null,
+			and burknania_ally != null,
 		"测试所需部队存在"
 	)
 	if player == null or bandits == null or burknania_knights == null \
-			or burknania_king == null:
+			or burknania_ally == null:
 		return
 
 	# 玩家与伯克纳建立临时友好，使伯克纳部队成为玩家侧增援；
@@ -164,7 +165,7 @@ func _run() -> void:
 	_check(prompt_panel != null and prompt_panel.visible, "玩家侧增援显示提示")
 	_check(
 		prompt_label != null
-			and prompt_label.text.contains(WorldInitializer.BURKNANIA_LORD_NAME)
+			and prompt_label.text.contains(WorldInitializer.BURKNANIA_KING_NAME)
 			and prompt_label.text.contains(WorldInitializer.BURKNANIA_HOUSE_NAME),
 		"提示包含真实贵族与家族名称"
 	)
@@ -174,25 +175,27 @@ func _run() -> void:
 	)
 
 	# 第二名增援进入队列，不覆盖当前提示。
-	burknania_king.world_position = _session.world_position
+	burknania_ally.world_position = _session.world_position
 	_check(
 		_context.battle_manager.try_join_battle(
-			burknania_king.party_id, _session.battle_id
+			burknania_ally.party_id, _session.battle_id
 		),
-		"第二支伯克纳部队加入玩家侧"
+		"第二支伯克纳王国部队加入玩家侧"
 	)
 	var queue: Array = _battle_scene.get("_reinforcement_queue") as Array
 	_check(queue != null and queue.size() >= 1, "多条增援提示进入队列而非覆盖")
 	_check(
 		prompt_label != null and prompt_label.text.contains(
-			WorldInitializer.BURKNANIA_LORD_NAME
+			WorldInitializer.BURKNANIA_KING_NAME
 		),
 		"当前提示仍为第一条增援消息"
 	)
 
 	# 玩家自身与敌对侧增援不得产生提示。
 	var queue_before: int = queue.size() if queue != null else 0
-	var king_noble := _context.house_manager.get_house_leader("HOUSE_BURKNANIA")
+	var ally_noble := _context.house_manager.get_house_leader(
+		WorldInitializer.HOUSE_BARI_ID
+	)
 	_battle_scene.call(
 		"_on_party_reinforced",
 		_session.battle_id,
@@ -203,8 +206,8 @@ func _run() -> void:
 	_battle_scene.call(
 		"_on_party_reinforced",
 		_session.battle_id,
-		burknania_king.party_id,
-		king_noble.lord_id if king_noble != null else "",
+		burknania_ally.party_id,
+		ally_noble.lord_id if ally_noble != null else "",
 		1 - player_side
 	)
 	queue = _battle_scene.get("_reinforcement_queue") as Array
@@ -291,39 +294,45 @@ func _test_three_side_bottom_reinforcement() -> void:
 	var burknania_knight := _find_party_by_name(
 		WorldInitializer.BURKNANIA_KNIGHT_PARTY_NAME
 	)
-	var burknania_king := _find_party_by_name(
-		WorldInitializer.BURKNANIA_KING_PARTY_NAME
+	var burknania_ally := _find_party_by_name(
+		WorldInitializer.BARI_KNIGHT_PARTY_NAME
 	)
-	var olin_king := _find_party_by_name(WorldInitializer.OLIN_KING_PARTY_NAME)
-	var olin_knight := _find_party_by_name(
-		WorldInitializer.OLIN_KNIGHT_PARTY_NAME
+	var olin_knight := _find_party_by_name(WorldInitializer.OLIN_KNIGHT_PARTY_NAME)
+	# 墨西西与奥林同属洛里亚克王国，可作为第 2 侧增援。
+	var moxixi_knight := _find_party_by_name(
+		WorldInitializer.MOXIXI_KNIGHT_PARTY_NAME
 	)
 	var player := _context.get_player_party()
 	_check(
-		burknania_knight != null and burknania_king != null
-			and olin_king != null and olin_knight != null and player != null,
+		burknania_knight != null and burknania_ally != null
+			and olin_knight != null and moxixi_knight != null and player != null,
 		"三侧增援测试所需部队存在"
 	)
-	if burknania_knight == null or burknania_king == null \
-			or olin_king == null or olin_knight == null or player == null:
+	if burknania_knight == null or burknania_ally == null \
+			or olin_knight == null or moxixi_knight == null or player == null:
 		return
 	# 玩家与奥林友好，加入第 2 侧；同时保证屏幕战斗存在玩家参与。
 	_context.faction_manager.set_house_relation(
 		"HOUSE_PLAYER", "HOUSE_OLIN", FactionManager.Relation.FRIENDLY
 	)
+	# 新世界初始无战争；本测试临时让伯克纳与洛里亚克交战，
+	# 使第 0/1 侧的伯克纳部队与第 2 侧的奥林/墨西西敌对。
+	_context.kingdom_manager.declare_war(
+		WorldInitializer.KINGDOM_BURKNANIA_ID, WorldInitializer.KINGDOM_LORIAK_ID
+	)
 	for party: PartyData in [
-		burknania_knight, burknania_king, olin_king, olin_knight, player
+		burknania_knight, burknania_ally, olin_knight, moxixi_knight, player
 	]:
 		_reset_party_for_battle(party)
 
 	var position := Vector2(1500.0, 1500.0)
-	# 第 0/1 侧均为与奥林敌对的伯克纳部队，第 2 侧为奥林王室卫队与玩家；
-	# 奥林骑士只与第 2 侧友好，因此加入第 2 侧（下方）。
+	# 第 0/1 侧均为与奥林敌对的伯克纳部队，第 2 侧为奥林骑士与玩家；
+	# 墨西西骑士只与第 2 侧友好，因此加入第 2 侧（下方）。
 	_session = _context.battle_manager.start_battle_by_sides(
 		[
 			[burknania_knight.party_id],
-			[burknania_king.party_id],
-			[olin_king.party_id, player.party_id],
+			[burknania_ally.party_id],
+			[olin_knight.party_id, player.party_id],
 		],
 		position
 	)
@@ -333,23 +342,23 @@ func _test_three_side_bottom_reinforcement() -> void:
 	await _instantiate_battle_scene()
 	var snapshot := _snapshot_controllers()
 
-	olin_knight.world_position = position
+	moxixi_knight.world_position = position
 	_check(
 		_context.battle_manager.try_join_battle(
-			olin_knight.party_id, _session.battle_id
+			moxixi_knight.party_id, _session.battle_id
 		),
-		"奥林骑士加入既有三方战斗"
+		"墨西西骑士加入既有三方战斗"
 	)
 	_check(
-		_session.get_side_of_party(olin_knight.party_id) == 2
-			and _session.get_side_of_party(olin_knight.party_id)
-				== _session.get_side_of_party(olin_king.party_id),
-		"奥林骑士加入第 2 侧"
+		_session.get_side_of_party(moxixi_knight.party_id) == 2
+			and _session.get_side_of_party(moxixi_knight.party_id)
+				== _session.get_side_of_party(olin_knight.party_id),
+		"墨西西骑士加入第 2 侧"
 	)
 	await _wait_spawn_frames()
-	var behind := _side_positions_behind(olin_knight.party_id, Vector2.DOWN)
-	var in_bounds := _side_positions_in_bounds(olin_knight.party_id)
-	var spaced := _side_positions_spaced(olin_knight.party_id, snapshot)
+	var behind := _side_positions_behind(moxixi_knight.party_id, Vector2.DOWN)
+	var in_bounds := _side_positions_in_bounds(moxixi_knight.party_id)
+	var spaced := _side_positions_spaced(moxixi_knight.party_id, snapshot)
 	_check(behind, "第 2 侧增援部署在下方后方")
 	_check(in_bounds, "第 2 侧增援保持在战场边界内")
 	_check(spaced, "第 2 侧增援不与既有单位重叠")

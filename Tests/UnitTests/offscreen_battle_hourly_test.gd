@@ -56,7 +56,8 @@ func _setup_fixture() -> void:
 	_battle.setup(_units, _parties, _ids, _factions)
 
 	var config := OffscreenBattleConfig.new()
-	config.settlement_interval_world_seconds = 6.0
+	# 1x 下 2 世界秒 = 1 游戏小时。
+	config.settlement_interval_world_seconds = 2.0
 	config.base_hourly_casualty_fraction = 0.2
 	config.casualty_variance = 0.0
 	config.random_seed = 20261121
@@ -77,7 +78,7 @@ func _test_hourly_gate_and_casualties() -> void:
 	if session == null:
 		return
 
-	_battle.tick(5.9)
+	_battle.tick(1.9)
 	_check(session.offscreen_settlements_done == 0, "不足 1 个游戏小时不结算")
 	_check(_alive_count(session) == 10, "未到结算时间没有伤亡")
 
@@ -120,7 +121,7 @@ func _test_tier_affects_casualties() -> void:
 	if session == null:
 		return
 
-	_battle.tick(6.0)
+	_battle.tick(2.0)
 	var militia_alive: int = _side_alive_count(session, 0)
 	var veteran_alive: int = _side_alive_count(session, 1)
 	_check(militia_alive < 5, "低阶部队承受伤亡")
@@ -148,7 +149,7 @@ func _test_player_join_preserves_casualties() -> void:
 	_check(session != null, "创建可加入离屏战斗")
 	if session == null:
 		return
-	_battle.tick(6.0)
+	_battle.tick(2.0)
 	var alive_before_join: int = _alive_count(session)
 	var existing_states: Dictionary = {}
 	for unit_id: String in session.get_all_unit_ids():
@@ -201,7 +202,7 @@ func _test_battle_ends_by_annihilation() -> void:
 		return
 	var guard: int = 0
 	while _battle.get_battle(session.battle_id) == session and guard < 100:
-		_battle.tick(6.0)
+		_battle.tick(2.0)
 		guard += 1
 	_check(_battle.get_battle(session.battle_id) == null, "一方全灭后自动结束战斗")
 	_check(session.final_result != null, "全灭战斗生成结果")
@@ -238,7 +239,7 @@ func _test_living_side_count_ignores_empty_sides() -> void:
 		"0 人战斗侧不计入存活侧数量"
 	)
 
-	_battle.tick(6.0)
+	_battle.tick(2.0)
 	_check(
 		_battle.get_battle(session.battle_id) == null
 		and session.status == BattleSession.Status.ENDED,
@@ -266,7 +267,7 @@ func _test_living_side_count_ignores_empty_sides() -> void:
 			if state != null:
 				state.alive = false
 				state.battle_hp = 0
-		_battle.tick(6.0)
+		_battle.tick(2.0)
 		_check(
 			_battle.get_battle(draw_session.battle_id) == null,
 			"双方全灭时立即结束"
@@ -302,7 +303,7 @@ func _test_parallel_offscreen_battles() -> void:
 		return
 	_check(_battle.get_active_battles().size() == 2, "两场战斗同时存在")
 
-	_battle.tick(6.0)
+	_battle.tick(2.0)
 	_check(
 		first.offscreen_settlements_done == 1
 		and second.offscreen_settlements_done == 1,

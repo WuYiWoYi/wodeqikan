@@ -2,13 +2,13 @@ class_name OffscreenBattleConfig
 extends Resource
 ## AI 对 AI 离屏战斗的结算参数。
 ##
-## 每经过 settlement_interval_world_seconds（默认 6 世界秒 = 1 游戏小时），
+## 每经过 settlement_interval_world_seconds（默认 2 世界秒 = 1 游戏小时），
 ## 根据双方剩余战力、兵种等级、骑乘状态与随机波动结算一次伤亡。
 ## 公式集中在 OffscreenBattleResolver，本资源只提供可调整参数。
 
 @export_category("Timing")
-## 1 游戏小时 = 6 世界累计秒（TimeManager.REAL_SECONDS_PER_GAME_HOUR）。
-@export var settlement_interval_world_seconds: float = 6.0
+## 1 游戏小时 = 2 世界累计秒（TimeManager.REAL_SECONDS_PER_GAME_HOUR）。
+@export var settlement_interval_world_seconds: float = 2.0
 ## 安全上限；达到后按剩余战力判定胜负，避免极端情况下战斗无限持续。
 @export var max_settlement_hours: int = 48
 

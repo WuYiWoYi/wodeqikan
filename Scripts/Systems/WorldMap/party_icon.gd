@@ -26,6 +26,8 @@ var _last_count: int = -1
 var _floating_label: Label = null
 var _floating_tween: Tween = null
 var _last_floating_text: String = ""
+## 鼠标悬浮状态；只影响额外白色描边，不改变尺寸、位置或点击区域。
+var _hovered: bool = false
 
 
 func setup(
@@ -81,18 +83,33 @@ func _draw() -> void:
 		maxf(1.0, radius - _style.border_width),
 		_marker_color.darkened(0.35)
 	)
+	# 基础黑色圆形描边：外缘固定在标记外径，加粗部分全部向圆内扩展，
+	# 因此整体视觉尺寸、位置与点击/悬浮判定都不改变。
+	if _style.outline_width > 0.0:
+		draw_arc(
+			Vector2.ZERO,
+			_style.get_outline_outer_radius() - _style.outline_width * 0.5,
+			0.0, TAU, 64,
+			_style.outline_color, _style.outline_width, true
+		)
 	if is_player:
 		draw_arc(
 			Vector2.ZERO, radius + 3.0, 0.0, TAU, 40,
 			_style.player_ring_color, 2.5, true
 		)
+	# 悬浮白色描边：画在圆形主体之外，与黑色基础描边同时存在。
+	if _hovered and _style.hover_outline_width > 0.0:
+		draw_arc(
+			Vector2.ZERO,
+			radius + _style.hover_outline_gap + _style.hover_outline_width * 0.5,
+			0.0, TAU, 64,
+			_style.hover_outline_color, _style.hover_outline_width, true
+		)
 
 	# 没有家族旗帜时，在圆内绘制简易默认旗帜，避免出现空圆。
-	# 三角形顶点需落在内圆内，因此单独限制半宽，避免放大旗帜后越出圆形。
+	# 三角形顶点需落在旗帜裁剪圈内，因此单独限制半宽，避免越出圆形。
 	if _flag_sprite == null or _flag_sprite.texture == null:
-		var inner_radius: float = maxf(
-			1.0, _style.marker_radius - _style.border_width
-		)
+		var inner_radius: float = _style.get_flag_clip_radius()
 		var half: float = minf(
 			_style.flag_max_size * 0.5, inner_radius * 0.62
 		)
@@ -127,6 +144,22 @@ func get_count_text() -> String:
 
 func get_marker_radius() -> float:
 	return _style.marker_radius if _style != null else 0.0
+
+
+## 仅切换悬浮白色描边；不改变标记尺寸、位置或点击区域。
+func set_hovered(value: bool) -> void:
+	if _hovered == value:
+		return
+	_hovered = value
+	queue_redraw()
+
+
+func is_hovered() -> bool:
+	return _hovered
+
+
+func get_marker_style() -> PartyMarkerStyle:
+	return _style
 
 
 func get_flag_texture_path() -> String:
@@ -197,21 +230,29 @@ func _create_flag_sprite() -> void:
 	_flag_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_flag_sprite.z_index = 1
 	# 等比缩放：取有效宽高中较大边，保持原始宽高比；再由圆形遮罩裁剪边缘。
+	var factor: float = 1.0
 	var longest_side: float = maxf(texture_size.x, texture_size.y)
 	if longest_side > 0.0:
-		var factor: float = _style.flag_max_size / longest_side
+		factor = _style.flag_max_size / longest_side
 		_flag_sprite.scale = Vector2(factor, factor)
 	if ResourceLoader.exists(CIRCLE_FLAG_SHADER_PATH):
 		var mask_shader := load(CIRCLE_FLAG_SHADER_PATH) as Shader
 		if mask_shader != null:
 			var mask_material := ShaderMaterial.new()
 			mask_material.shader = mask_shader
-			# 裁剪半径贴近边框内缘：旗帜允许大于内径，但不会盖住外圈边框。
+			# 在旗帜精灵的局部像素空间裁剪正圆：把图标主体中心换算到精灵局部坐标，
+			# 即使旗帜有垂直偏移也与圆形主体同心。
+			# 精灵缩放会把局部半径放大 factor 倍，因此先换算回局部单位；
+			# 这样遮罩与 draw_circle / draw_arc 共用同一世界半径基准，
+			# 不再依赖 AtlasTexture 的图集 UV 或旗帜宽高比。
+			var local_scale: float = maxf(0.0001, factor)
+			mask_material.set_shader_parameter("use_local_circle", true)
 			mask_material.set_shader_parameter(
-				"uv_radius", _style.get_flag_clip_uv_radius()
+				"circle_center", -_flag_sprite.position / local_scale
 			)
 			mask_material.set_shader_parameter(
-				"uv_aspect", texture_size.x / maxf(1.0, texture_size.y)
+				"circle_radius",
+				_style.get_flag_clip_radius() / local_scale
 			)
 			_flag_sprite.material = mask_material
 	add_child(_flag_sprite)

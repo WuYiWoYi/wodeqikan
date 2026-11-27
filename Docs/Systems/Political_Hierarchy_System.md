@@ -1,8 +1,8 @@
 # 贵族 / 家族 / 王国体系
 
-**状态：** 阶段 8 已交付
+**状态：** 阶段 8 已交付；2026-11-27 补全为六方势力（统治家族 + 附庸家族 + 民族）
 **相关代码：** `Scripts/Entities/Noble/`、`Scripts/Entities/House/`、`Scripts/Entities/Kingdom/`、`Scripts/Core/World/noble_manager.gd`、`house_manager.gd`、`kingdom_manager.gd`、`faction_manager.gd`、`world_initializer.gd`
-**存档：** Schema v5（`nobles` / `houses` / `kingdoms`，保留 `lords` 兼容副本）
+**存档：** Schema v10（政治字段自 v5 起为 `nobles` / `houses` / `kingdoms`，保留 `lords` 兼容副本；v10 追加 `people_name` 等可选字段）
 
 ---
 
@@ -66,7 +66,8 @@
 
 ## 5. 封地与征召
 
-- `SettlementData.owner_house_id` / `owner_noble_id` / `family_id` 表达所有权。
+- `SettlementData.owner_house_id` / `owner_noble_id` 表达政治所有权；`family_id` 只决定地点旗帜，不参与授权。
+- 初始世界只有 9 处地点有明确所有者：巴里、灰石堡垒、墨西西、北境村、伯克纳尼亚、伯克纳、奥林德斯堡、奥林、青禾村；其余地点无主。重建地图不按位置补写所有权。
 - 仅村庄可征召采邑。
 - `FiefRecruitmentManager.is_authorized_owner(settlement, lord_id)` 是唯一授权判断，条件：
   - `settlement.owner_noble_id == lord_id`，或
@@ -116,18 +117,25 @@
 - `HOUSE_*` 是政治实体 ID。
 - `HouseData.banner_id` 保存对应的 `FAMILY_*`。
 - 读档迁移通过 `banner_id` 把旧存档中的 `FAMILY_*` 解析为现有 `HOUSE_*`，避免重复创建家族。
+- 地点旗帜取自 `SettlementData.family_id`，政治归属取自 `owner_house_id` / `owner_noble_id`；两者可以不同。例：灰石堡垒旗帜为伯克纳家族（`FAMILY_BURKNANIA`），所有权属于巴里家族。
 - 新增家族时若不配置旗帜，关系解析会回退到阵营关系。
 
-## 8. 初始世界
+## 8. 初始世界（六方势力，2026-11-27）
 
-| 王国 | 统治家族 | 国王 | 附庸 | 封地 |
+| 王国 | 民族 | 统治家族 | 统治者 | 附庸家族 |
 |---|---|---|---|---|
-| 伯克纳尼亚王国 `KINGDOM_BURKNANIA` | `HOUSE_BURKNANIA` | 伯克纳国王 | 墨西西家族 | 伯克纳尼亚（城镇）、伯克纳（村庄）、墨西西两处 |
-| 奥林王国 `KINGDOM_OLIN` | `HOUSE_OLIN` | 奥林国王 | 巴里家族 | 奥林德斯堡（城堡）、奥林（村庄）、巴里两处 |
+| 伯克纳王国 `KINGDOM_BURKNANIA` | 多拉曼人 | `HOUSE_BURKNANIA` | 伯克纳国王 | 奥德斯特、埃克托、巴夫勒、巴里 |
+| 弗拉尼伯国 `KINGDOM_FRANI` | 布吉多人 | `HOUSE_FRANI` | 弗拉尼伯爵 | 丁达尼、康利亚、米奇奇 |
+| 瓦伊拉王国 `KINGDOM_VAILA` | 布吉多人 | `HOUSE_VAILA` | 瓦伊拉国王 | 无 |
+| 洛里亚克王国 `KINGDOM_LORIAK` | 洛里斯人 | `HOUSE_LORIAK` | 洛里亚克国王 | 奥林、墨西西、罗斯维克 |
+| 泰纳公国 `KINGDOM_TAINA` | 蒙卡人 | `HOUSE_TAINA` | 泰纳公爵 | 无 |
+| 瓦勒蒙联盟 `KINGDOM_VALEMON` | 蒙卡人 | `HOUSE_VALEMON` | 瓦勒蒙盟主 | 克里卡 |
 
-- 两王国处于战争状态。
+- 初始六方全部和平，`enemy_kingdom_ids` 为空；战争只由显式 `declare_war()` 产生，并传播到双方成员家族。
+- 当前共 18 个家族（17 个 NPC 家族 + 玩家家族）、18 名贵族（每 NPC 家族一名领袖 + 玩家贵族）、23 支部队。
+- 每个 NPC 家族恰好一名贵族、一支由该贵族指挥的家族骑士部队（`<简称>骑士`）；统治家族的领袖为国王/公爵/盟主，非统治家族领袖为 `<简称>领主`。
 - 玩家属于 `HOUSE_PLAYER`，骑士爵位，独立且中立。
-- 每个国王、普通贵族、家族领袖均拥有独立部队。
+- 旧世界确认的 9 处封地所有权保留；重建地图的位置、旗帜、民族与附庸名称不会自动生成封地、战争或外交关系。
 
 ## 9. 持久化
 
@@ -147,7 +155,7 @@ Schema v5 新增：
 ## 10. 未实现
 
 - 领地转让/继承。
-- 宣战/议和/停战与战争胜负。
+- 战争胜负结算与完整外交 UI；`KingdomManager.declare_war()` / `end_war()` 只切换敌对关系并传播到成员家族。
 - 附庸叛离、家族外交与关系 UI。
 - 玩家晋升爵位或成为国王的流程。
 - 绕过 `kill_noble()` 的外部修改不会触发选举。

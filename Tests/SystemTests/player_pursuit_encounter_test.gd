@@ -58,8 +58,9 @@ func _run() -> void:
 	_check(_player.focus_party_id == _bandit.party_id, "记录主动追击焦点")
 	_check(_player.current_order == PartyData.OrderType.FOLLOW_PARTY, "玩家进入持续跟随指令")
 
+	# 0.08 倍率下玩家 36 px/s、强盗 20 px/s，180 像素初始间距约需 12 个 tick。
 	var triggered: bool = false
-	for i: int in range(300):
+	for i: int in range(700):
 		_context.world_map_manager.update_party_movement(0.1)
 		if _context.encounter_manager.update_encounters():
 			triggered = true
@@ -350,8 +351,9 @@ func _test_pursuit_waits_for_post_battle_cooldown() -> void:
 		"商队战败后玩家继续追击强盗"
 	)
 
+	# 强盗原地等待，300 像素间距按玩家 12 px/s 约需 250 个 tick。
 	var triggered: bool = false
-	for i: int in range(240):
+	for i: int in range(500):
 		_context.world_map_manager.update_party_movement(0.1)
 		TimeManager.world_elapsed_seconds += 0.2
 		if _context.encounter_manager.update_encounters():

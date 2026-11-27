@@ -19,13 +19,13 @@ const MAX_TICKS_PER_FRAME: int = 10
 ## 游戏日历
 ## ---------------------------------------------------------------------------
 ## 世界累计秒数是唯一权威时间；年月日与时间段全部由它换算，各系统不得自行累计。
-## 1x 速度下：现实 6 秒 = 1 游戏小时，144 秒 = 1 游戏日。
+## 1x 速度下：现实 2 秒 = 1 游戏小时，48 秒 = 1 游戏日。
 const START_YEAR: int = 1103
 const START_MONTH: int = 1
 const START_DAY: int = 1
-const REAL_SECONDS_PER_GAME_HOUR: float = 6.0
-## 每 1 世界累计秒 = 10 游戏分钟（60 / 6）。
-const GAME_MINUTES_PER_ELAPSED_SECOND: float = 10.0
+const REAL_SECONDS_PER_GAME_HOUR: float = 2.0
+## 每 1 世界累计秒 = 30 游戏分钟（60 / 2）。
+const GAME_MINUTES_PER_ELAPSED_SECOND: float = 30.0
 const HOURS_PER_DAY: int = 24
 ## 本阶段采用简化历法：每月 30 天、每年 12 个月，便于后续统一调整。
 const DAYS_PER_MONTH: int = 30

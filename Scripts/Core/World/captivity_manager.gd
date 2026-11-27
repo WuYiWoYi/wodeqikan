@@ -14,7 +14,8 @@ extends RefCounted
 ## 不创建场景节点，也不处理 UI。
 
 const CONFIG_PATH: String = "res://Data/Combat/captivity_config.tres"
-const SECONDS_PER_GAME_HOUR: float = 6.0
+## 与 TimeManager.REAL_SECONDS_PER_GAME_HOUR 保持一致；1x 下 2 世界秒 = 1 游戏小时。
+const SECONDS_PER_GAME_HOUR: float = 2.0
 ## 逃脱落点与押送部队的最小距离，以及尝试半径。
 const ESCAPE_MIN_DISTANCE: float = 42.0
 const ESCAPE_PARTY_GAP: float = 30.0

@@ -56,6 +56,8 @@ func _run() -> void:
 		return
 
 	await _test_time_centered()
+	_test_top_info_icon_scale()
+	await _test_day_night_clock()
 	await _test_money_display_and_tooltip()
 	await _test_speed_display_and_tooltip()
 	await _test_troop_display_and_tooltip()
@@ -68,48 +70,79 @@ func _test_time_centered() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 	var time_label := _map.find_child("WorldTimeLabel", true, false) as Label
+	var clock := _map.find_child("DayNightClock", true, false) as Control
+	var top_bar := _map.find_child("TopBar", true, false) as Control
 	var left := _map.find_child("TopBarLeft", true, false) as Control
 	var right := _map.find_child("TopBarRight", true, false) as Control
-	_check(time_label != null and left != null and right != null, "顶栏左中右区域存在")
-	if time_label == null or left == null or right == null:
+	_check(
+		time_label != null and clock != null and top_bar != null
+			and left != null and right != null,
+		"顶栏左中右区域与昼夜窗口存在"
+	)
+	if time_label == null or clock == null or top_bar == null \
+			or left == null or right == null:
 		return
-	var center_x: float = time_label.get_global_rect().get_center().x
+	var clock_rect := clock.get_global_rect()
 	var viewport_center_x: float = _map.get_viewport_rect().size.x * 0.5
 	_check(
-		absf(center_x - viewport_center_x) <= 2.0,
-		"世界时间水平居中（%.1f vs %.1f）" % [center_x, viewport_center_x]
+		absf(clock_rect.size.x - clock_rect.size.y) <= 0.5,
+		"昼夜窗口为正方形（%.1f×%.1f）" % [clock_rect.size.x, clock_rect.size.y]
+	)
+	_check(
+		absf(clock_rect.get_center().x - viewport_center_x) <= 2.0,
+		"昼夜窗口位于顶栏水平中心（%.1f vs %.1f）" % [
+			clock_rect.get_center().x, viewport_center_x
+		]
+	)
+	_check(
+		clock_rect.position.y >= top_bar.get_global_rect().position.y - 0.5
+			and clock_rect.end.y <= top_bar.get_global_rect().end.y + 0.5,
+		"昼夜窗口完整位于顶栏内"
+	)
+	_check(clock.clip_contents, "昼夜窗口裁切超出遮罩的美术")
+	_check(
+		clock.texture_filter == CanvasItem.TEXTURE_FILTER_NEAREST,
+		"昼夜美术使用最近邻采样"
 	)
 	_check(
 		left.get_global_rect().end.x <= time_label.get_global_rect().position.x,
 		"左侧金币/移速不与世界时间重叠"
 	)
 	_check(
-		time_label.get_global_rect().end.x <= right.get_global_rect().position.x,
-		"世界时间不与右侧功能入口重叠"
+		time_label.get_global_rect().end.x <= clock_rect.position.x,
+		"世界时间位于昼夜窗口左侧且不重叠"
+	)
+	_check(
+		clock_rect.end.x <= right.get_global_rect().position.x,
+		"昼夜窗口不与右侧功能入口重叠"
 	)
 	_check(
 		left.get_global_rect().end.x <= right.get_global_rect().position.x,
 		"左侧信息与右侧入口不重叠"
 	)
 
-	# 1280 宽度：紧凑顶栏入口仍不挤压居中时间与左侧信息。
+	# 1280 宽度：紧凑顶栏入口仍不挤压居中窗口与左侧信息。
 	get_window().size = Vector2i(1280, 720)
 	await get_tree().process_frame
 	await get_tree().process_frame
-	var narrow_center: float = time_label.get_global_rect().get_center().x
+	clock_rect = clock.get_global_rect()
 	_check(
-		absf(narrow_center - _map.get_viewport_rect().size.x * 0.5) <= 2.0,
-		"1280 宽度下世界时间仍居中"
+		absf(
+			clock_rect.get_center().x - _map.get_viewport_rect().size.x * 0.5
+		) <= 2.0,
+		"1280 宽度下昼夜窗口仍居中"
 	)
 	_check(
 		left.get_global_rect().end.x <= time_label.get_global_rect().position.x,
 		"1280 宽度下左侧信息不与时间重叠"
 	)
 	_check(
-		time_label.get_global_rect().end.x <= right.get_global_rect().position.x,
-		"1280 宽度下时间不与右侧入口重叠（time end %.1f, right start %.1f）" % [
-			time_label.get_global_rect().end.x, right.get_global_rect().position.x
-		]
+		time_label.get_global_rect().end.x <= clock_rect.position.x,
+		"1280 宽度下时间不覆盖昼夜窗口"
+	)
+	_check(
+		clock_rect.end.x <= right.get_global_rect().position.x,
+		"1280 宽度下昼夜窗口不与右侧入口重叠"
 	)
 	_check(
 		right.get_global_rect().size.x >= 500.0,
@@ -118,6 +151,121 @@ func _test_time_centered() -> void:
 	get_window().size = Vector2i(1920, 1080)
 	await get_tree().process_frame
 	await get_tree().process_frame
+
+
+func _test_top_info_icon_scale() -> void:
+	var top_bar := _map.find_child("TopBar", true, false) as Control
+	for icon_name: String in [
+		"MoneyLabelIcon", "PartySpeedLabelIcon", "PartySizeLabelIcon"
+	]:
+		var icon := _map.find_child(icon_name, true, false) as TextureRect
+		_check(icon != null, "%s 存在" % icon_name)
+		if icon == null:
+			continue
+		_check(
+			icon.custom_minimum_size.is_equal_approx(Vector2(40.0, 40.0)),
+			"%s 美术尺寸为 40×40（放大 2 倍）" % icon_name
+		)
+		_check(
+			icon.size.x >= 40.0 and icon.size.y >= 40.0,
+			"%s 实际布局尺寸不小于 40×40" % icon_name
+		)
+		_check(
+			icon.stretch_mode == TextureRect.STRETCH_KEEP_ASPECT_CENTERED,
+			"%s 保持等比缩放" % icon_name
+		)
+		_check(
+			icon.texture_filter == CanvasItem.TEXTURE_FILTER_NEAREST,
+			"%s 保持最近邻采样" % icon_name
+		)
+		if top_bar != null:
+			_check(
+				top_bar.get_global_rect().encloses(icon.get_global_rect()),
+				"%s 完整位于顶栏内，不被裁切" % icon_name
+			)
+
+
+## 昼夜滚动只由世界时间换算：验证正午/黄昏/午夜/黎明、跨午夜连续、
+## 暂停停住、2 倍速同步与读档恢复后的位置。
+func _test_day_night_clock() -> void:
+	var clock := _map.find_child("DayNightClock", true, false) as Control
+	if clock == null:
+		return
+	var original_seconds: float = TimeManager.world_elapsed_seconds
+	var original_speed: float = TimeManager.get_base_world_speed()
+
+	# 暂停状态下逐点核对映射，避免测试等待期间时间推进影响精度。
+	TimeManager.set_base_world_speed(TimeManager.SPEED_PAUSED)
+	await _check_clock_at_hour(clock, 12.0, 0.0, "12:00 完整显示白天")
+	await _check_clock_at_hour(clock, 18.0, 24.0, "18:00 处于昼夜交接")
+	await _check_clock_at_hour(clock, 24.0, 48.0, "00:00 完整显示黑夜")
+	await _check_clock_at_hour(clock, 30.0, 72.0, "06:00 处于夜昼交接")
+	await _check_clock_at_hour(clock, 36.0, 0.0, "次日 12:00 回到白天")
+	await _check_clock_at_hour(clock, 23.5, 46.0, "午夜前滚动位置连续")
+	await _check_clock_at_hour(clock, 24.5, 50.0, "跨午夜后滚动位置连续")
+
+	# 暂停：世界时间不推进时偏移保持不变。
+	TimeManager.restore_world_time(
+		18.0 * TimeManager.REAL_SECONDS_PER_GAME_HOUR, TimeManager.SPEED_PAUSED
+	)
+	await get_tree().process_frame
+	var paused_offset: float = clock.get_texture_offset_pixels()
+	var paused_seconds: float = TimeManager.world_elapsed_seconds
+	await get_tree().create_timer(0.2).timeout
+	_check(
+		is_equal_approx(TimeManager.world_elapsed_seconds, paused_seconds)
+			and is_equal_approx(clock.get_texture_offset_pixels(), paused_offset),
+		"世界暂停时昼夜滚动停止"
+	)
+
+	# 2 倍速：偏移始终等于当前世界时间的换算值，没有独立累加误差。
+	TimeManager.restore_world_time(
+		12.0 * TimeManager.REAL_SECONDS_PER_GAME_HOUR, TimeManager.SPEED_DOUBLE
+	)
+	await get_tree().create_timer(0.2).timeout
+	var expected_phase: float = _expected_clock_phase(TimeManager.world_elapsed_seconds)
+	_check(
+		absf(clock.get_scroll_phase() - expected_phase) <= 0.002,
+		"2 倍速下昼夜位置与世界时间同步（%.4f vs %.4f）" % [
+			clock.get_scroll_phase(), expected_phase
+		]
+	)
+
+	# 读档：restore_world_time 走与读档相同的接口，位置立即刷新。
+	TimeManager.restore_world_time(
+		18.0 * TimeManager.REAL_SECONDS_PER_GAME_HOUR, TimeManager.SPEED_PAUSED
+	)
+	await get_tree().process_frame
+	_check(
+		absf(clock.get_texture_offset_pixels() - 24.0) <= 0.01,
+		"读档恢复时间后昼夜位置立即更新"
+	)
+
+	TimeManager.restore_world_time(original_seconds, original_speed)
+	TimeManager.clear_pauses()
+	await get_tree().process_frame
+
+
+func _check_clock_at_hour(
+	clock: Control, hour: float, expected_offset: float, message: String
+) -> void:
+	TimeManager.restore_world_time(
+		hour * TimeManager.REAL_SECONDS_PER_GAME_HOUR, TimeManager.SPEED_PAUSED
+	)
+	await get_tree().process_frame
+	_check(
+		absf(clock.get_texture_offset_pixels() - expected_offset) <= 0.01,
+		"%s（偏移 %.2f/%.2f）" % [
+			message, clock.get_texture_offset_pixels(), expected_offset
+		]
+	)
+
+
+func _expected_clock_phase(total_seconds: float) -> float:
+	var day_length: float = (
+		TimeManager.HOURS_PER_DAY * TimeManager.REAL_SECONDS_PER_GAME_HOUR
+	)
+	return fposmod(fposmod(total_seconds / day_length, 1.0) - 0.5, 1.0)
 
 
 func _test_money_display_and_tooltip() -> void:
@@ -397,7 +545,7 @@ func _expected_party_counts() -> Dictionary:
 func _test_building_panel_ui_permissions() -> void:
 	var targets: Array[SettlementData] = [
 		_find_settlement(WorldInitializer.BARI_VILLAGE_NAME),
-		_find_settlement("灰石城堡"),
+		_find_settlement("灰石堡垒"),
 		_find_settlement(WorldInitializer.BURKNANIA_TOWN_NAME),
 	]
 	for settlement: SettlementData in targets:

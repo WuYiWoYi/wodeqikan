@@ -8,7 +8,6 @@ const HOUSE_MOXIXI: String = "HOUSE_MOXIXI"
 const HOUSE_BURKNANIA: String = "HOUSE_BURKNANIA"
 const HOUSE_PLAYER: String = "HOUSE_PLAYER"
 const KINGDOM_BURKNANIA: String = "KINGDOM_BURKNANIA"
-const KINGDOM_OLIN: String = "KINGDOM_OLIN"
 
 var _failed: bool = false
 var _context: WorldContext = null
@@ -99,38 +98,28 @@ func _run() -> void:
 	_check(_title.text.contains("王国"), "点击王国分类进入条目列表")
 	_check(_back_button.visible, "条目列表显示返回按钮")
 	var kingdom_button := _find_button("EncyclopediaKingdom_%s" % KINGDOM_BURKNANIA)
-	_check(kingdom_button != null, "王国列表包含伯克纳尼亚王国")
+	_check(kingdom_button != null, "王国列表包含伯克纳王国")
 	if kingdom_button != null:
-		_check(kingdom_button.text.contains("伯克纳尼亚王国"), "王国名称来自数据")
+		_check(kingdom_button.text.contains("伯克纳王国"), "王国名称来自数据")
 		_check(kingdom_button.text.contains("伯克纳家族"), "统治家族来自数据")
 		_check(kingdom_button.text.contains("伯克纳国王"), "国王来自数据")
-		_check(kingdom_button.text.contains("附庸家族：1"), "附庸数量来自数据")
+		_check(kingdom_button.text.contains("附庸家族：4"), "附庸数量来自数据")
 		_check(kingdom_button.text.contains("封地：4"), "封地数量来自数据")
-		_check(kingdom_button.text.contains("交战中"), "战争状态来自数据")
-		_check(
-			kingdom_button.text.contains("奥林王国"),
-			"战争对象来自数据"
-		)
+		_check(kingdom_button.text.contains("和平"), "初始和平状态来自数据")
 
 	# 二级：王国详情。
 	await _click("EncyclopediaKingdom_%s" % KINGDOM_BURKNANIA)
-	_check(_title.text.contains("伯克纳尼亚王国"), "二级为王国详情")
+	_check(_title.text.contains("伯克纳王国"), "二级为王国详情")
 	_check(_subtitle_text().contains("二级：王国详情"), "王国详情标注二级")
 
-	var enemy_button := _find_button("EncyclopediaEnemyKingdom_%s" % KINGDOM_OLIN)
-	_check(enemy_button != null, "王国详情列出敌对王国")
-	_check(enemy_button != null and enemy_button.text.contains("奥林王国"), "敌对王国名称来自数据")
+	# 新世界六方势力初始互不宣战：敌对区块显示空状态，不生成跳转按钮。
+	_check(_list_has_text("敌对王国（0）"), "无战争时敌对王国为空")
+	_check(_list_has_text("没有敌对王国。"), "无战争时显示空状态")
 	_check(_list_has_text("敌对独立家族（0）"), "无敌对独立家族时显示空状态")
-
-	await _click("EncyclopediaEnemyKingdom_%s" % KINGDOM_OLIN)
-	_check(_title.text.contains("奥林王国"), "点击敌对王国跳转对应详情")
 	_check(
-		_find_button("EncyclopediaEnemyKingdom_%s" % KINGDOM_BURKNANIA) != null,
-		"敌对关系双向可跳转"
+		_find_button("EncyclopediaEnemyKingdom_KINGDOM_OLIN") == null,
+		"无战争时不生成敌对王国按钮"
 	)
-	_back_button.pressed.emit()
-	await get_tree().process_frame
-	_check(_title.text.contains("伯克纳尼亚王国"), "从敌对王国返回原王国详情")
 	_back_button.pressed.emit()
 	await get_tree().process_frame
 	_check(_title.text.contains("王国") and _back_button.visible, "从王国详情返回王国列表")
@@ -149,14 +138,11 @@ func _run() -> void:
 
 	await _click("EncyclopediaHouse_%s" % HOUSE_MOXIXI)
 	_check(_title.text.contains("墨西西家族"), "二级为家族详情")
-	_check(_subtitle_text().contains("所属王国：伯克纳尼亚王国"), "家族详情显示所属王国")
+	_check(_subtitle_text().contains("所属王国：洛里亚克王国"), "家族详情显示所属王国")
 	_check(_list_has_text("墨西西领主"), "家族详情列出贵族")
 	_check(_list_has_text("墨西西"), "家族详情列出封地")
-	_check(_list_has_text("敌对王国（1）"), "家族详情列出敌对王国")
-	_check(
-		_find_button("EncyclopediaEnemyKingdom_%s" % KINGDOM_OLIN) != null,
-		"家族敌对王国来自统一关系数据"
-	)
+	_check(_list_has_text("敌对王国（0）"), "初始无敌对王国")
+	_check(_list_has_text("没有敌对王国。"), "家族无敌对王国时显示空状态")
 	_back_button.pressed.emit()
 	await get_tree().process_frame
 
@@ -194,10 +180,8 @@ func _run() -> void:
 	await _click("EncyclopediaCategory_Houses")
 	await _click("EncyclopediaHouse_%s" % HOUSE_BURKNANIA)
 	_check(_title.text.contains("伯克纳家族"), "进入统治家族详情")
-	var lord := _context.noble_manager.get_noble_by_party_id(
-		_find_party_id(WorldInitializer.BURKNANIA_KNIGHT_PARTY_NAME)
-	)
-	_check(lord != null, "找到伯克纳普通贵族")
+	var lord := _context.house_manager.get_house_leader(HOUSE_BURKNANIA)
+	_check(lord != null, "找到伯克纳家族领袖")
 	if lord != null:
 		_check(_context.noble_manager.kill_noble(lord.lord_id), "贵族死亡写入数据")
 		await get_tree().process_frame
@@ -262,13 +246,6 @@ func _find_settlement_id(display_name: String) -> String:
 	for settlement: SettlementData in _context.settlement_manager.get_all_settlements():
 		if settlement.display_name == display_name:
 			return settlement.settlement_id
-	return ""
-
-
-func _find_party_id(party_name: String) -> String:
-	for party: PartyData in _context.party_manager.get_all_parties():
-		if party.party_name == party_name:
-			return party.party_id
 	return ""
 
 

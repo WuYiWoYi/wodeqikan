@@ -543,7 +543,7 @@ BattleScene (Node2D)
 - `start_battle(..., offscreen = true)` 不压入 `battle` 暂停，世界继续推进。
 - `WorldSimulation.on_world_tick` 调用 `BattleManager.tick(delta)`；它先复制全部有效战斗快照，再逐场推进。
 - 每场离屏战斗各自累计世界时间，满 1 个游戏小时
-  （`OffscreenBattleConfig.settlement_interval_world_seconds = 6` 世界秒）后执行一次伤亡结算。
+  （`OffscreenBattleConfig.settlement_interval_world_seconds = 2` 世界秒）后执行一次伤亡结算。
 - 只有 `offscreen == true` 的战斗会推进小时结算；屏幕战斗期间世界暂停，其结算由 BattleScene 驱动。
 - 某场战斗结束并删除后，本次 tick 继续处理其他战斗，不提前退出。
 - 每场离屏战斗拥有独立 `OffscreenBattleResolver` 与随机序列；一场战斗的创建、结算或结束不会改变其他战斗的随机状态。固定 `random_seed` 时仍可稳定复现。

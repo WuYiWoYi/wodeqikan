@@ -9,16 +9,27 @@ const ARRIVAL_RADIUS: float = 2.0
 ## 大地图实际移动速度倍率。所有部队都经过 update_party_movement 的统一入口，
 ## 因此只在这里乘一次；PartyData.movement_speed 仍保存原始基础速度，
 ## 小地图/战斗移动完全不受影响。
-const WORLD_MAP_SPEED_SCALE: float = 0.5
+##
+## 0.08 来自地图时间标定：参考图中最近的两个地点相距 86.2 像素，
+## 换算为世界坐标 431 像素；玩家基础速度 150，6 游戏小时 = 36 世界秒，
+## 因此 150 × 36 × scale ≈ 431 → scale ≈ 0.08。
+const WORLD_MAP_SPEED_SCALE: float = 0.08
 ## 跟随目标位置的刷新间隔（世界秒），避免每个 tick 都重新寻路。
 const FOLLOW_REFRESH_INTERVAL: float = 0.5
 ## 与跟随目标距离小于该值视为追上，结束跟随。
 const FOLLOW_COMPLETE_RADIUS: float = 14.0
+## 跟随目标移动超过该距离才重新寻路，避免原地抖动时反复计算 A*。
+const PATH_REFRESH_DISTANCE: float = 32.0
 
 var world_bounds: Rect2 = Rect2()
+## 绑定时启用边界/湖泊/山脉寻路；旧存档或手动构造的测试世界保持直线移动。
+var terrain: WorldTerrain = null
 var _party_manager: PartyManager = null
 var _vision_manager: VisionManager = null
 var _follow_timer: float = 0.0
+## party_id → {points: PackedVector2Array, index: int, goal: Vector2}
+## 路径是移动过程的临时状态，不写入 PartyData，也不进入存档。
+var _party_paths: Dictionary = {}
 
 
 func setup(party_manager: PartyManager, vision_manager: VisionManager = null) -> void:
@@ -28,6 +39,12 @@ func setup(party_manager: PartyManager, vision_manager: VisionManager = null) ->
 
 func bind_vision(vision_manager: VisionManager) -> void:
 	_vision_manager = vision_manager
+
+
+## 由 WorldContext 在新世界尺寸与地图定义匹配时装配；传 null 表示回退到直线移动。
+func bind_terrain(value: WorldTerrain) -> void:
+	terrain = value if value != null and value.is_valid() else null
+	_party_paths.clear()
 
 
 func set_party_target(party_id: String, target: Vector2) -> bool:
@@ -43,6 +60,7 @@ func set_party_target(party_id: String, target: Vector2) -> bool:
 	party.target_position = _clamp_to_world(target)
 	party.current_order = PartyData.OrderType.MOVE
 	party.movement_state = PartyData.MovementState.MOVING
+	_party_paths.erase(party.party_id)
 	return true
 
 
@@ -67,6 +85,7 @@ func set_party_follow(follower_id: String, target_id: String) -> bool:
 	follower.current_target_id = target_id
 	follower.target_position = _clamp_to_world(target.world_position)
 	follower.movement_state = PartyData.MovementState.MOVING
+	_party_paths.erase(follower.party_id)
 	return true
 
 
@@ -99,6 +118,10 @@ func update_party_movement(fixed_delta: float) -> void:
 		if party.movement_speed <= 0.0:
 			continue
 
+		if terrain != null:
+			_update_party_with_terrain(party, fixed_delta)
+			continue
+
 		var to_target: Vector2 = party.target_position - party.world_position
 		var distance: float = to_target.length()
 		if distance <= ARRIVAL_RADIUS:
@@ -124,8 +147,100 @@ func update_party_movement(fixed_delta: float) -> void:
 		EventBus.party_position_changed.emit(party.party_id)
 
 
+## 地形模式：沿 A* 折线逐段移动；直线可通行时折线只有首尾两点，
+## 与旧版直线移动完全一致，避免为无障碍路段引入额外抖动。
+func _update_party_with_terrain(party: PartyData, fixed_delta: float) -> void:
+	var goal: Vector2 = party.target_position
+	var entry_value: Variant = _party_paths.get(party.party_id)
+	var needs_path: bool = not (entry_value is Dictionary)
+	if not needs_path:
+		var entry_snapshot: Dictionary = entry_value
+		var entry_goal: Vector2 = entry_snapshot.get("goal", goal)
+		if entry_goal.distance_to(goal) > PATH_REFRESH_DISTANCE:
+			needs_path = true
+		var entry_points: PackedVector2Array = entry_snapshot.get(
+			"points", PackedVector2Array()
+		)
+		if int(entry_snapshot.get("index", 0)) >= entry_points.size():
+			needs_path = true
+	if needs_path and not _assign_path(party, goal):
+		# 没有可通行路线（例如目标位于湖心且无法靠近）：原地停下，
+		# 绝不退化为穿山直线。
+		party.target_position = party.world_position
+		party.movement_state = PartyData.MovementState.IDLE
+		party.current_order = PartyData.OrderType.NONE
+		_party_paths.erase(party.party_id)
+		EventBus.party_position_changed.emit(party.party_id)
+		return
+
+	var entry: Dictionary = _party_paths.get(party.party_id)
+	if entry.is_empty():
+		return
+	var points: PackedVector2Array = entry.get("points", PackedVector2Array())
+	var index: int = int(entry.get("index", 0))
+	var remaining: float = get_effective_movement_speed(party) * fixed_delta
+	var moved: bool = false
+	while remaining > 0.0 and index < points.size():
+		var waypoint: Vector2 = points[index]
+		var offset: Vector2 = waypoint - party.world_position
+		var distance: float = offset.length()
+		if distance <= ARRIVAL_RADIUS:
+			party.world_position = waypoint
+			index += 1
+			continue
+		var step: float = minf(remaining, distance)
+		party.world_position = _clamp_to_world(
+			party.world_position + offset.normalized() * step
+		)
+		remaining -= step
+		moved = true
+		if distance - step <= ARRIVAL_RADIUS:
+			party.world_position = waypoint
+			index += 1
+	entry["index"] = index
+	if moved:
+		EventBus.party_position_changed.emit(party.party_id)
+
+	if index >= points.size():
+		_finish_terrain_arrival(party)
+
+
+func _assign_path(party: PartyData, goal: Vector2) -> bool:
+	if terrain == null or party == null:
+		return false
+	if not terrain.is_passable(party.world_position):
+		party.world_position = terrain.nearest_passable_point(party.world_position)
+	var path: PackedVector2Array = terrain.find_path(party.world_position, goal)
+	if path.size() < 2:
+		_party_paths.erase(party.party_id)
+		return false
+	# path[0] 是当前（或收敛后的）位置；从下一个点开始走。
+	_party_paths[party.party_id] = {
+		"points": path,
+		"index": 1,
+		"goal": goal,
+	}
+	return true
+
+
+func _finish_terrain_arrival(party: PartyData) -> void:
+	_party_paths.erase(party.party_id)
+	if party.current_order == PartyData.OrderType.FOLLOW_PARTY:
+		if _refresh_follow_party(party):
+			EventBus.party_position_changed.emit(party.party_id)
+			return
+		party.movement_state = PartyData.MovementState.IDLE
+	else:
+		party.movement_state = PartyData.MovementState.IDLE
+		party.current_order = PartyData.OrderType.NONE
+	party.target_position = party.world_position
+	EventBus.party_position_changed.emit(party.party_id)
+	# 只在真正到达当前目标时广播；跟随目标移动导致的重新寻路不广播。
+	EventBus.party_arrived.emit(party.party_id)
+
+
 ## 大地图实际速度（含统一倍率）。仅用于移动计算与测试展示；
-## 不改写 PartyData.movement_speed，避免重复乘 0.5。
+## 不改写 PartyData.movement_speed，避免重复乘系数。
 func get_effective_movement_speed(party: PartyData) -> float:
 	if party == null:
 		return 0.0
@@ -149,7 +264,7 @@ func get_movement_speed_breakdown(party: PartyData) -> Dictionary:
 		{
 			"label": "大地图移动系数",
 			"value": WORLD_MAP_SPEED_SCALE,
-			"display": "×%.1f" % WORLD_MAP_SPEED_SCALE,
+			"display": "×%.2f" % WORLD_MAP_SPEED_SCALE,
 		},
 	]
 	return {
@@ -173,6 +288,7 @@ func stop_party(party_id: String) -> bool:
 	party.attack_intent = false
 	party.battle_response_id = ""
 	party.battle_response_until = 0.0
+	_party_paths.erase(party_id)
 	return true
 
 
@@ -229,9 +345,15 @@ func _clear_follow(party: PartyData) -> void:
 	party.movement_state = PartyData.MovementState.IDLE
 	party.current_order = PartyData.OrderType.NONE
 	party.current_target_id = ""
+	_party_paths.erase(party.party_id)
 
 
+## 边界收敛：新地图使用真实边界/湖泊/山脉；旧存档或测试世界仍用矩形范围。
 func _clamp_to_world(position: Vector2) -> Vector2:
+	if terrain != null:
+		if terrain.is_passable(position):
+			return position
+		return terrain.nearest_passable_point(position)
 	if world_bounds.size == Vector2.ZERO:
 		return position
 	var clamped := position

@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="FamilyConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/family_config.gd" id="1_familyconfig"]
+
+[resource]
+script = ExtResource("1_familyconfig")
+family_id = "FAMILY_BAFLE"
+display_name = "巴夫勒家族"
+primary_color = Color(0.38, 0.63, 0.25, 1)
+secondary_color = Color(0.25, 0.25, 0.75, 1)
+banner_texture_path = "res://art/正式人物美术/巴夫勒家族风格美术/巴夫勒旗帜16_16.png"
+tabard_primary_texture_path = "res://art/正式人物美术/巴夫勒家族风格美术/巴夫勒风格罩袍_主.png"
+tabard_secondary_texture_path = "res://art/正式人物美术/巴夫勒家族风格美术/巴夫勒风格罩袍_副.png"
+leader_plume_texture_path = "res://art/正式人物美术/巴夫勒家族风格美术/巴夫勒风格缨饰.png"
+spear_texture_path = "res://art/正式人物美术/巴夫勒家族风格美术/巴夫勒风格长矛.png"

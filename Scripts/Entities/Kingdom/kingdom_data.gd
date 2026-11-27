@@ -12,6 +12,8 @@ extends RefCounted
 
 var kingdom_id: String = ""
 var kingdom_name: String = ""
+## 主体民族名称（如“多拉曼人”）。只用于百科与叙事展示，不产生机制。
+var people_name: String = ""
 var ruling_house_id: String = ""
 var king_noble_id: String = ""
 var vassal_house_ids: Array[String] = []
@@ -43,6 +45,7 @@ func to_dict() -> Dictionary:
 	return {
 		"kingdom_id": kingdom_id,
 		"kingdom_name": kingdom_name,
+		"people_name": people_name,
 		"ruling_house_id": ruling_house_id,
 		"king_noble_id": king_noble_id,
 		"vassal_house_ids": vassal_house_ids.duplicate(),
@@ -56,6 +59,8 @@ static func from_dict(data: Dictionary) -> KingdomData:
 	var kingdom := KingdomData.new()
 	kingdom.kingdom_id = str(data.get("kingdom_id", ""))
 	kingdom.kingdom_name = str(data.get("kingdom_name", ""))
+	# 旧存档没有民族字段：保持为空，不伪造。
+	kingdom.people_name = str(data.get("people_name", ""))
 	kingdom.ruling_house_id = str(data.get("ruling_house_id", ""))
 	kingdom.king_noble_id = str(data.get("king_noble_id", ""))
 	kingdom.kingdom_color = Color.from_string(

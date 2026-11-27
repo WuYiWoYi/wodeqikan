@@ -3,7 +3,7 @@
 **所属层：** 玩法逻辑 / 表现
 **核心脚本：** `Scripts/Systems/WorldMap/world_map_manager.gd`、`Scripts/UI/WorldMap/world_map.gd`
 **场景：** `Scenes/WorldMap/world_map.tscn`
-**状态：** 基础移动、NPC 自主商队/巡逻/强盗/治安队、统一 Party 数据、恢复原尺寸的圆形部队标记、放大的村庄圆形标记与位于上方的固定屏幕名称、部队跟随、视野查询、地点交互与村庄入口、底部 NPC 遭遇对话（领袖头像/对白/动态选项）、遭遇原因与敌对追击禁离开、玩家追击接触、追逐焦点保护、人数图标与悬浮信息、日期/时间段 UI、按战斗 ID 独立的多战斗标记与多方战斗汇总、世界日志面板、封地信息与采邑征召入口、部队浮动提示、5000×3000 地图与城镇图标、百科入口、阶段 9 地点区域化布局与部队内部旗帜放大、阶段 13 地点家族旗帜与停留部队旗帜条、统一最终移动速度显示、玩家移动目标标记与动态虚线、右侧纵向事件框与可操作事件详情弹窗、家族入口与家族面板、冒险者招募浮动提示已实现
+**状态：** 基础移动、NPC 自主商队/巡逻/强盗/治安队、统一 Party 数据、恢复原尺寸的圆形部队标记、放大的村庄圆形标记与位于上方的固定屏幕名称、部队跟随、视野查询、地点交互与村庄入口、底部 NPC 遭遇对话（领袖头像/对白/动态选项）、遭遇原因与敌对追击禁离开、玩家追击接触、追逐焦点保护、人数图标与悬浮信息、日期/时间段 UI、顶栏昼夜滚动窗口、按战斗 ID 独立的多战斗标记与多方战斗汇总、世界日志面板、封地信息与采邑征召入口、部队浮动提示、`WorldMapDefinition` 驱动的 7780×6615 重建地图（不规则边界/湖泊/山脉/道路、绿陆/蓝海/深蓝湖地表配色）与城镇图标、百科入口、地点区域化布局与部队内部旗帜放大、阶段 13 地点家族旗帜与停留部队旗帜条、统一最终移动速度显示、玩家移动目标标记与动态虚线、右侧纵向事件框与可操作事件详情弹窗、家族入口与家族面板、冒险者招募浮动提示、顶栏信息图标 2 倍放大、部队黑色基础描边与部队/建筑悬浮白色描边已实现
 
 ---
 
@@ -13,7 +13,7 @@
 - 处理部队的目标设置、移动推进、跟随与到达判定。
 - 向表现层提供可读取的部队位置。
 
-不负责：图标节点、UI、战斗、AI 决策、视野关系判定（由 `VisionManager` 提供）、路径规划（初期）。
+不负责：图标节点、UI、战斗、AI 决策、视野关系判定（由 `VisionManager` 提供）、地形可通行性与路径求解（由 `WorldTerrain` 提供）。
 
 相关公共系统：
 
@@ -28,11 +28,14 @@
 |---|---|
 | 坐标系 | 2D 世界坐标，原点左上，+X 向右，+Y 向下 |
 | 位置字段 | `PartyData.world_position`、`target_position`，单位：像素 |
-| 速度 | `PartyData.movement_speed`，单位：像素 / 游戏秒 |
-| 地图边界 | `WorldMapManager.world_bounds: Rect2` |
-| 存档格式 | `Vector2` 序列化为 `[x, y]` |
+| 速度 | `PartyData.movement_speed`（原始速度）；有效移速 = 原始 × 0.08，单位：世界像素 / 游戏秒 |
+| 地图范围 | `WorldContext.world_size`；`WorldMapManager.world_bounds` 为同尺寸的矩形外框，仅用于传送/极端坐标兜底 |
+| 可通行区域 | `WorldTerrain`：不规则边界内、湖泊与山脉之外（含 6 像素安全边距） |
+| 存档格式 | `Vector2` 序列化为 `[x, y]`；`world_size` 随存档保存 |
 
-阶段 8 起世界地图固定为 5000×3000（原 3000×2000）。摄像机支持跟随、方向键平移和滚轮缩放（0.5x–2x）；缩放只改变表现层，数据坐标不变。1920×1080 下默认缩放为 1.5x；UI 位于 CanvasLayer，不受相机缩放影响。
+新世界尺寸为 7780×6615（`WorldContext.DEFAULT_WORLD_SIZE`），由 `Data/WorldMap/world_map_definition.tres` 的参考尺寸 1556×1323 按 `reference_scale = 5` 推导。地图几何、地点参考坐标、道路与山脉全部保存在该 Resource 中；`WorldMapDefinition` 只做参考坐标 → 世界坐标换算，不保存运行时状态。旧存档的 `world_size`（如 5000×3000）继续按存档值读取，尺寸与定义不一致时不启用新地形，回退为矩形边界与直线移动（见第 20 节）。
+
+摄像机支持跟随、方向键/WASD 平移和滚轮缩放（0.5x–2x）；缩放只改变表现层，数据坐标不变。1920×1080 下默认缩放为 1.5x；UI 位于 CanvasLayer，不受相机缩放影响。
 
 ## 3. 部队移动
 
@@ -52,14 +55,14 @@
 AI 部队由 `AIManager` 调用同一接口设置目标，不直接改字段：
 
 - 商队：`TRADE_ROUTE`，在巴里与墨西西之间往返；
-- 治安队：`GUARD`，无威胁时按四个固定巡逻点循环，发现强盗后追击/拦截；
+- 治安队：`GUARD`，无威胁时按围绕驻地的四个 `ai_patrol_points` 循环，发现强盗后追击/拦截；
 - 强盗：`BANDIT`，无目标时沿配置路线游荡，发现敌对目标后追击；
 - AI 每 1 世界秒决策一次；移动仍由 `WorldMapManager` 执行。
 
 ### 3.1.1 玩家速度、输入与跟随
 
-- 新游戏玩家部队移动速度：150 像素/游戏秒。
-- 治安队：120 像素/游戏秒；强盗：100；商队：80。速度关系为治安队 > 强盗 > 商队。
+- 新游戏玩家部队移动速度：原始 450，有效 36 世界像素/游戏秒（×0.08）。
+- 治安队：原始 300（有效 24）；强盗：250（有效 20）；商队：200（有效 16）。速度关系为治安队 > 强盗 > 商队。
 - 旧存档通过 `PartyData.movement_speed` 保留原速度，读档不会按新常量重置。
 - 顶部数字键 `1` / `2` / `3` 分别暂停 / 1x / 2x；小键盘不响应，echo 不重复触发。
 - UI 面板打开时快捷键和地图点击都被屏蔽；地图点击只经 `_unhandled_input`，UI 控件自行消费的点击不会落到地图。
@@ -137,11 +140,13 @@ set_party_follow(follower, target)
 ### 3.2 推进
 
 - 只有 `WorldSimulation.on_world_tick` 调用 `update_party_movement(fixed_delta)`。
-- 直线移动，不做寻路。
+- 已绑定 `WorldTerrain`（新地图）时沿 A* 折线逐段移动；直线本身可通行时折线只有首尾两点，表现与旧版直线移动一致。
+- 路径按 `PATH_REFRESH_DISTANCE = 32` 世界像素的终点变化重新求解；路径是运行时缓存，不进入存档。
+- 目标点位于湖泊/山脉/边界外时，先收敛到最近可通行点；完全无路可走时原地停止，绝不退化为穿山直线。
 - 到达阈值 2 像素；到达后精确对齐目标，置 `IDLE`，清理 `current_order`。
-- 每 tick 移动距离 = `movement_speed * fixed_delta`。
+- 每 tick 移动距离 = `get_effective_movement_speed(party) * fixed_delta`，即 `movement_speed * WORLD_MAP_SPEED_SCALE * fixed_delta`。
 - 大地图暂停或倍率变化时，tick 本身被 `TimeManager` 控制，移动逻辑不感知倍率。
-- 目标点和每 tick 的下一位置都经过地图边界 clamp。
+- 未绑定地形的旧存档/测试世界保持直线移动，目标点和每 tick 的下一位置经过矩形 `world_bounds` clamp。
 
 ### 3.3 玩家操作与摄像机
 
@@ -195,6 +200,7 @@ WorldSimulation 更新 PartyData.world_position
 - 成员构成按“兵种 + 骑乘状态”合并计数，例如“骑马职业步兵（3）”“民兵（3）”；
 - 玩家角色单独显示为“玩家角色（1）”；
 - 鼠标离开图标后关闭；
+- 悬浮部队或建筑时同时显示白色描边，见 11.6；
 - 面板及子控件 `mouse_filter = IGNORE`，不拦截地图点击、移动或时间按钮；
 - 面板打开期间如果弹出保存/地点/部队等模态 UI，悬浮面板自动隐藏；
 - 成员构成变化时通过轻量签名比较刷新，不在每帧重建节点。
@@ -233,8 +239,23 @@ WorldSimulation 更新 PartyData.world_position
 
 - 顶栏只显示年月日 + 时间段，不显示小时/分钟，例如“世界时间：1103 年 1 月 1 日 深夜”。
 - 时间段文字来自 `TimeManager.get_time_period()`；具体区间集中配置。
-- 世界时间始终位于顶栏水平中心；金币与移速在左侧独立显示，见 18.1–18.3。
+- 顶栏水平中心是昼夜窗口 `DayNightClock`；世界时间文本紧贴其左侧显示，金币与移速在左侧独立显示，见 18.1–18.3。
 - 倍率仍显示暂停 / 1x / 2x。
+
+### 4.5 顶栏昼夜窗口
+
+- 组件：`Scripts/UI/WorldMap/day_night_clock.gd`，在 `world_map.gd::_build_top_bar()` 中创建为 `DayNightClock`。
+- 美术：直接复用 `UI_昼夜.png`（96×48，左半 48×48 白天、右半 48×48 黑夜），不修改原始文件。
+- 遮罩：`Control` 正方形窗口，边长 36（顶栏 48 高、上下边距 6 后的内容高度），`clip_contents = true` 裁切越界美术；美术按 48→36 等比缩放，不拉伸变形，最近邻采样。
+- 循环：以 96 像素为周期重复绘制纹理；相位 0~1 时最多两份即可覆盖窗口，离开左侧的美术从右侧立即接续，无空白与跳变。
+- 时间映射：相位 = `fposmod(世界累计秒 / 48 - 0.5, 1)`（1x 下 48 世界秒 = 1 游戏日），等价于一天中从正午起算的比例。
+  - 12:00 → 纹理偏移 0，完整白天；
+  - 18:00 → 偏移 24，昼夜交接；
+  - 次日 00:00 → 偏移 48，完整黑夜；
+  - 06:00 → 偏移 72，夜昼交接；
+  - 次日 12:00 → 偏移 96 折回 0，循环闭合。
+- 驱动：`_update_time_ui()` 在 `world_time_changed` / `world_speed_changed` 时调用 `DayNightClock.set_world_seconds(TimeManager.world_elapsed_seconds)`；不逐帧累加、不使用现实时间计时器。暂停时世界累计秒不变，窗口自然停住；倍速与读档由同一值直接换算。
+- 测试接口：`get_scroll_phase()`、`get_texture_offset_pixels()`，供 `main_map_info_test` 校验各时刻、跨午夜、暂停、倍速与读档位置。
 
 ## 5. 地点交互（Milestone 1，阶段 7 修订）
 
@@ -442,20 +463,21 @@ WorldSimulation 更新 PartyData.world_position
 
 ## 8. 扩展方向
 
-- 路径规划与寻路网格。
-- 地形速度系数、道路加成、河流/山脉阻挡。
-- 地图边界形状（非矩形）。
-- 镜头滚动与缩放。
+- 地形速度系数与道路加成（当前道路只影响绘制，不改变移动速度）。
 - 多选部队与军团移动。
 - 视野遮挡与探测。
+- 动态地形或可破坏障碍。
 
 ## 9. 实现状态
 
 | 项 | 状态 |
 |---|---|
-| `world_bounds` 与目标 clamp | 已实现 |
+| `world_bounds` 与目标 clamp | 已实现（矩形兜底；新地图实际由 `WorldTerrain` 约束） |
 | `set_party_target` | 已实现 |
-| `update_party_movement` | 已实现（直线/到达/边界） |
+| `update_party_movement` | 已实现（A* 折线/到达/不可通行收敛） |
+| 不规则地图边界、湖泊、山脉不可通行 | 已实现（`WorldTerrain`，玩家与 NPC 共用） |
+| 显式灰色虚线道路 | 已实现（`WorldMapDefinition.roads`，绘制时经 A* 绕行） |
+| 旧存档矩形地图兼容 | 已实现（尺寸不匹配时回退直线移动与旧绘制） |
 | `stop_party` | 已实现 |
 | `update_visibility` | 保留空实现；实际查询由 `VisionManager` 提供 |
 | NPC 商队往返 / 治安队巡逻 | 已实现（AIManager） |
@@ -465,7 +487,7 @@ WorldSimulation 更新 PartyData.world_position
 | 统一 AI 遭遇判定 | 已实现（`EncounterManager`，距离 50，攻击意图） |
 | 遭遇原因与选项规则 | 已实现（ENEMY_PURSUIT 不允许离开；PLAYER_INITIATED 保留离开） |
 | 玩家被主动拦截遭遇对话 | 已实现（`encounter_dialogue`，底部对白 + 动态选项） |
-| 统一圆形部队标记 | 已实现（所有部队共用 PartyIcon/PartyMarkerStyle/圆形旗帜遮罩，恢复原尺寸 18/30） |
+| 统一圆形部队标记 | 已实现（所有部队共用 PartyIcon/PartyMarkerStyle/圆形旗帜遮罩，半径 18、旗帜最大边长 48） |
 | 村庄圆形标记与名称 | 已实现（村庄单独放大 32/76，城堡不变；名称固定在标记正上方） |
 | AI 对 AI 离屏战斗 | 已实现（每游戏小时结算伤亡，最多 48 小时） |
 | 玩家追击同向移动敌军 | 已实现（`focus_party_id` 作为追击意图，接触后立即停止） |
@@ -502,7 +524,7 @@ WorldSimulation 更新 PartyData.world_position
 - 战斗交互面板是否扩展“观察/离开并继续移动”等选项。
 - 遭遇对话是否继续扩展谈判/缴赎等选项（当前为战斗 + 按原因动态生成的离开选项；ENEMY_PURSUIT 不允许离开）。
 - 地点到达是否需要在移动中途显示目标高亮或路径指示（当前只显示普通移动）。
-- 路径规划、地形阻挡与道路加成的具体规则。
+- 道路是否应提供移动速度加成（当前只影响绘制与路线观感）。
 
 ## 11. 圆形部队标记、村庄标记与统一速度（阶段 6 新增）
 
@@ -510,10 +532,12 @@ WorldSimulation 更新 PartyData.world_position
 
 - `PartyIcon` 是所有部队类型唯一的圆形标记组件：圆形底盘、边框、旗帜、下方人数。
 - 尺寸、边框、旗帜最大边长、人数偏移与阵营回退色集中在 `PartyMarkerStyle`（`Data/WorldMap/party_marker_style.tres`）。
-- 标准半径 18、边框 2、旗帜最大边长 38、人数偏移 24；圆形底盘与人数偏移保持原尺寸，阶段 9 仅放大内部旗帜（见 14.2）。
+- 标准半径 18、边框 2、旗帜最大边长 48（阶段 6 为 30，阶段 9 放大到 38，后续调到 44、52、60，最终调回 48）、人数偏移 24；圆形底盘与人数偏移保持原尺寸。
 - 旗帜来自 `PartyData.banner_texture_path`，为空时回退 `FamilyConfig.banner_texture_path`；无家族色时按阵营读取回退色。
-- `map_flag_circle.gdshader` 的 `uv_radius` 仍按实际半径计算；未来单独调整部队标记时无需改绘制代码。
+- 旗帜遮罩半径 = `PartyMarkerStyle.get_flag_clip_radius()` = 黑色描边内缘（`get_outline_outer_radius() - outline_width`，当前 16.25）；`PartyIcon` 将其除以旗帜精灵缩放后交给 shader 的局部像素正圆模式。旗帜因此填满圆内有效区域，但任何放大都不会盖住黑色描边。
 - 玩家、家族、商队、强盗、治安队使用同一节点与同一套绘制逻辑；玩家标记额外显示外圈高亮。
+- 基础黑色描边由 `PartyMarkerStyle.outline_color/outline_width` 控制（当前黑色 / 2.5）：外缘锁定为加粗前位置 `get_outline_outer_radius() = marker_radius + 0.75 = 18.75`，加粗部分全部向圆内扩展（内缘 16.25）；不改变标记最外侧轮廓、整体视觉尺寸、地图位置、点击或悬浮判定。
+- 悬浮白色描边由 `hover_outline_*` 控制（当前白色 / 3.0，位于基础描边外侧 4.0）；悬浮时与黑色基础描边同时保留，由 `WorldMap._update_hover_outline()` 统一切换。
 - 人数徽标与悬浮面板逻辑保持不变；图标仍不显示部队名称。
 
 ### 11.2 村庄圆形标记（放大）
@@ -533,19 +557,36 @@ WorldSimulation 更新 PartyData.world_position
 - 每个标签按 `SettlementData.settlement_id` 独立创建；同名村庄不会合并。
 - 名称标签完全不拦截鼠标，不影响地图点击、地点点击或部队悬浮。
 
-### 11.4 统一大地图速度倍率
+### 11.4 统一大地图速度倍率与移速基准
 
-- `WorldMapManager.WORLD_MAP_SPEED_SCALE = 0.5`。
-- 所有部队（玩家、商队、巡逻、强盗、家族骑士）都经过 `update_party_movement()`，在该唯一入口乘一次 0.5。
-- `PartyData.movement_speed` 继续保存原始基础速度，不写回、不重复减半。
+- `WorldMapManager.WORLD_MAP_SPEED_SCALE = 0.08`（2026-11-27 大地图重建后，配合放大 5 倍的世界坐标与行程标定；同日时间流速改为 1x 下 2 世界秒 = 1 游戏小时）。
+- 所有部队（玩家、商队、巡逻、强盗、家族骑士）都经过 `update_party_movement()`，在该唯一入口乘一次 0.08。
+- `PartyData.movement_speed` 保存原始基础速度，不写回、不重复缩放；有效移速 = 原始速度 × 0.08。
+- 2026-11-27 移速基准由 20 调整为 30：全体部队当前速度 ×1.5；NPC 原始速度统一 ×5/2（相对最初配置：商队 80→200、巡逻 120→300、强盗 100→250、家族骑士 110→275），相对差异与排序保持不变。
+- 玩家按需求单列：原始速度 300→450，有效移速 24→36，不参与 ×5/2 换算。
 - 小地图/战斗中的 `UnitData.move_speed` 与 `StatCalculator` 不受影响。
-- 旧存档部队读取原始速度后同样按统一倍率移动。
+- 旧存档部队读取原有 `movement_speed` 后按当前统一倍率移动，不按新常量重置。
 
 ### 11.5 新部队
 
-- 两支家族骑士：巴里骑士、墨西西骑士，`FACTION_LOCAL`，各自 `family_id`，专属巡逻点。
-- 两支新强盗：东路强盗、荒野强盗，沿用 BANDIT 阵营与 AI，拥有独立出生点与路线。
+- 每个 NPC 家族一支骑士部队（`<家族简称>骑士`，如巴里骑士、墨西西骑士、伯克纳骑士），由该家族领袖指挥；当前共 18 支。六方势力的统治者家族部队名称见 `Political_Hierarchy_System.md`。
+- 两支强盗：东路强盗、荒野强盗，沿用 BANDIT 阵营与 AI，拥有独立出生点与路线。
 - `WorldInitializer` 只在新游戏创建时生成；读档不调用初始化，不会重复生成。
+
+### 11.6 悬浮描边（部队与建筑）
+
+- 鼠标悬浮目标由 `WorldMap._update_hover_outline()` 每帧统一识别：先用 `_find_party_within(PARTY_HOVER_RADIUS = 30)`，无部队时再用 `_find_settlement_at()`（`SETTLEMENT_CLICK_RADIUS = 45`）；同一时刻最多高亮一个目标，部队优先于建筑。
+- 部队：`PartyIcon.set_hovered(true)` 只增加白色描边，不改变位置、尺寸、绘制层级或点击判定；基础黑色描边保留。
+- 建筑：`SettlementIcon.set_hovered(true)` 沿村庄/城镇/城堡原有几何边缘绘制 5 像素白色描边，再由建筑填充覆盖内侧一半；不改变名称标签、家族徽章、布局与点击进入功能。
+- 鼠标离开目标、打开模态 UI 或战斗切换时立即清除；描边使用世界坐标绘制，随地图缩放与移动自然同步。
+- 部队图标注册在 `_party_icons`，地点图标注册在 `_settlement_icons`；`_set_hover_outline()` 负责清除旧目标并设置新目标，避免多个无关目标同时高亮。
+
+### 11.7 圆形几何一致性与图集 UV 陷阱（2026-11-27 修复）
+
+- 圆形主体、黑色描边、玩家外圈与悬浮白色描边全部在 `PartyIcon` 的局部坐标中用 `draw_circle` / `draw_arc` 绘制；相机缩放由 `_set_camera_zoom()` 始终设置 `Vector2(z, z)`，`WorldEntities` 与图标节点没有附加缩放，因此 0.5x / 1x / 2x 下均保持正圆且同心。
+- 旗帜遮罩使用 `map_flag_circle.gdshader` 的 `use_local_circle` 模式：`vertex()` 通过 `varying vec2 local_position` 传入画布局部像素坐标，`fragment()` 按 `circle_center = (0, 0)` 与 `circle_radius = get_flag_clip_radius() / sprite.scale` 裁剪。遮罩与主体/描边共用同一圆心和半径基准，与旗帜宽高比、父节点缩放无关。
+- 根因：`TextureRegion.get_trimmed_texture()` 返回 `AtlasTexture`；canvas shader 的 `UV` 是**整张图集**坐标（实测旗帜图集归一化范围约 u=0.188–0.813、v=0.125–0.875），不是有效贴图的 0–1。旧实现直接按 `UV - 0.5` 计算圆形遮罩，把遮罩拉伸成椭圆并放大到约 52×43 世界像素，覆盖黑色描边并溢出圆形标记。修复后旗帜严格限制在半径 16.25 的正圆内。
+- shader 保留原 UV 模式（默认 `use_local_circle = false`）供地点家族徽章等既有调用；本次未修改建筑徽章（KI546）。
 
 ## 12. 地点原始美术、徽章名称组合与悬浮 Alt（阶段 6 后续）
 
@@ -582,9 +623,9 @@ WorldSimulation 更新 PartyData.world_position
 
 ### 13.1 地图与区域
 
-- `WorldContext.DEFAULT_WORLD_SIZE = Vector2(5000, 3000)`。
-- 阶段 8 新增伯克纳尼亚与奥林两个王国区域，阶段 9 重新聚类全部地点（见 14.1）。
-- `map_background.gd` 为每个地点绘制清空区，并绘制道路：青禾村通向两王国，各王国区域内部互相连通。
+- 当前 `WorldContext.DEFAULT_WORLD_SIZE = Vector2(7780, 6615)`；阶段 8 时期的 5000×3000 仅作为旧存档尺寸保留兼容。
+- 阶段 8 新增伯克纳尼亚与奥林两个王国区域，阶段 9 重新聚类全部地点；2026-11-27 大地图重建后，地点布局与势力范围以 `WorldMapDefinition` 为准（见第 20 节）。
+- 新地图由 `map_background.gd` 按定义绘制不规则边界、灰色虚线道路、湖泊与山脉；旧存档尺寸不匹配时继续绘制旧矩形草地、河流与道路。
 - 新地点与旧地点不重叠；所有地点 ID 唯一。
 
 ### 13.2 地点层级与所有权
@@ -615,7 +656,9 @@ WorldSimulation 更新 PartyData.world_position
 
 ### 14.1 地点布局
 
-阶段 9 只调整坐标与表现，不改变地点 ID、名称、类型、归属、家族、交互配置或村庄征召；世界尺寸仍为 5000×3000。
+> **已过时（2026-11-27）：** 本节的 5000×3000 世界与 9 个地点坐标已被大地图重建取代。当前世界尺寸、63 个地点坐标、道路与地形以 `Data/WorldMap/world_map_definition.tres` 为准，详见第 20 节。下表仅保留作阶段 9 历史记录，不再代表当前实现。
+
+阶段 9 只调整坐标与表现，不改变地点 ID、名称、类型、归属、家族、交互配置或村庄征召；当时世界尺寸为 5000×3000。
 
 | 区域 | 地点 | 坐标 |
 |---|---|---|
@@ -642,7 +685,7 @@ WorldSimulation 更新 PartyData.world_position
 
 - `PartyMarkerStyle.flag_max_size` 由 30 调整为 38；`marker_radius` 仍为 18，`border_width` 仍为 2。
 - 家族旗帜贴图为 48×48 画布，有效像素约 30×36；38 使等比缩放后的有效旗帜接近内圆（半径 16），同时保持原画布纵横比并居中。
-- 旗帜仍由 `map_flag_circle.gdshader` 圆形遮罩裁剪；`get_flag_clip_uv_radius()` 按实际半径计算，圆形底盘、边框、点击/悬浮区域、地图位置与移动动画均不变。
+- 旗帜仍由 `map_flag_circle.gdshader` 圆形遮罩裁剪（当前实现见 11.7）；圆形底盘、边框、点击/悬浮区域、地图位置与移动动画均不变。
 - 无旗帜纹理时的回退三角形仍限制在内圆内（半宽不超过 `inner_radius * 0.62`），不会因旗帜放大而越出圆形。
 
 ## 15. 行动悬浮、战斗摘要、自由镜头与攻击确认（阶段 10）
@@ -685,8 +728,9 @@ WorldSimulation 更新 PartyData.world_position
 
 ### 15.5 部队旗帜进一步放大
 
-- `PartyMarkerStyle.flag_max_size` 38 → 44；`marker_radius` 18、`border_width` 2 不变。
+- `PartyMarkerStyle.flag_max_size` 38 → 44 → 52 → 60 → 48（最终）；`marker_radius` 18、`border_width` 2 不变。当前值以 `Data/WorldMap/party_marker_style.tres` 为准。
 - 仍按贴图画布等比缩放并居中，圆形遮罩裁剪四角；点击/悬浮判定、人数显示与移动动画不变。
+- 旗帜遮罩改裁到黑色描边内缘（半径 16.25），黑色描边由 1.5 加粗到 2.5 且只向圆内扩展；描边外缘保持 18.75，标记最外侧轮廓与整体视觉尺寸不变。
 - 视觉可读性与边框比例需非 headless 人工验收（KI516）。
 
 ## 16. 地点家族旗帜与停留部队旗帜条（阶段 13）
@@ -737,9 +781,9 @@ WorldSimulation 更新 PartyData.world_position
 ### 18.1 顶栏布局
 
 - 顶栏内容分为 `TopBarLeft`、`TopBarCenter`、`TopBarRight` 三个锚定区域。
-- `WorldTimeLabel` 位于 `TopBarCenter` 并保持屏幕水平居中；左右区域新增内容不会推离中心。
+- `DayNightClock` 固定在顶栏精确水平中心（36×36）；`WorldTimeLabel` 位于 `TopBarCenter` 内、右对齐并紧贴昼夜窗口左侧，左右区域新增内容不会推离中心。
 - 左侧显示三个“图标 + 数值”条目：`MoneyLabel`（金币）、`PartySpeedLabel`（部队移速）、`PartySizeLabel`（部队人数），以及纯文本 `PlayerHpLabel`（当前控制角色的 `current_hp/max_hp`）；右侧保留暂停/1x/2x/事件/部队/家族/背包/百科/保存/主菜单。
-- 每个条目由 `<标签名>Entry` 容器、`<标签名>Icon` 与 `<标签名>` 数值标签组成，图标统一 20×20、字号 15、条目间距 12、图标与数值间距 4。
+- 每个条目由 `<标签名>Entry` 容器、`<标签名>Icon` 与 `<标签名>` 数值标签组成，图标统一 40×40（原 20×20 的 2 倍，等比缩放）、字号 15、条目间距 12、图标与数值间距 6；左侧区域加宽到 360，避免挤压时间与右侧入口。
 - 数值不再带“金币：/部队移速：/部队人数：”文字前缀，只显示数量。
 - 顶栏入口使用紧凑尺寸（52×30、字号 13），在 1280 宽度下不与中间时间区域重叠。
 - 视口宽度小于 1400 时，居中时间文本降到字号 11；时间与倍率文本保持完整。视口尺寸变化通过 `size_changed` 立即重排。
@@ -831,3 +875,61 @@ WorldSimulation 更新 PartyData.world_position
 - 被俘时玩家不能在大地图下达移动/攻击指令；`_has_open_modal()` 不因被俘面板而阻塞普通入口。
 - 部队/家族/背包/百科/事件中心等普通入口保持可用；时间按钮只在真正的模态面板打开时禁用。
 - 所有显示只读取 `CaptivityManager` 与实体数据，不在 UI 内结算恢复或逃脱。
+
+## 20. 大地图重建与地形寻路（2026-11-27）
+
+### 20.1 唯一数据源
+
+| 内容 | 位置 |
+|---|---|
+| 参考图尺寸与缩放 | `Data/WorldMap/world_map_definition.tres`：`reference_size = (1556, 1323)`、`reference_scale = 5.0` |
+| 世界尺寸 | `WorldMapDefinition.get_world_size()` = 7780×6615；`WorldContext.DEFAULT_WORLD_SIZE` 与之一致 |
+| 地点（63 个） | `settlements`：`key`、中文名、类型、参考像素坐标、视觉家族 |
+| 道路（46 条） | `roads`：只保存显式端点对；不自动补边 |
+| 不规则边界（46 点） | `boundary_points` |
+| 湖泊（11 点） | `lake_points` |
+| 山脉（5 座） | `mountains`：中心、长短半轴、旋转角 |
+| 时间标定 | `calibration_reference_distance = 86.2`、`calibration_travel_hours = 5.8`（1x 下 2 世界秒/游戏小时、移速基准 30）、`world_map_speed_scale = 0.08` |
+
+- 参考图像素坐标乘 `reference_scale` 得到世界坐标；`WorldMapDefinition` 只做换算，场景与运行时实体不保存参考图坐标。
+- 世界坐标画布足够容纳全部地点与标签；不再使用阶段 9 的 5000×3000 坐标表。
+- 63 个地点 = 38 村庄 + 8 城镇 + 17 城堡；地点 ID 由 `IdGenerator` 生成，存档持久化。
+
+### 20.2 地区构成
+
+- 地图按参考图分为西北、东北、中部、西南、东南与东南岛链等区域；六方势力分别为伯克纳王国、弗拉尼伯国、瓦伊拉王国、洛里亚克王国、泰纳公国与瓦勒蒙联盟。
+- 地点视觉旗帜由 `WorldMapDefinition.settlements[].family` → `FamilyConfig` 决定；政治所有权只由 `SettlementData.owner_house_id` / `owner_noble_id` 决定，两者刻意分离（例如灰石堡垒旗帜为伯克纳家族，所有权仍为巴里家族）。
+- 重建不从地图位置推断封地、战争或外交关系；只保留旧世界已确认的 9 处所有权，其余 54 处无主。
+
+### 20.3 地形与不可通行
+
+- `WorldTerrain` 用 40×40 世界像素的 `AStarGrid2D` 网格回答“是否可通行”和“两点折线路径”。
+- 不可通行：绿线边界外、湖泊内、山脉椭圆内；湖泊/山脉额外 6 像素安全边距。
+- 玩家与 NPC 共用 `WorldMapManager` + `WorldTerrain`，不存在只限制玩家的特判。
+- 目标落在不可通行区域时收敛到最近可通行点；没有可行路线时原地停止并清除移动状态，不退化为穿山直线。
+- 地图绘制 `map_background.gd` 只读定义：整块世界先铺蓝色海洋（`#5a8fae`），边界多边形填充草地绿（`#a8c483`）并绘制深绿海岸线；陆地网格纹理经多边形裁切，只出现在陆地内部；湖泊填充比海洋更深的蓝色（`#3c7396`）；道路为深灰虚线，山脉为灰色椭圆。道路绘制同样经 A* 绕行。
+- 海洋即 `WorldTerrain` 的边界外区域，湖泊即湖泊多边形，两者仍由既有地形判定限制通行；地表配色不参与、也不改变通行规则。
+
+### 20.4 道路与时间标定
+
+- 道路只来自 `roads` 的 46 条显式连接；59 个地点参与道路网络，青禾村、北境村、塞洛斯要塞与巴达洛斯要塞没有显式道路，保持参考图状态。
+- 最近地点对的世界距离约 415 像素；玩家实际速度 = 450 × 0.08 = 36 世界像素/游戏秒；1x 下 1 游戏小时 = 2 世界秒，因此约 5.8 游戏小时（现实约 11.5 秒）。移动速度未随时间流速调整。
+- 道路当前不提供速度加成，只作为地图连接与视觉依据。
+
+### 20.5 校验
+
+`Tests/SystemTests/world_map_layout_test.gd` 自动验证：
+
+- 世界尺寸 7780×6615、边界 ≥ 40 点、湖泊 ≥ 6 点、山脉 5 座、道路 46 条；
+- 63 个地点名称/坐标唯一，全部位于边界内且不在湖泊/山脉中，任意两点间距 ≥ 250 世界像素；
+- 边界外、湖泊中心、每座山脉中心均不可通行；目标收敛到可通行点；
+- 穿越山脉的路线会绕行且全程可通行，无障碍路线保持两点直线；
+- 最近地点对行程 5.77±0.6 游戏小时（现实约 11.5 秒），`WORLD_MAP_SPEED_SCALE == 0.08`；
+- 18 家族、6 王国、18 贵族、23 部队；六方势力名称/民族/统治家族/附庸正确且初始无战争；9 处所有权保留；
+- 地点引用到的家族旗帜资源存在，克里卡与伯克纳旗帜命名/引用正确。
+
+### 20.6 旧存档兼容
+
+- 读档以存档中的 `world_size` 为准；尺寸与当前定义不一致时不构建 `WorldTerrain`，`WorldMapManager` 回退为矩形 `world_bounds` clamp 与直线移动。
+- `map_background.gd` 在尺寸不匹配时继续绘制旧矩形草地、河流与道路，避免旧地点坐标与新地形错位。
+- 不重写旧存档的地点坐标、所有权或 `world_size`；迁移只在新开游戏时使用新定义。

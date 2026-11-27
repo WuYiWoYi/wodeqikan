@@ -122,18 +122,19 @@ Idle
 
 ### 3.2 商队往返
 
-- 路线由 `WorldInitializer` 在新建世界时写入 `oak_village.settlement_id` 与 `riverside_village.settlement_id`。
-- 新游戏时商队初始化在 `(900,1500)`，`ai_route_index = 0`；首次决策前往巴里 `(2600,2100)`，之后在巴里与墨西西 `(2500,700)` 之间持续往返（阶段 9 布局坐标）。
-- `AIManager` 通过 `SettlementManager.get_settlement(id)` 读取真实地点坐标，不使用数组下标或硬编码坐标。
+- 路线由 `WorldInitializer` 在新建世界时写入巴里与墨西西的 `settlement_id`（`["bari", "moxixi"]`）。
+- 商队初始化在巴里，`ai_route_index = 0`；首次决策前往下一个路线地点，之后在巴里与墨西西之间持续往返。
+- `AIManager` 通过 `SettlementManager.get_settlement(id)` 读取真实地点坐标（来自 `WorldMapDefinition`），不使用数组下标或硬编码坐标。
 - 两个地点之间持续循环，无额外等待。
 - 路线地点缺失时停止该部队的移动并输出警告。
 
 ### 3.3 巡逻循环
 
-- 巡逻点为 `AIManager.PATROL_POINTS`：
-  `(2200,500) → (2600,900) → (2400,1500) → (1900,1200) → (2200,500)`。
+- 新游戏的北境巡逻队在创建时写入围绕实际驻地的 4 个 `ai_patrol_points`（`_patrol_points_around()`，全部收敛到可通行区域）。
+- 家族骑士同样拥有围绕家族驻地的 4 个专属巡逻点；`AIManager` 优先读取 `party.ai_patrol_points`。
+- `AIManager.PATROL_POINTS` 只作为旧存档/无专属巡逻点部队的回退数组；新世界不再依赖其旧坐标。
 - 到达目标后按顺序前进，不随机改变目标。
-- 目标仍由 `WorldMapManager.set_party_target()` 进行地图边界限制。
+- 目标仍由 `WorldMapManager.set_party_target()` 进行边界限制；新地图再由 `WorldTerrain` 绕开湖泊/山脉。
 
 ### 3.4 职责边界
 
@@ -233,7 +234,7 @@ Idle
 
 ### 3.7 离屏战斗与第三方响应
 
-- NPC 对 NPC 战斗使用 `offscreen = true`：不暂停世界，每 1 个游戏小时（6 世界秒）结算一次伤亡，直到一方全灭、平局或达到 48 小时安全上限。
+- NPC 对 NPC 战斗使用 `offscreen = true`：不暂停世界，每 1 个游戏小时（2 世界秒）结算一次伤亡，直到一方全灭、平局或达到 48 小时安全上限。
 - 战斗期间参战部队锁定，其他 AI 仍正常决策。
 - 世界可同时存在多场 AI 离屏战斗，互不阻塞；一场战斗不会阻止其他位置发生新战斗。
 - 强盗/治安队会遍历全部有效离屏战斗，在 `BATTLE_APPROACH_RADIUS = 700` 内选择可加入且距离最近的一场接近；
@@ -404,7 +405,7 @@ AI 参数应可配置：
 
 - `PartyData.ai_patrol_points` 持久化每支部队的巡逻点数组。
 - `AIManager._update_patrol_party()` 优先使用部队专属路线；为空时回退全局 `PATROL_POINTS`。
-- 巴里骑士、墨西西骑士以 `PATROL` 类型围绕各自村庄巡逻，并由现有 `AIManager` 控制；不新增 NPC 管理 UI 或特殊地图逻辑。
+- 每个 NPC 家族一支 `<家族简称>骑士` 部队（当前 18 支），以 `PATROL` 类型围绕各自家族驻地巡逻，并由现有 `AIManager` 控制；不新增 NPC 管理 UI 或特殊地图逻辑。
 - 东路强盗、荒野强盗沿用 `BANDIT` AI，只通过独立 `ai_route_settlement_ids` 与出生点区分。
 - 家族不参与敌对判定：家族骑士属于 `FACTION_LOCAL`，与玩家中立；家族 `family_id` 仅由表现层读取。
 - 大地图速度倍率在 `WorldMapManager` 统一应用，AI 仍按原始 `movement_speed` 做速度关系比较。

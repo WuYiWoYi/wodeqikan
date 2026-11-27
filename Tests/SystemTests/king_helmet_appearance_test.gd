@@ -38,9 +38,10 @@ func _run() -> void:
 	if not _context.is_valid_world():
 		return
 
-	var king_party := _find_party(WorldInitializer.BURKNANIA_KING_PARTY_NAME)
-	var lord_party := _find_party(WorldInitializer.BURKNANIA_KNIGHT_PARTY_NAME)
-	var moxixi_party := _find_party(WorldInitializer.MOXIXI_KNIGHT_PARTY_NAME)
+	# 新世界每个家族只有一名领袖：统治家族“伯克纳骑士”由国王指挥；
+	# 巴里骑士是同王国的附庸贵族，可用来模拟统治家族更替。
+	var king_party := _find_party(WorldInitializer.BURKNANIA_KNIGHT_PARTY_NAME)
+	var lord_party := _find_party(WorldInitializer.BARI_KNIGHT_PARTY_NAME)
 	var king_unit := (
 		_context.party_manager.get_leader_unit(king_party.party_id)
 		if king_party != null else null
@@ -49,20 +50,16 @@ func _run() -> void:
 		_context.party_manager.get_leader_unit(lord_party.party_id)
 		if lord_party != null else null
 	)
-	var moxixi_unit := (
-		_context.party_manager.get_leader_unit(moxixi_party.party_id)
-		if moxixi_party != null else null
-	)
 	_check(
-		king_unit != null and lord_unit != null and moxixi_unit != null,
-		"找到国王、同家族贵族与另一家族领袖单位"
+		king_unit != null and lord_unit != null,
+		"找到国王与附庸贵族单位"
 	)
-	if king_unit == null or lord_unit == null or moxixi_unit == null:
+	if king_unit == null or lord_unit == null:
 		return
 
 	_test_initial_display(king_unit, lord_unit)
-	_test_identity_changes(king_unit, lord_unit)
-	_test_kingdom_and_ruling_house_changes(king_unit, moxixi_unit)
+	_test_identity_changes(king_unit)
+	_test_kingdom_and_ruling_house_changes(king_unit, lord_unit)
 	_test_no_helmet_no_override(king_unit)
 
 
@@ -99,12 +96,12 @@ func _test_initial_display(king_unit: UnitData, lord_unit: UnitData) -> void:
 	_check(
 		_helmet_resource_path(lord_visual) != KING_HELMET_PATH
 			and _helmet_resource_path(lord_visual).contains("头盔_3级"),
-		"同家族普通贵族仍使用普通头盔"
+		"同王国附庸贵族仍使用普通头盔"
 	)
 
 	var member_visual = null
 	for unit_id: String in _find_party(
-		WorldInitializer.BURKNANIA_KING_PARTY_NAME
+		WorldInitializer.BURKNANIA_KNIGHT_PARTY_NAME
 	).member_unit_ids:
 		if unit_id == king_unit.unit_id:
 			continue
@@ -138,30 +135,49 @@ func _test_initial_display(king_unit: UnitData, lord_unit: UnitData) -> void:
 	_free_visual(member_visual)
 
 
-func _test_identity_changes(king_unit: UnitData, lord_unit: UnitData) -> void:
+func _test_identity_changes(king_unit: UnitData) -> void:
 	var king_visual = _make_visual(king_unit)
-	var lord_visual = _make_visual(lord_unit)
 	_check(_helmet_resource_path(king_visual) == KING_HELMET_PATH, "更替前国王显示国王盔")
-	_check(_helmet_resource_path(lord_visual) != KING_HELMET_PATH, "更替前贵族显示普通头盔")
 
+	# 新世界每个家族只有一名领袖；测试临时创建同家族继承人，
+	# 只用于验证外观层对领袖更替的响应，不新增继承玩法。
 	var original_leader: String = _context.house_manager.get_house(
 		WorldInitializer.HOUSE_BURKNANIA_ID
 	).leader_noble_id
-	# 现任贵族是骑士，按当前规则不能成为国王；测试中临时提升爵位，
-	# 只用于验证外观层对身份变化的响应，不新增政治玩法。
-	var lord_noble := _context.noble_manager.get_noble(lord_unit.noble_id)
-	var original_rank: int = int(lord_noble.rank)
-	lord_noble.rank = NobleData.Rank.BARON as NobleData.Rank
+	var heir := _context.noble_manager.create_noble(
+		"伯克纳测试继承人",
+		king_unit.faction_id,
+		"",
+		WorldInitializer.HOUSE_BURKNANIA_ID,
+		NobleData.Rank.BARON,
+		false,
+		false
+	)
+	_check(heir != null, "创建临时家族继承人")
+	if heir == null:
+		_free_visual(king_visual)
+		return
+	var heir_unit := UnitData.new()
+	heir_unit.unit_id = "king_heir_unit"
+	heir_unit.noble_id = heir.lord_id
+	heir_unit.faction_id = king_unit.faction_id
+	heir_unit.appearance = king_unit.appearance.duplicate(true)
+	var heir_visual = _make_visual(heir_unit)
+	_check(
+		_helmet_resource_path(heir_visual) != KING_HELMET_PATH,
+		"更替前继承人显示普通头盔"
+	)
+
 	_check(
 		_context.house_manager.set_leader(
-			WorldInitializer.HOUSE_BURKNANIA_ID, lord_unit.noble_id
+			WorldInitializer.HOUSE_BURKNANIA_ID, heir.lord_id
 		),
 		"模拟统治家族领袖更替"
 	)
 
 	# 已存在的表现节点只需重建即可读取最新身份，不需要重新生成单位。
 	king_visual.rebuild()
-	lord_visual.rebuild()
+	heir_visual.rebuild()
 	_check(
 		_helmet_resource_path(king_visual) != KING_HELMET_PATH
 			and _helmet_resource_path(king_visual).contains("头盔_3级"),
@@ -172,11 +188,11 @@ func _test_identity_changes(king_unit: UnitData, lord_unit: UnitData) -> void:
 		"失去国王身份后恢复原头盔缨饰"
 	)
 	_check(
-		_helmet_resource_path(lord_visual) == KING_HELMET_PATH,
+		_helmet_resource_path(heir_visual) == KING_HELMET_PATH,
 		"新家族领袖自动切换为国王盔"
 	)
 	_check(
-		not lord_visual.has_part("Plume"),
+		not heir_visual.has_part("Plume"),
 		"新国王盔显示期间不出现普通缨饰"
 	)
 
@@ -188,18 +204,20 @@ func _test_identity_changes(king_unit: UnitData, lord_unit: UnitData) -> void:
 		"恢复初始家族领袖"
 	)
 	king_visual.rebuild()
-	lord_visual.rebuild()
+	heir_visual.rebuild()
 	_check(_helmet_resource_path(king_visual) == KING_HELMET_PATH, "恢复后国王再次显示国王盔")
 	_check(not king_visual.has_part("Plume"), "恢复国王身份后再次隐藏缨饰")
-	_check(_helmet_resource_path(lord_visual) != KING_HELMET_PATH, "恢复后贵族再次显示普通头盔")
-	lord_noble.rank = original_rank as NobleData.Rank
+	_check(
+		_helmet_resource_path(heir_visual) != KING_HELMET_PATH,
+		"恢复后继承人再次显示普通头盔"
+	)
 
 	_free_visual(king_visual)
-	_free_visual(lord_visual)
+	_free_visual(heir_visual)
 
 
 func _test_kingdom_and_ruling_house_changes(
-	king_unit: UnitData, moxixi_unit: UnitData
+	king_unit: UnitData, vassal_unit: UnitData
 ) -> void:
 	var kingdom := _context.kingdom_manager.get_kingdom(
 		WorldInitializer.KINGDOM_BURKNANIA_ID
@@ -207,18 +225,18 @@ func _test_kingdom_and_ruling_house_changes(
 	var house := _context.house_manager.get_house(
 		WorldInitializer.HOUSE_BURKNANIA_ID
 	)
-	_check(kingdom != null and house != null, "找到伯克纳尼亚王国与统治家族")
+	_check(kingdom != null and house != null, "找到伯克纳王国与统治家族")
 	if kingdom == null or house == null:
 		return
 
 	var king_noble := _context.noble_manager.get_noble(king_unit.noble_id)
-	var moxixi_noble := _context.noble_manager.get_noble(moxixi_unit.noble_id)
-	_check(king_noble != null and moxixi_noble != null, "找到王国与附庸家族领袖身份")
-	if king_noble == null or moxixi_noble == null:
+	var vassal_noble := _context.noble_manager.get_noble(vassal_unit.noble_id)
+	_check(king_noble != null and vassal_noble != null, "找到王国与附庸家族领袖身份")
+	if king_noble == null or vassal_noble == null:
 		return
 
 	var king_visual = _make_visual(king_unit)
-	var moxixi_visual = _make_visual(moxixi_unit)
+	var vassal_visual = _make_visual(vassal_unit)
 
 	var old_ruling_house: String = kingdom.ruling_house_id
 	var old_king_id: String = kingdom.king_noble_id
@@ -235,19 +253,19 @@ func _test_kingdom_and_ruling_house_changes(
 	king_visual.rebuild()
 	_check(_helmet_resource_path(king_visual) == KING_HELMET_PATH, "王国恢复后国王盔重新出现")
 
-	# 模拟统治家族变化：墨西西家族成为统治家族。
-	kingdom.ruling_house_id = WorldInitializer.HOUSE_MOXIXI_ID
-	kingdom.king_noble_id = moxixi_unit.noble_id
+	# 模拟统治家族变化：同王国的巴里家族成为统治家族。
+	kingdom.ruling_house_id = WorldInitializer.HOUSE_BARI_ID
+	kingdom.king_noble_id = vassal_unit.noble_id
 	king_noble.is_king = false
-	moxixi_noble.is_king = true
+	vassal_noble.is_king = true
 	king_visual.rebuild()
-	moxixi_visual.rebuild()
+	vassal_visual.rebuild()
 	_check(
 		_helmet_resource_path(king_visual) != KING_HELMET_PATH,
 		"失去统治家族地位后原领袖不再显示国王盔"
 	)
 	_check(
-		_helmet_resource_path(moxixi_visual) == KING_HELMET_PATH,
+		_helmet_resource_path(vassal_visual) == KING_HELMET_PATH,
 		"新统治家族领袖切换为国王盔"
 	)
 
@@ -256,17 +274,17 @@ func _test_kingdom_and_ruling_house_changes(
 	kingdom.king_noble_id = old_king_id
 	kingdom.is_active = old_active
 	king_noble.is_king = true
-	moxixi_noble.is_king = false
+	vassal_noble.is_king = false
 	king_visual.rebuild()
-	moxixi_visual.rebuild()
+	vassal_visual.rebuild()
 	_check(
 		_helmet_resource_path(king_visual) == KING_HELMET_PATH
-			and _helmet_resource_path(moxixi_visual) != KING_HELMET_PATH,
+			and _helmet_resource_path(vassal_visual) != KING_HELMET_PATH,
 		"恢复政治数据后头盔显示正确"
 	)
 
 	_free_visual(king_visual)
-	_free_visual(moxixi_visual)
+	_free_visual(vassal_visual)
 
 
 func _test_no_helmet_no_override(king_unit: UnitData) -> void:

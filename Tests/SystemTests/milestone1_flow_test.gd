@@ -54,7 +54,8 @@ func _run() -> void:
 	GameManager.world_context.world_map_manager.set_party_target(
 		player.party_id, start_position + Vector2(180.0, 0.0)
 	)
-	await get_tree().create_timer(0.45).timeout
+	# 大地图倍率为 0.08：450 × 0.08 = 36 像素/秒，0.7 秒约推进 8 个世界 tick。
+	await get_tree().create_timer(0.7).timeout
 	_check(player.world_position.distance_to(start_position) > 5.0, "1x 下玩家部队真实移动")
 	_check(TimeManager.world_elapsed_seconds > 0.0, "1x 下世界时间推进")
 	TimeManager.set_base_world_speed(TimeManager.SPEED_PAUSED)

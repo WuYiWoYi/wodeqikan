@@ -13,7 +13,8 @@ extends RefCounted
 ## 只修改 UnitData 的 HP/状态与“仅剩伤兵”部队的可行动标记，不处理补给或工资。
 
 const HEALING_CONFIG_PATH: String = "res://Data/Combat/healing_config.tres"
-const SECONDS_PER_GAME_HOUR: float = 6.0
+## 与 TimeManager.REAL_SECONDS_PER_GAME_HOUR 保持一致；1x 下 2 世界秒 = 1 游戏小时。
+const SECONDS_PER_GAME_HOUR: float = 2.0
 
 ## 上次完成治疗结算的游戏小时（从世界起点累计）。
 ## -1 表示尚未初始化：第一次 tick 只记录当前小时，不补发历史治疗。
