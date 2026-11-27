@@ -124,7 +124,7 @@ GameManager (Autoload)
 | `NobleManager` | `NobleData` 增删查、爵位/宗主/领袖/国王校验、独立部队绑定、领袖死亡选举 | 家族/王国聚合决策、UI |
 | `HouseManager` | `HouseData` 增删查、领袖/贵族/封地成员关系、家族按旗帜映射 | 王国战争决策、UI |
 | `KingdomManager` | `KingdomData` 增删查、统治家族/国王/附庸、敌对关系、战争传播 | 外交 UI、战役指挥 |
-| `FactionManager` | 阵营与政治身份的统一关系查询（敌对/友好/中立） | 修改家族/王国数据 |
+| `FactionManager` | 阵营与政治身份的统一关系查询（敌对/友好/中立）、玩家关系接口、玩家主动宣战记录与存档 | 修改家族/王国静态数据 |
 | `FiefRecruitmentManager` | 封地归属校验、采邑储备/补充、成组征召、资源成本、税收缓存 | UI、场景节点、世界日志 |
 | `AdventurerRecruitmentManager` | 村庄候选人池、刷新、按 tier 定价招募、离开清理 | UI、场景节点、AI |
 | `MercenaryManager` | 全局雇佣兵池、增长/流转/酒馆分配、玩家与 NPC 原子招募、雇佣兵身份写入 | UI、场景节点、战斗结算 |
@@ -338,6 +338,7 @@ Continue / Load Game
 | `party_position_changed` | `party_id` | `WorldMapManager` | 大地图图标 |
 | `party_arrived` | `party_id` | `WorldMapManager` | 大地图（只对玩家部队触发到达暂停） |
 | `party_battle_state_changed` | `party_id`, `battle_state` | `BattleManager` | 大地图图标、UI |
+| `faction_relations_changed` | 无 | `FactionManager`（玩家宣战）、`KingdomManager`（战争/附庸变化） | 大地图部队外环与建筑名称底板 |
 | `settlement_interaction_requested` | `settlement_id` | 大地图输入/交互 | 地点面板 |
 | `settlement_entered` | `settlement_id`, `party_id` | `WorldMap` | 世界日志 |
 | `settlement_exited` | `settlement_id`, `party_id` | `VillageScene` | 世界日志 |

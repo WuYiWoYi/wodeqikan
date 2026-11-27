@@ -16,6 +16,9 @@ signal party_position_changed(party_id: String)
 ## 部队真正到达大地图移动/跟随目标的事实；旧目标被替换后不会补发。
 signal party_arrived(party_id: String)
 signal party_battle_state_changed(party_id: String, battle_state: int)
+## 玩家阵营关系发生变化（主动宣战、王国战争、家族归属等）。
+## 只表示事实；大地图据此刷新部队外环与建筑名称底板颜色，不携带关系数据。
+signal faction_relations_changed()
 signal settlement_interaction_requested(settlement_id: String)
 ## 玩家实际进入/离开小场景的事实，供世界日志等系统消费。
 signal settlement_entered(settlement_id: String, party_id: String)

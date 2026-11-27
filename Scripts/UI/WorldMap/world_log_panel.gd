@@ -9,10 +9,19 @@ extends PanelContainer
 const PANEL_WIDTH: float = 460.0
 const PANEL_HEIGHT: float = 220.0
 const BOTTOM_MARGIN: float = 54.0
+## 大地图折叠态只显示最新一条事件文本，高度按单行文本与内边距计算。
+const COLLAPSED_HEIGHT: float = 42.0
 
 var _log_manager: WorldLogManager = null
 var _scroll: ScrollContainer = null
 var _content: VBoxContainer = null
+var _title: Label = null
+var _separator: HSeparator = null
+var _collapsed_label: Label = null
+
+## 大地图日志默认折叠为纯事件文本；村庄等场景保持完整面板。
+var _collapsible: bool = false
+var _expanded: bool = true
 
 
 func _ready() -> void:
@@ -54,6 +63,7 @@ func rebuild() -> void:
 		empty.name = "WorldLogEmpty"
 		empty.modulate = Color(0.82, 0.82, 0.78)
 		_content.add_child(empty)
+		_refresh_collapsed_text()
 		return
 
 	for index: int in range(entries.size()):
@@ -68,6 +78,7 @@ func rebuild() -> void:
 		label.custom_minimum_size = Vector2(PANEL_WIDTH - 56.0, 0.0)
 		_content.add_child(label)
 
+	_refresh_collapsed_text()
 	call_deferred("_scroll_to_bottom")
 
 
@@ -108,13 +119,13 @@ func _build() -> void:
 	column.add_theme_constant_override("separation", 4)
 	margin.add_child(column)
 
-	var title := _make_label("世界日志", 16)
-	title.name = "WorldLogTitle"
-	column.add_child(title)
+	_title = _make_label("世界日志", 16)
+	_title.name = "WorldLogTitle"
+	column.add_child(_title)
 
-	var separator := HSeparator.new()
-	separator.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	column.add_child(separator)
+	_separator = HSeparator.new()
+	_separator.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_child(_separator)
 
 	_scroll = ScrollContainer.new()
 	_scroll.name = "WorldLogScroll"
@@ -130,6 +141,109 @@ func _build() -> void:
 	_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_content.add_theme_constant_override("separation", 3)
 	_scroll.add_child(_content)
+
+	# 折叠态只保留最新事件文本；标题、分隔线与滚动区域隐藏。
+	_collapsed_label = _make_label("", 13)
+	_collapsed_label.name = "WorldLogCollapsedText"
+	_collapsed_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	_collapsed_label.clip_text = true
+	_collapsed_label.add_theme_color_override("font_color", Color("#f3ead6"))
+	_collapsed_label.add_theme_color_override(
+		"font_shadow_color", Color(0.0, 0.0, 0.0, 0.9)
+	)
+	_collapsed_label.add_theme_constant_override("shadow_offset_x", 1)
+	_collapsed_label.add_theme_constant_override("shadow_offset_y", 1)
+	_collapsed_label.visible = false
+	column.add_child(_collapsed_label)
+
+
+## 大地图启用折叠；村庄等共享面板保持完整显示。
+func set_collapsible(value: bool) -> void:
+	_collapsible = value
+	_expanded = not value
+	_apply_visibility_state()
+
+
+func is_collapsible() -> bool:
+	return _collapsible
+
+
+func is_expanded() -> bool:
+	return _expanded
+
+
+func is_collapsed() -> bool:
+	return _collapsible and not _expanded
+
+
+func expand() -> void:
+	if not _collapsible or _expanded:
+		return
+	_expanded = true
+	_apply_visibility_state()
+	call_deferred("_scroll_to_bottom")
+
+
+func collapse() -> void:
+	if not _collapsible or not _expanded:
+		return
+	_expanded = false
+	_apply_visibility_state()
+
+
+## 折叠时只替换面板装饰与容器表现，事件文本保持可见。
+func _apply_visibility_state() -> void:
+	if _scroll == null or _title == null or _separator == null \
+			or _collapsed_label == null:
+		return
+	var expanded: bool = not _collapsible or _expanded
+	_title.visible = expanded
+	_separator.visible = expanded
+	_scroll.visible = expanded
+	_collapsed_label.visible = not expanded
+	if expanded:
+		remove_theme_stylebox_override("panel")
+		mouse_filter = Control.MOUSE_FILTER_STOP if _collapsible \
+			else Control.MOUSE_FILTER_PASS
+		offset_top = -BOTTOM_MARGIN - PANEL_HEIGHT
+		offset_bottom = -BOTTOM_MARGIN
+	else:
+		# 折叠态不绘制底板，也不拦截任何鼠标事件。
+		add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		offset_top = -BOTTOM_MARGIN - COLLAPSED_HEIGHT
+		offset_bottom = -BOTTOM_MARGIN
+
+
+func get_collapsed_text() -> String:
+	return _collapsed_label.text if _collapsed_label != null else ""
+
+
+## 折叠态可点击展开的区域：只有事件文本本身，不包含面板空白范围。
+func get_collapsed_interaction_rect() -> Rect2:
+	if _collapsed_label == null or not _collapsed_label.visible:
+		return Rect2()
+	var rect := _collapsed_label.get_global_rect()
+	var font := _collapsed_label.get_theme_font("font")
+	var font_size: int = _collapsed_label.get_theme_font_size("font_size")
+	var text_width: float = rect.size.x
+	if font != null and not _collapsed_label.text.is_empty():
+		text_width = font.get_string_size(
+			_collapsed_label.text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, font_size
+		).x
+	rect.size.x = clampf(text_width + 4.0, 1.0, rect.size.x)
+	rect.size.y = maxf(rect.size.y, 18.0)
+	return rect
+
+
+func _refresh_collapsed_text() -> void:
+	if _collapsed_label == null:
+		return
+	var entries: Array[WorldLogEntry] = (
+		_log_manager.get_entries() if _log_manager != null else []
+	)
+	_collapsed_label.text = entries[-1].text if not entries.is_empty() \
+		else "暂无世界事件"
 
 
 func _scroll_to_bottom() -> void:

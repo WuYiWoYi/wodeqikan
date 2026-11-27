@@ -3,7 +3,7 @@
 **核心数据：** `Scripts/Entities/Log/world_log_entry.gd`
 **核心管理：** `Scripts/Core/World/world_log_manager.gd`
 **UI：** `Scripts/UI/WorldMap/world_log_panel.gd`（大地图左下角 / 村庄右上角共用）
-**状态：** 数据生成、事件类型、时间、数量上限（20 条）、共享面板、滚动、自动刷新、村庄/城镇玩家交易日志与存档恢复已实现；NPC 补给采购只显示部队浮字，不写日志
+**状态：** 数据生成、事件类型、时间、数量上限（20 条）、共享面板、滚动、自动刷新、大地图默认折叠/点击展开、村庄/城镇玩家交易日志与存档恢复已实现；NPC 补给采购只显示部队浮字，不写日志
 
 ---
 
@@ -77,8 +77,18 @@ WorldMap / Village WorldLogPanel（只读展示、滚动）
 - 标题「世界日志」+ `ScrollContainer` + `VBoxContainer`。
 - 新日志从 `entry_added` 信号进入，自动重建条目并滚动到最新事件。
 - 历史条目超过面板高度时可滚动查看。
-- 面板与滚动区域使用 `MOUSE_FILTER_PASS`，避免永久吞掉地图点击；日志标签本身不拦截输入。
+- 村庄实例与滚动区域使用 `MOUSE_FILTER_PASS`，日志标签不拦截输入；大地图折叠/展开态的输入策略见 4.1。
 - 面板不显示时数据仍保留在 `WorldLogManager` 中；重新进入大地图会按当前历史重建。
+
+### 4.1 大地图折叠态（2026-11-27）
+
+- 大地图实例调用 `WorldLogPanel.set_collapsible(true)`，默认折叠；村庄实例保持完整面板。
+- 折叠态只显示最新一条事件文本 `WorldLogCollapsedText`；隐藏 Panel 底板、标题、分隔线、滚动区域与滚动条。
+- 折叠时面板 `mouse_filter = IGNORE`，不拦截地图点击；可展开区域只有事件文本自身的屏幕矩形，空白区域不参与交互。
+- 点击事件文本展开完整面板；展开态 `mouse_filter = STOP`，面板自身区域内的点击与滚动不再落到地图。
+- 日志展开后，点击其矩形之外任意位置（地图或其他 UI）都会折叠。折叠/展开判断在 `WorldMap._input`/`_unhandled_input` 中完成，不改变其他交互本身。
+- 折叠状态不属于永久状态；事件新增只更新文本与历史，不改变当前展开/折叠状态。
+- 折叠/展开不销毁任何节点；`WorldLogEntry_*`、标题与滚动区域始终存在，仅切换可见性。
 
 ## 5. 持久化
 
@@ -91,7 +101,7 @@ WorldMap / Village WorldLogPanel（只读展示、滚动）
 ## 6. 测试
 
 - `Tests/UnitTests/world_log_manager_test.tscn`：事件类型、战斗/胜负/消灭/遭遇/地点/征召/冒险者文本、扩展事件、20 条上限/第 21 条淘汰/100 条读档裁剪、`PLAYER_TRADE` 序列化。
-- `Tests/SystemTests/world_log_ui_test.tscn`：左下角固定面板、自动刷新、滚动区域、20 条显示上限、不阻挡地图移动。
+- `Tests/SystemTests/world_log_ui_test.tscn`：左下角固定面板、自动刷新、滚动区域、20 条显示上限、不阻挡地图移动；默认折叠只显示最新事件、点击文本展开、点击其他区域折叠、折叠面板不拦截输入。
 - `Tests/UnitTests/market_manager_test.tscn`：玩家交易写日志、失败不写日志、NPC 来源不写日志。
 - `Tests/SystemTests/town_market_ui_test.tscn`：成功确认后新增一条交易日志。
 - `Tests/SystemTests/fief_adventurer_system_test.tscn`：采邑/冒险者日志文本与去重。

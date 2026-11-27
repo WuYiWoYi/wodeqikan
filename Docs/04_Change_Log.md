@@ -6,6 +6,28 @@
 
 ---
 
+## 2026-11-27 · 大地图日志折叠、玩家宣战与阵营视觉反馈
+
+### 变更
+
+- `WorldLogPanel` 新增可选折叠态：大地图默认只显示最新事件文本，隐藏底板/标题/滚动条；点击文本展开，点击其他区域折叠；村庄共享面板保持完整显示。折叠态面板不拦截地图输入，展开态拦截自身区域。
+- `FactionManager` 新增以玩家为中心的统一关系接口 `PlayerRelation`（`get_player_relation_for_house/party/settlement/kingdom`）与 `declare_player_hostility_against_party/house`；玩家家族关系委托该接口，AI/遭遇/战斗/百科自动获得同一结果。
+- 玩家主动攻击成功创建战斗后触发宣战：目标家族敌对；目标属于王国时整个王国及其成员家族、建筑敌对；玩家未加入王国也生效。玩家已有王国时同步建立正式王国战争。
+- 个人宣战记录保存到已有 `SaveData.factions`（`player_hostile_house_ids` / `player_hostile_kingdom_ids`），增量字段、不升级 Schema。
+- 新增 `EventBus.faction_relations_changed`；`KingdomManager` 在宣战/停战/附庸变化时广播，大地图据此批量刷新。
+- `PartyIcon` 增加持续阵营外环：玩家蓝、同阵营绿、敌对红、中立无；沿用原蓝色外环的半径/线宽/正圆绘制，不影响尺寸、旗帜、悬浮与点击。
+- `SettlementNameTag` 增加阵营底板颜色：同阵营绿色半透明、敌对红色半透明、中立保持黑色半透明；不改变底板尺寸、透明度基准、文字与建筑美术。
+
+### 验证
+
+- 已运行并通过：`player_faction_relation_ui_test`（新增）、`world_log_ui_test`、`faction_vision_test`、`faction_bandit_hostility_test`、`political_hierarchy_test`、`party_attack_confirmation_test`、`party_dialogue_test`、`world_map_milestone6_test`、`stage13_world_map_ui_test`、`ai_encounter_flow_test`。
+
+### 文档
+
+- `World_Log_System.md`、`Political_Hierarchy_System.md`、`World_Map_System.md`、`01_Core_Architecture.md` 事件契约同步更新。
+
+---
+
 ## 2026-11-27 · 大地图 UI 架构审查第一轮：覆盖层登记簿、百科与存档拆出
 
 ### 变更

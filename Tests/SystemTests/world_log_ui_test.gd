@@ -61,7 +61,18 @@ func _run() -> void:
 		"日志超出高度时支持滚动"
 	)
 	var title := panel.find_child("WorldLogTitle", true, false) as Label
-	_check(title != null and title.text == "世界日志", "日志面板显示标题")
+	_check(title != null and title.text == "世界日志", "日志面板保留标题节点")
+	_check(
+		not title.visible and not scroll.visible,
+		"默认折叠：标题与滚动条隐藏"
+	)
+	var collapsed_label := panel.find_child(
+		"WorldLogCollapsedText", true, false
+	) as Label
+	_check(
+		collapsed_label != null and collapsed_label.visible,
+		"默认折叠：仅保留事件文本"
+	)
 
 	_check(_map.call("get_world_log_entry_count") == 0, "初始日志为空")
 	_context.world_log_manager.add_event(
@@ -71,6 +82,13 @@ func _run() -> void:
 	var text: String = str(_map.call("get_world_log_text"))
 	_check(text.contains("第一条世界事件"), "新日志自动显示在面板数据中")
 	_check(_count_entry_labels() == 1, "日志面板实时生成一条条目")
+	_check(
+		collapsed_label != null
+			and collapsed_label.text.contains("第一条世界事件"),
+		"折叠状态持续更新最新事件文本"
+	)
+
+	_test_collapse_interaction(panel, title, scroll, collapsed_label)
 
 	var village := _first_village()
 	if village != null:
@@ -110,6 +128,48 @@ func _run() -> void:
 	# 日志数量继续受管理器上限约束，UI 只读取数据。
 	_context.world_log_manager.clear()
 	_check(_map.call("get_world_log_entry_count") == 0, "管理器清空后日志数据为空")
+
+
+## 折叠/展开交互：点击文本展开，点击其他区域折叠；数据持续更新不改变状态。
+func _test_collapse_interaction(
+	panel: PanelContainer, title: Label, scroll: ScrollContainer, collapsed: Label
+) -> void:
+	_check(not bool(_map.call("is_world_log_expanded")), "日志默认处于折叠状态")
+	var collapsed_rect := Rect2()
+	var log_panel: WorldLogPanel = _map.call("get_world_log_panel")
+	if log_panel != null:
+		collapsed_rect = log_panel.get_collapsed_interaction_rect()
+	_check(
+		collapsed_rect.size.x > 0.0 and collapsed_rect.size.y > 0.0,
+		"折叠文本具有可点击区域"
+	)
+
+	var inside := InputEventMouseButton.new()
+	inside.button_index = MOUSE_BUTTON_LEFT
+	inside.pressed = true
+	inside.position = collapsed_rect.get_center()
+	_map.call("_unhandled_input", inside)
+	_check(bool(_map.call("is_world_log_expanded")), "点击事件文本展开完整面板")
+	_check(title.visible and scroll.visible, "展开后恢复标题、滚动条与内容")
+	_check(
+		panel.mouse_filter == Control.MOUSE_FILTER_STOP,
+		"展开面板拦截自身区域的地图点击"
+	)
+
+	var outside := InputEventMouseButton.new()
+	outside.button_index = MOUSE_BUTTON_LEFT
+	outside.pressed = true
+	outside.position = Vector2(5.0, 5.0)
+	_map.call("_input", outside)
+	_check(not bool(_map.call("is_world_log_expanded")), "点击其他区域后自动折叠")
+	_check(
+		not title.visible and not scroll.visible and collapsed.visible,
+		"折叠后只保留事件文本"
+	)
+	_check(
+		panel.mouse_filter != Control.MOUSE_FILTER_STOP,
+		"折叠面板不阻挡地图点击"
+	)
 
 
 func _count_entry_labels() -> int:

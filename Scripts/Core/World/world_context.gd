@@ -365,7 +365,8 @@ func to_save_data() -> SaveData:
 	save.lords = save.nobles.duplicate(true)
 	save.houses = house_manager.to_dict()
 	save.kingdoms = kingdom_manager.to_dict()
-	save.factions = {}
+	# 玩家主动宣战产生的个人敌对关系；静态阵营关系仍由 FactionManager 重建。
+	save.factions = faction_manager.to_dict()
 	save.quests = {}
 	return save
 
@@ -546,6 +547,8 @@ func load_from_save_data(save: SaveData) -> bool:
 		_migrate_party_supplies()
 	house_manager.load_from_dict(save.houses)
 	kingdom_manager.load_from_dict(save.kingdoms)
+	# v10 之前没有该字段：视为玩家没有个人宣战记录，保持空表。
+	faction_manager.load_from_dict(save.factions)
 	world_log_manager.load_from_dict(save.world_log)
 	# 新地图尺寸装配真实地形；旧存档尺寸回退到矩形边界与直线移动。
 	setup_world_terrain(world_size)
@@ -848,7 +851,11 @@ func _wire_managers() -> void:
 	house_manager.setup_political(kingdom_manager)
 	faction_manager.setup_defaults()
 	faction_manager.setup_political(
-		party_manager, noble_manager, house_manager, kingdom_manager
+		party_manager,
+		noble_manager,
+		house_manager,
+		kingdom_manager,
+		settlement_manager
 	)
 	vision_manager.setup(party_manager, faction_manager, unit_manager)
 	world_map_manager.setup(party_manager, vision_manager)

@@ -14,6 +14,10 @@ extends Resource
 @export var marker_fill_color: Color = Color(0.11, 0.13, 0.16, 0.92)
 @export var marker_border_color: Color = Color(0.86, 0.82, 0.70, 0.95)
 @export var player_ring_color: Color = Color("#4ea1ff")
+## 与玩家同阵营的持续外环；玩家本人仍使用 player_ring_color。
+@export var allied_ring_color: Color = Color("#4fbf6a")
+## 与玩家敌对的持续外环。
+@export var hostile_ring_color: Color = Color("#d9534f")
 
 @export_category("Outline")
 ## 加粗前的基础描边宽度（1.5 像素沿 marker_radius 绘制）。

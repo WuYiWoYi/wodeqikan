@@ -108,7 +108,10 @@ Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录
     "escape_check_last_hour": 81,
     "escape_protection_until": 0.0
   },
-  "factions": {},
+  "factions": {
+    "player_hostile_house_ids": ["HOUSE_BARI"],
+    "player_hostile_kingdom_ids": ["KINGDOM_BURKNANIA"]
+  },
   "quests": {}
 }
 ```
@@ -133,6 +136,7 @@ Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录
 | `nobles` | 贵族表 `{ noble_id: NobleData }`；Schema v5 新增 |
 | `houses` | 家族表 `{ house_id: HouseData }`；Schema v5 新增，含 `banner_id` 映射 |
 | `kingdoms` | 王国表 `{ kingdom_id: KingdomData }`；Schema v5 新增 |
+| `factions` | 玩家个人宣战记录 `{ player_hostile_house_ids, player_hostile_kingdom_ids }`；2026-11-27 起使用，旧存档缺失时为空表，不升级 Schema |
 | 各实体表 | `{ 实体 ID: 实体数据 }` |
 
 `units` 与 `parties` 以实体 ID 为键；`PartyData.member_unit_ids` 保存成员 ID 列表，`PartyData.prisoner_unit_ids` 保存本部队关押的俘虏 ID 列表（v7）。

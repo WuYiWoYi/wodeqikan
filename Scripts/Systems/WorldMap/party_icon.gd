@@ -28,6 +28,8 @@ var _floating_tween: Tween = null
 var _last_floating_text: String = ""
 ## 鼠标悬浮状态；只影响额外白色描边，不改变尺寸、位置或点击区域。
 var _hovered: bool = false
+## 与玩家的阵营关系；由 WorldMap 通过统一关系接口写入，图标不自行判断政治关系。
+var _player_relation: int = FactionManager.PlayerRelation.NEUTRAL
 
 
 func setup(
@@ -52,6 +54,7 @@ func setup(
 	_flag_texture = flag_texture
 	_flag_texture_path = flag_texture.resource_path if flag_texture != null else ""
 	position = data.world_position
+	_player_relation = FactionManager.PlayerRelation.NEUTRAL
 	_create_flag_sprite()
 	_create_count_label()
 	_refresh_count()
@@ -92,10 +95,13 @@ func _draw() -> void:
 			0.0, TAU, 64,
 			_style.outline_color, _style.outline_width, true
 		)
-	if is_player:
+	# 持续阵营外环：玩家蓝色优先，其余按与玩家的关系显示绿/红/无。
+	# 只绘制在主体外缘，不改变标记尺寸、点击区域或悬浮描边。
+	var faction_ring := _resolve_faction_ring_color()
+	if faction_ring.a > 0.0:
 		draw_arc(
 			Vector2.ZERO, radius + 3.0, 0.0, TAU, 40,
-			_style.player_ring_color, 2.5, true
+			faction_ring, 2.5, true
 		)
 	# 悬浮白色描边：画在圆形主体之外，与黑色基础描边同时存在。
 	if _hovered and _style.hover_outline_width > 0.0:
@@ -156,6 +162,35 @@ func set_hovered(value: bool) -> void:
 
 func is_hovered() -> bool:
 	return _hovered
+
+
+## 由 WorldMap 写入统一关系查询结果；只切换阵营外环，不影响其他状态。
+func set_player_relation(relation: int) -> void:
+	if _player_relation == relation:
+		return
+	_player_relation = relation
+	queue_redraw()
+
+
+func get_player_relation() -> int:
+	return _player_relation
+
+
+## 当前持续外环颜色；透明表示中立（不绘制阵营外环）。
+func _resolve_faction_ring_color() -> Color:
+	if is_player:
+		return _style.player_ring_color
+	match _player_relation:
+		FactionManager.PlayerRelation.ALLIED:
+			return _style.allied_ring_color
+		FactionManager.PlayerRelation.HOSTILE:
+			return _style.hostile_ring_color
+		_:
+			return Color(0.0, 0.0, 0.0, 0.0)
+
+
+func get_faction_ring_color() -> Color:
+	return _resolve_faction_ring_color()
 
 
 func get_marker_style() -> PartyMarkerStyle:

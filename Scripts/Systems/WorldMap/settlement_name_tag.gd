@@ -16,6 +16,9 @@ const BADGE_GAP: float = 8.0
 ## 半透明底板在内容四周的留白。
 const BACKGROUND_PADDING := Vector2(10.0, 4.0)
 const BACKGROUND_COLOR: Color = Color(0.05, 0.06, 0.08, 0.55)
+## 阵营关系覆盖色：保持与中立底板相同的透明度与形状，只替换底色。
+const ALLIED_BACKGROUND_COLOR: Color = Color(0.16, 0.40, 0.22, 0.55)
+const HOSTILE_BACKGROUND_COLOR: Color = Color(0.50, 0.17, 0.15, 0.55)
 const BACKGROUND_BORDER: Color = Color(0.86, 0.82, 0.70, 0.28)
 
 var settlement: SettlementData = null
@@ -23,9 +26,12 @@ var settlement: SettlementData = null
 ## 实际绑定的家族 ID；无家族时为空。用于检测家族归属变化后重建。
 var _bound_family_id: String = ""
 var _background: Panel = null
+var _background_style: StyleBoxFlat = null
 var _row: HBoxContainer = null
 var _badge: FamilyBadge = null
 var _name_label: Label = null
+## 由 WorldMap 通过统一关系接口写入；标签本身不判断政治关系。
+var _player_relation: int = FactionManager.PlayerRelation.NEUTRAL
 
 
 ## 圆形家族徽章。读取 FamilyConfig 的家族旗帜美术与颜色，
@@ -199,6 +205,34 @@ func get_background_control() -> Panel:
 	return _background
 
 
+## 由 WorldMap 写入统一关系查询结果；只替换底板底色，不改变尺寸/布局/文字。
+func set_player_relation(relation: int) -> void:
+	if _player_relation == relation:
+		return
+	_player_relation = relation
+	if _background_style != null:
+		_background_style.bg_color = _resolve_background_color()
+
+
+func get_player_relation() -> int:
+	return _player_relation
+
+
+func get_background_color() -> Color:
+	return _background_style.bg_color if _background_style != null else BACKGROUND_COLOR
+
+
+## 中立保持原黑色半透明；同阵营绿色、敌对红色，均沿用同一透明度与形状。
+func _resolve_background_color() -> Color:
+	match _player_relation:
+		FactionManager.PlayerRelation.ALLIED:
+			return ALLIED_BACKGROUND_COLOR
+		FactionManager.PlayerRelation.HOSTILE:
+			return HOSTILE_BACKGROUND_COLOR
+		_:
+			return BACKGROUND_COLOR
+
+
 func _create_contents(family: FamilyConfig) -> void:
 	for child: Node in get_children():
 		remove_child(child)
@@ -212,12 +246,12 @@ func _create_contents(family: FamilyConfig) -> void:
 	_background = Panel.new()
 	_background.name = "SettlementNameBackground"
 	_background.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var background_style := StyleBoxFlat.new()
-	background_style.bg_color = BACKGROUND_COLOR
-	background_style.border_color = BACKGROUND_BORDER
-	background_style.set_border_width_all(1)
-	background_style.set_corner_radius_all(8)
-	_background.add_theme_stylebox_override("panel", background_style)
+	_background_style = StyleBoxFlat.new()
+	_background_style.bg_color = _resolve_background_color()
+	_background_style.border_color = BACKGROUND_BORDER
+	_background_style.set_border_width_all(1)
+	_background_style.set_corner_radius_all(8)
+	_background.add_theme_stylebox_override("panel", _background_style)
 	add_child(_background)
 
 	_row = HBoxContainer.new()

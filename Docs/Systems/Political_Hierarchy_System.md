@@ -111,6 +111,42 @@
 - 若无贵族，则通过 `PartyData.family_id` → `HouseManager.get_house_by_banner_id()` 映射视觉家族到政治家族。
 - 都没有时使用 `PartyData.faction_id`。
 
+### 6.1 以玩家为中心的阵营关系（2026-11-27）
+
+`FactionManager` 新增统一接口，返回 `PlayerRelation.ALLIED / NEUTRAL / HOSTILE`：
+
+| 方法 | 说明 |
+|---|---|
+| `get_player_relation_for_house(house_id)` | 家族与玩家的关系 |
+| `get_player_relation_for_party(party_id)` | 部队与玩家的关系 |
+| `get_player_relation_for_settlement(settlement_id)` | 地点与玩家的关系（权威归属 `owner_house_id`，回退 `owner_noble_id`） |
+| `get_player_relation_for_kingdom(kingdom_id)` | 王国与玩家的关系 |
+
+判定顺序：
+
+1. 玩家家族本身 → 同阵营。
+2. 玩家主动宣战记录（家族或王国）→ 敌对。该记录优先于王国关系。
+3. 玩家未加入王国 → 其余目标中立，不从其他王国外交推导同阵营。
+4. 目标家族与玩家所属王国相同 → 同阵营。
+5. 玩家所属王国与目标家族王国处于战争 → 敌对。
+6. 其余中立。
+
+- `get_house_relation()` 在任一方是玩家家族时改为委托上述接口，因此 AI、遭遇、战斗与百科自动获得同一结果。
+- 玩家本人部队仍为 `PartyData.player_party_id` 特判；玩家所属家族、加入的王国与当前政治身份是三个不同概念，不互相替代。
+- 玩家是国王属于“玩家家族所属王国”的特例：其成员家族与建筑通过王国归属判定为同阵营，不通过玩家个人家族 ID 推导。
+
+### 6.2 玩家主动攻击宣战
+
+- 玩家主动攻击入口 `WorldMap.begin_battle_with_party()` 成功创建战斗后调用 `FactionManager.declare_player_hostility_against_party(target_party_id)`。
+- 加入友军既有战斗不是主动攻击，不触发宣战。
+- 目标无政治家族（强盗、商队等）不产生家族/王国宣战，继续使用原阵营关系。
+- 目标属于王国 A：玩家与目标家族敌对，同时记录王国 A 为玩家敌对王国；王国 A 所有成员家族与所属建筑敌对。玩家自身无需拥有王国。
+- 目标为独立家族：只有该家族敌对，不扩展到其他家族，不产生王国宣战。
+- 玩家已有王国且目标属于其他王国时，同时调用 `KingdomManager.declare_war()` 建立正式王国战争；双方王国成员家族按既有规则互相敌对。
+- 玩家主动宣战记录由 `FactionManager.to_dict()` / `load_from_dict()` 保存到 `SaveData.factions` 的 `player_hostile_house_ids` / `player_hostile_kingdom_ids`（增量字段，缺失时为空，不升级 Schema）。
+- 关系变化后广播 `EventBus.faction_relations_changed`；大地图据此刷新部队外环与建筑名称底板，不每帧重算政治关系。
+- 当前尚未实现玩家加入/退出王国、成为国王的运行时流程；这些流程落地时需广播同一事件以刷新 UI。
+
 ## 7. 视觉家族与政治家族
 
 - `FAMILY_*` 是 `FamilyConfig` 的视觉配置 ID（旗帜、罩袍、缨饰、长矛）。
@@ -144,6 +180,12 @@ Schema v5 新增：
 - `nobles: { noble_id: {...} }`
 - `houses: { house_id: {...} }`
 - `kingdoms: { kingdom_id: {...} }`
+
+玩家个人宣战记录从 2026-11-27 起写入既有的 `factions` 容器：
+
+- `factions.player_hostile_house_ids`：玩家主动攻击后保持敌对的家族 ID。
+- `factions.player_hostile_kingdom_ids`：玩家个人宣战的王国 ID。
+- 旧存档缺失该容器时视为空表；静态阵营关系与默认外交仍由各管理器重建。
 
 保留 `lords` 作为兼容副本，`lord_manager` 与 `noble_manager` 指向同一实例。读档会：
 

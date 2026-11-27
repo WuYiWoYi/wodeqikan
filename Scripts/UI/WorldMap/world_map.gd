@@ -318,6 +318,8 @@ func _ready() -> void:
 		EventBus.adventurers_recruited.connect(_on_adventurers_recruited)
 	if not EventBus.npc_supply_purchased.is_connected(_on_npc_supply_purchased):
 		EventBus.npc_supply_purchased.connect(_on_npc_supply_purchased)
+	if not EventBus.faction_relations_changed.is_connected(_on_faction_relations_changed):
+		EventBus.faction_relations_changed.connect(_on_faction_relations_changed)
 	if not EventBus.party_arrived.is_connected(_on_party_arrived):
 		EventBus.party_arrived.connect(_on_party_arrived)
 
@@ -388,6 +390,19 @@ func _process(delta: float) -> void:
 
 ## 集中处理左 Alt 的按住/松开，不标记事件已处理，不影响点击与快捷键。
 func _input(event: InputEvent) -> void:
+	# 日志展开后，点击其矩形之外的任何位置都恢复折叠；不消费事件，
+	# 因此其他 UI/地图仍按原样处理本次点击。
+	if event is InputEventMouseButton:
+		var mouse_event := event as InputEventMouseButton
+		if mouse_event.pressed and mouse_event.button_index == MOUSE_BUTTON_LEFT \
+				and _world_log_panel != null \
+				and _world_log_panel.is_collapsible() \
+				and _world_log_panel.is_expanded() \
+				and not _world_log_panel.get_global_rect().has_point(
+					mouse_event.position
+				):
+			_world_log_panel.collapse()
+		return
 	if not event is InputEventKey:
 		return
 	var key_event := event as InputEventKey
@@ -430,6 +445,14 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mouse_event := event as InputEventMouseButton
 		if mouse_event.pressed and mouse_event.button_index == MOUSE_BUTTON_LEFT:
+			# 折叠日志只显示事件文本；点击文本区域展开完整面板，且不触发地图移动。
+			if _world_log_panel != null and _world_log_panel.is_collapsed() \
+					and _world_log_panel.get_collapsed_interaction_rect().has_point(
+						mouse_event.position
+					):
+				_world_log_panel.expand()
+				get_viewport().set_input_as_handled()
+				return
 			_queue_map_click(get_global_mouse_position())
 			get_viewport().set_input_as_handled()
 			return
@@ -723,6 +746,7 @@ func _build_world_entities() -> void:
 		_party_icons[party.party_id] = party_icon
 		if party.party_id == _context.player_party_id:
 			_player_icon = party_icon
+	_refresh_party_relations()
 
 	for settlement: SettlementData in _context.settlement_manager.get_all_settlements():
 		var settlement_icon: SettlementIcon = SettlementIcon.new()
@@ -801,6 +825,58 @@ func _get_party_marker_style() -> PartyMarkerStyle:
 	return _party_marker_style
 
 
+## 玩家阵营关系变化后统一刷新大地图表现。
+## 关系本身由 FactionManager 维护；这里只重新读取并写入图标/名称标签。
+func _refresh_faction_visuals() -> void:
+	_refresh_party_relations()
+	_refresh_settlement_relations()
+
+
+func _refresh_party_relations() -> void:
+	if _context == null:
+		return
+	for party_id: Variant in _party_icons:
+		var icon := _party_icons.get(party_id) as PartyIcon
+		if icon == null or not is_instance_valid(icon):
+			continue
+		icon.set_player_relation(
+			_context.faction_manager.get_player_relation_for_party(str(party_id))
+		)
+
+
+func _refresh_settlement_relations() -> void:
+	if _context == null:
+		return
+	for settlement_id: Variant in _settlement_name_tags:
+		var tag := _settlement_name_tags.get(settlement_id) as SettlementNameTag
+		if tag == null or not is_instance_valid(tag):
+			continue
+		tag.set_player_relation(
+			_context.faction_manager.get_player_relation_for_settlement(
+				str(settlement_id)
+			)
+		)
+
+
+func _on_faction_relations_changed() -> void:
+	_refresh_faction_visuals()
+	if _family_panel != null and _family_panel.visible:
+		_family_panel.refresh()
+
+
+## 供自动化测试/调试读取当前关系对应的大地图表现。
+func get_party_player_relation(party_id: String) -> int:
+	if _context == null:
+		return FactionManager.PlayerRelation.NEUTRAL
+	return _context.faction_manager.get_player_relation_for_party(party_id)
+
+
+func get_settlement_player_relation(settlement_id: String) -> int:
+	if _context == null:
+		return FactionManager.PlayerRelation.NEUTRAL
+	return _context.faction_manager.get_player_relation_for_settlement(settlement_id)
+
+
 ## 地点名称位于固定屏幕 UI 层；世界坐标每帧转换为屏幕坐标，
 ## 因而文字大小不受相机缩放影响，但位置仍跟随建筑。
 func _build_settlement_name_tags() -> void:
@@ -830,6 +906,7 @@ func _build_settlement_name_tags() -> void:
 		_stationed_bars[settlement.settlement_id] = bar
 	# 名称层放在 UI 最底层，避免覆盖地点/部队/日志面板。
 	_ui_root.move_child(_settlement_name_layer, 0)
+	_refresh_settlement_relations()
 	_update_settlement_name_tags()
 
 
@@ -2492,6 +2569,26 @@ func _build_world_log_panel() -> void:
 	_world_log_panel = WorldLogPanel.new()
 	_ui_root.add_child(_world_log_panel)
 	_world_log_panel.setup(_context.world_log_manager)
+	# 大地图默认只显示最新事件文本；点击展开完整历史。
+	_world_log_panel.set_collapsible(true)
+
+
+func expand_world_log() -> void:
+	if _world_log_panel != null:
+		_world_log_panel.expand()
+
+
+func collapse_world_log() -> void:
+	if _world_log_panel != null:
+		_world_log_panel.collapse()
+
+
+func is_world_log_expanded() -> bool:
+	return _world_log_panel != null and _world_log_panel.is_expanded()
+
+
+func get_world_log_panel() -> WorldLogPanel:
+	return _world_log_panel
 
 
 func _rebuild_world_log() -> void:
@@ -4162,6 +4259,10 @@ func begin_battle_with_party() -> BattleSession:
 		_battle_transition_started = false
 		_party_status_label.text = "无法开始战斗"
 		return null
+
+	# 玩家主动攻击已成功创建战斗：按目标家族与所属王国建立持续敌对关系。
+	# 关系维护与派生全部由 FactionManager 负责，UI 不解读政治数据。
+	_context.faction_manager.declare_player_hostility_against_party(enemy.party_id)
 
 	# 先由 start_battle 压入战斗暂停，再释放对话暂停，避免中间帧恢复世界时间。
 	_overlays.release_pause("party_dialogue")

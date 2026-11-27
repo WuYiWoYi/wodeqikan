@@ -196,6 +196,7 @@ func add_vassal_house(kingdom_id: String, house_id: String) -> bool:
 		kingdom.vassal_house_ids.append(house_id)
 	_sync_king_flags(kingdom, kingdom.king_noble_id)
 	last_error = ""
+	EventBus.faction_relations_changed.emit()
 	return true
 
 
@@ -205,10 +206,13 @@ func remove_vassal_house(kingdom_id: String, house_id: String) -> bool:
 		if _house_manager != null else null
 	if kingdom == null or house == null:
 		return false
+	var was_member: bool = kingdom.vassal_house_ids.has(house_id)
 	kingdom.vassal_house_ids.erase(house_id)
 	if house.kingdom_id == kingdom_id:
 		house.kingdom_id = ""
 		house.overlord_house_id = ""
+	if was_member:
+		EventBus.faction_relations_changed.emit()
 	return true
 
 
@@ -220,10 +224,15 @@ func declare_war(a_kingdom_id: String, b_kingdom_id: String) -> bool:
 	var b := get_kingdom(b_kingdom_id)
 	if a == null or b == null:
 		return false
+	var changed: bool = false
 	if not a.enemy_kingdom_ids.has(b_kingdom_id):
 		a.enemy_kingdom_ids.append(b_kingdom_id)
+		changed = true
 	if not b.enemy_kingdom_ids.has(a_kingdom_id):
 		b.enemy_kingdom_ids.append(a_kingdom_id)
+		changed = true
+	if changed:
+		EventBus.faction_relations_changed.emit()
 	return true
 
 
@@ -232,8 +241,12 @@ func end_war(a_kingdom_id: String, b_kingdom_id: String) -> bool:
 	var b := get_kingdom(b_kingdom_id)
 	if a == null or b == null:
 		return false
+	var changed: bool = a.enemy_kingdom_ids.has(b_kingdom_id) \
+		or b.enemy_kingdom_ids.has(a_kingdom_id)
 	a.enemy_kingdom_ids.erase(b_kingdom_id)
 	b.enemy_kingdom_ids.erase(a_kingdom_id)
+	if changed:
+		EventBus.faction_relations_changed.emit()
 	return true
 
 

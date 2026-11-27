@@ -4,7 +4,7 @@
 **核心脚本：** `Scripts/Systems/WorldMap/world_map_manager.gd`、`Scripts/UI/WorldMap/world_map.gd`
 **大地图 UI 组件：** `map_overlay_registry.gd`（覆盖层登记与暂停计数）、`world_map_encyclopedia.gd`（百科）、`world_map_save_panel.gd`（存档）、`map_ui_kit.gd`（控件辅助）；由 `world_map.gd` 装配，控件名称与根公开方法保持兼容。
 **场景：** `Scenes/WorldMap/world_map.tscn`
-**状态：** 基础移动、NPC 自主商队/巡逻/强盗/治安队、统一 Party 数据、恢复原尺寸的圆形部队标记、放大的村庄圆形标记与位于上方的固定屏幕名称、部队跟随、视野查询、地点交互与村庄入口、底部 NPC 遭遇对话（领袖头像/对白/动态选项）、遭遇原因与敌对追击禁离开、玩家追击接触、追逐焦点保护、人数图标与悬浮信息、日期/时间段 UI、顶栏昼夜滚动窗口、按战斗 ID 独立的多战斗标记与多方战斗汇总、世界日志面板、封地信息与采邑征召入口、部队浮动提示、`WorldMapDefinition` 驱动的 7780×6615 重建地图（不规则边界/湖泊/山脉/道路、绿陆/蓝海/深蓝湖地表配色）与城镇图标、百科入口、地点区域化布局与部队内部旗帜放大、阶段 13 地点家族旗帜与停留部队旗帜条、统一最终移动速度显示、玩家移动目标标记与动态虚线、右侧纵向事件框与可操作事件详情弹窗、家族入口与家族面板、冒险者招募浮动提示、顶栏信息图标 2 倍放大、部队黑色基础描边与部队/建筑悬浮白色描边已实现
+**状态：** 基础移动、NPC 自主商队/巡逻/强盗/治安队、统一 Party 数据、恢复原尺寸的圆形部队标记、放大的村庄圆形标记与位于上方的固定屏幕名称、部队跟随、视野查询、地点交互与村庄入口、底部 NPC 遭遇对话（领袖头像/对白/动态选项）、遭遇原因与敌对追击禁离开、玩家追击接触、追逐焦点保护、人数图标与悬浮信息、日期/时间段 UI、顶栏昼夜滚动窗口、按战斗 ID 独立的多战斗标记与多方战斗汇总、世界日志面板、封地信息与采邑征召入口、部队浮动提示、`WorldMapDefinition` 驱动的 7780×6615 重建地图（不规则边界/湖泊/山脉/道路、绿陆/蓝海/深蓝湖地表配色）与城镇图标、百科入口、地点区域化布局与部队内部旗帜放大、阶段 13 地点家族旗帜与停留部队旗帜条、统一最终移动速度显示、玩家移动目标标记与动态虚线、右侧纵向事件框与可操作事件详情弹窗、家族入口与家族面板、冒险者招募浮动提示、顶栏信息图标 2 倍放大、部队黑色基础描边与部队/建筑悬浮白色描边、玩家阵营部队绿/红外环与建筑名称绿/红半透明底板已实现
 
 ---
 
@@ -595,12 +595,14 @@ WorldSimulation 更新 PartyData.world_position
 
 | 元素 | 层级 | 职责 |
 |---|---|---|
-| `SettlementIcon` | 世界层（`world_entities`） | 原始村庄/城堡美术；位置、缩放、点击判定不变 |
+| `SettlementIcon` | 世界层（`world_entities`） | 原始村庄/城镇/城堡美术，统一按 `BUILDING_ART_SCALE = 1.5` 放大绘制；节点位置、节点缩放与点击判定不变 |
 | `SettlementNameTag` | 屏幕 UI 层（`SettlementNameLayer`） | 固定 240×36 的徽章 + 名称组合 |
 | `SettlementNameTag.FamilyBadge` | 名称组合内部 | 左侧圆形家族徽章，颜色来自 `FamilyConfig` |
 
 - 世界层不再绘制圆形村庄标记或旗帜，也不再携带名称。
 - 名称组合整体位于地点世界坐标转换后的屏幕位置上方，按 `SettlementIcon.get_name_anchor_radius()` × 相机缩放 + 10 屏幕像素定位。
+- 建筑美术放大 1.5 倍只作用于 `SettlementIcon` 自身绘制几何（含地面阴影与悬浮描边轮廓），贴图/名称底板/家族徽章/交互提示等 UI 尺寸不变；描边线宽保持 5 像素。名称锚点半径同步 ×1.5，保证名称仍贴在放大后的建筑顶部上方。
+- 建筑世界坐标、节点 `scale`、点击/悬浮判定半径与所有权逻辑均不变。
 - 徽章读取 `SettlementData.family_id`；无家族隐藏徽章，只显示名称。
 - 名称组合与徽章均为 `MOUSE_FILTER_IGNORE`。
 
@@ -934,3 +936,39 @@ WorldSimulation 更新 PartyData.world_position
 - 读档以存档中的 `world_size` 为准；尺寸与当前定义不一致时不构建 `WorldTerrain`，`WorldMapManager` 回退为矩形 `world_bounds` clamp 与直线移动。
 - `map_background.gd` 在尺寸不匹配时继续绘制旧矩形草地、河流与道路，避免旧地点坐标与新地形错位。
 - 不重写旧存档的地点坐标、所有权或 `world_size`；迁移只在新开游戏时使用新定义。
+
+## 21. 玩家阵营视觉反馈（2026-11-27）
+
+### 21.1 部队持续阵营外环
+
+- `PartyIcon` 通过 `set_player_relation(FactionManager.PlayerRelation)` 接收关系；不在图标内判断政治数据。
+- 玩家本人部队：沿用原有蓝色外环（`PartyMarkerStyle.player_ring_color`），即使玩家加入王国也不被绿色覆盖。
+- 同阵营：`allied_ring_color` 绿色；敌对：`hostile_ring_color` 红色；中立：不绘制阵营外环。
+- 外环与原有蓝色外环共用同一绘制路径：半径 `marker_radius + 3`、线宽 2.5、`draw_arc` 正圆。不改变标记半径、旗帜缩放、人数位置、黑色基础描边、悬浮白色描边或点击/悬浮判定。
+- 外环位于圆形主体外缘，不遮挡旗帜；悬浮只叠加原有白色描边，不删除阵营外环。
+
+### 21.2 建筑名称底板颜色
+
+- `SettlementNameTag.set_player_relation()` 只替换 `SettlementNameBackground` 的 `StyleBoxFlat.bg_color`。
+- 中立：原 `BACKGROUND_COLOR`（黑色半透明）；同阵营：`ALLIED_BACKGROUND_COLOR` 绿色半透明；敌对：`HOSTILE_BACKGROUND_COLOR` 红色半透明。
+- 透明度、圆角、边框、底板尺寸、徽章、名称字体/位置/布局与建筑美术均不变。
+- 地点政治归属仍以 `SettlementData.owner_house_id`（回退 `owner_noble_id` 的家族）判定，视觉旗帜 `family_id` 不参与阵营关系。
+
+### 21.3 刷新机制
+
+- `WorldMap` 在创建图标/名称标签时各读取一次关系。
+- 订阅 `EventBus.faction_relations_changed` 后刷新全部部队与建筑，不每帧计算完整政治关系。
+- 事件来源：玩家主动宣战、`KingdomManager.declare_war()/end_war()`、家族加入/离开王国。
+- `_refresh_faction_visuals()` 是唯一的批量刷新入口；新增关系变化来源时应广播同一事件，而不是让 UI 自行推导。
+
+### 21.4 测试
+
+`Tests/SystemTests/player_faction_relation_ui_test.tscn` 覆盖：
+
+- 初始玩家自有建筑绿色、中立建筑黑色、玩家蓝色外环、中立部队无外环；
+- 玩家无王国时攻击王国 A 家族 → 家族及王国成员全部敌对、建筑红色、其他王国中立；
+- 攻击独立家族 → 仅该家族敌对，不产生王国宣战；
+- 玩家加入王国 → 同王国部队/建筑绿色，玩家蓝色外环保持；
+- 王国战争 → 敌国成员部队红色；
+- 主动攻击入口触发宣战与王国战争；
+- 个人宣战记录随 `SaveData` JSON 往返恢复。
