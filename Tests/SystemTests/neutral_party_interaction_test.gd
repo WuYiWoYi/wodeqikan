@@ -11,7 +11,7 @@ var _map: Node = null
 var _player: PartyData = null
 var _merchant: PartyData = null
 var _bandit: PartyData = null
-var _guard: PartyData = null
+var _ally: PartyData = null
 
 
 func _ready() -> void:
@@ -41,19 +41,19 @@ func _run() -> void:
 	_player = _context.get_player_party()
 	_merchant = _find_party(WorldInitializer.TEST_ENEMY_PARTY_NAME)
 	_bandit = _find_party(WorldInitializer.BANDIT_PARTY_NAME)
-	_guard = _find_party(WorldInitializer.GUARD_PARTY_NAME)
+	_ally = _find_party(WorldInitializer.BARI_KNIGHT_PARTY_NAME)
 	_check(
-		_player != null and _merchant != null and _bandit != null and _guard != null,
+		_player != null and _merchant != null and _bandit != null and _ally != null,
 		"找到玩家与三方 NPC"
 	)
-	if _player == null or _merchant == null or _bandit == null or _guard == null:
+	if _player == null or _merchant == null or _bandit == null or _ally == null:
 		return
 
 	_isolate_parties()
 	_player.world_position = Vector2(900.0, 1200.0)
 	_merchant.world_position = Vector2(1000.0, 1200.0)
 	_bandit.world_position = Vector2(1100.0, 1300.0)
-	_guard.world_position = Vector2(700.0, 1300.0)
+	_ally.world_position = Vector2(700.0, 1300.0)
 
 	var packed := load("res://Scenes/WorldMap/world_map.tscn") as PackedScene
 	_map = packed.instantiate()
@@ -78,9 +78,9 @@ func _run() -> void:
 	)
 
 	# 2. 玩家追击其他目标时路过中立部队：不弹窗。
-	_player.focus_party_id = _guard.party_id
+	_player.focus_party_id = _ally.party_id
 	_map.call("_check_party_interaction")
-	_check(not party_panel.visible, "追击其他目标时路过中立部队不打断行动")
+	_check(not party_panel.visible, "追击其他目标时路过无关部队不打断行动")
 
 	# 3. 玩家主动点击中立部队并接近：沿用主动交互入口。
 	_player.focus_party_id = ""

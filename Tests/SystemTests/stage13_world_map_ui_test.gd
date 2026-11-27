@@ -11,7 +11,7 @@ var _context: WorldContext = null
 var _map: Node = null
 var _player: PartyData = null
 var _merchant: PartyData = null
-var _guard: PartyData = null
+var _ally: PartyData = null
 var _village: SettlementData = null
 var _castle: SettlementData = null
 
@@ -43,15 +43,15 @@ func _run() -> void:
 
 	_player = _context.get_player_party()
 	_merchant = _find_party("河畔商队")
-	_guard = _find_party("北境巡逻队")
+	_ally = _find_party(WorldInitializer.BARI_KNIGHT_PARTY_NAME)
 	_village = _find_settlement(WorldInitializer.BARI_VILLAGE_NAME)
 	_castle = _find_settlement(WorldInitializer.OLIN_CASTLE_NAME)
 	_check(
-		_player != null and _merchant != null and _guard != null,
+		_player != null and _merchant != null and _ally != null,
 		"找到玩家与 NPC 部队"
 	)
 	_check(_village != null and _castle != null, "找到村庄与城堡")
-	if _player == null or _merchant == null or _guard == null \
+	if _player == null or _merchant == null or _ally == null \
 			or _village == null or _castle == null:
 		return
 
@@ -203,7 +203,7 @@ func _test_party_flag_inside_circle() -> void:
 		"旗帜裁剪半径不超过黑色描边内缘"
 	)
 	var icon := _map.find_child(
-		"PartyIcon_%s" % _guard.party_id, true, false
+		"PartyIcon_%s" % _ally.party_id, true, false
 	) as PartyIcon
 	_check(icon != null and icon.get_marker_radius() == style.marker_radius,
 		"部队图标使用统一圆形尺寸")
@@ -336,7 +336,7 @@ func _test_stationed_banners() -> void:
 
 func _test_multiple_settlements() -> void:
 	_place_party(_merchant, _village.world_position)
-	_place_party(_guard, _castle.world_position)
+	_place_party(_ally, _castle.world_position)
 	_map.call("_process", 0.016)
 	var village_bar := _map.call(
 		"get_stationed_bar", _village.settlement_id
@@ -351,7 +351,7 @@ func _test_multiple_settlements() -> void:
 			"村庄旗帜条只包含自己的停留部队"
 		)
 		_check(
-			castle_bar.get_banner_party_ids() == [_guard.party_id],
+			castle_bar.get_banner_party_ids() == [_ally.party_id],
 			"城堡旗帜条只包含自己的停留部队"
 		)
 
@@ -380,7 +380,7 @@ func _test_multiple_settlements() -> void:
 
 	_move_party_far(_merchant)
 	# 与商队保持不同坐标，避免后续悬浮命中另一支部队。
-	_place_party(_guard, Vector2(4200.0, 2400.0))
+	_place_party(_ally, Vector2(4200.0, 2400.0))
 	_map.call("_process", 0.016)
 
 
@@ -435,7 +435,7 @@ func _test_speed_display() -> void:
 
 func _test_hover_outlines() -> void:
 	_move_party_far(_merchant)
-	_move_party_far(_guard)
+	_move_party_far(_ally)
 	_place_party(_player, Vector2(1600.0, 2200.0))
 	_map.call("clear_hover_outline_for_test")
 

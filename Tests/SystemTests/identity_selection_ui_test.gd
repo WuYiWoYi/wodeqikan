@@ -11,6 +11,8 @@ var _screen: Control = null
 
 
 func _ready() -> void:
+	# 无头模式默认窗口极小，先设为常规分辨率，布局断言才有意义。
+	get_window().size = Vector2i(1280, 720)
 	get_tree().current_scene = null
 	await get_tree().process_frame
 	await _run()
@@ -71,6 +73,7 @@ func _run() -> void:
 
 	_check(doraman.button_pressed, "默认选中第一个文化：多拉曼人")
 	_check(_label("CultureDetailTitle").text == "多拉曼人", "左侧默认展示多拉曼人")
+	_check_culture_visual("多拉曼人")
 	_check(
 		_label("CultureDescriptionLabel").text.contains("天生的冒险者"),
 		"左侧展示多拉曼文化背景"
@@ -105,9 +108,11 @@ func _run() -> void:
 	)
 	_check(doraman.button_pressed and not bugido.button_pressed, "悬浮不改变已选文化")
 	_check_route("多拉曼人", "身份：待选择")
+	_check_culture_visual("布吉多人")
 	bugido.mouse_exited.emit()
 	await get_tree().process_frame
 	_check(_label("CultureDetailTitle").text == "多拉曼人", "悬浮离开后恢复已选文化")
+	_check_culture_visual("多拉曼人")
 
 	# 点击只选定，不跳转。
 	bugido.pressed.emit()
@@ -149,6 +154,37 @@ func _run() -> void:
 	_check(_button("CultureOption_CULTURE_DORAMAN").button_pressed, "重新进入默认选中多拉曼人")
 	_check_route("多拉曼人", "身份：待选择")
 
+	# 多拉曼身份层：埃克托家族次子接入新立绘。
+	_button("ConfirmButton").pressed.emit()
+	await get_tree().process_frame
+	_check_page("IdentityPage")
+	_check(
+		_button("IdentityOption_IDENTITY_EKTOR_SECOND_SON").button_pressed,
+		"多拉曼默认选中埃克托家族次子"
+	)
+	_check_identity_visual("UI_身份选择_埃克托家族次子.png")
+
+	# 无立绘身份：整块立绘区域隐藏，不显示占位文本或空框。
+	var doraman_mercenary := _button("IdentityOption_IDENTITY_DORAMAN_MERCENARY")
+	_check(doraman_mercenary != null, "多拉曼显示佣兵身份")
+	if doraman_mercenary != null:
+		doraman_mercenary.mouse_entered.emit()
+		await get_tree().process_frame
+		_check(
+			_label("IdentityDetailTitle").text == "多拉曼佣兵",
+			"悬停无立绘身份更新左侧"
+		)
+		_check_identity_visual_hidden()
+		doraman_mercenary.mouse_exited.emit()
+		await get_tree().process_frame
+		_check_identity_visual("UI_身份选择_埃克托家族次子.png")
+
+	# 返回文化层后恢复原流程。
+	_button("BackButton").pressed.emit()
+	await get_tree().process_frame
+	_check_page("CulturePage")
+	_check(_button("CultureOption_CULTURE_DORAMAN").button_pressed, "退回保留多拉曼")
+
 	# 选择布吉多并确认，进入身份层。
 	_button("CultureOption_CULTURE_BUGIDO").pressed.emit()
 	await get_tree().process_frame
@@ -177,6 +213,7 @@ func _run() -> void:
 	_check(knight.button_pressed, "默认选中第一个身份：丁达尼家族骑士")
 	_check(_label("IdentityDetailTitle").text == "丁达尼家族骑士", "左侧默认展示第一个身份")
 	_check(_label("IdentityDetailType").text.contains("贵族"), "左侧展示身份类型")
+	_check_identity_visual_hidden()
 	_check(
 		_label("IdentityDescriptionLabel").text.contains("最古老的血脉"),
 		"左侧展示身份背景"
@@ -286,6 +323,25 @@ func _check_catalog() -> void:
 	if catalog == null:
 		return
 
+	var visuals := IdentityVisualConfig.load_default()
+	_check(visuals != null, "详情贴图映射配置可加载")
+	if visuals != null:
+		for culture_id: String in [
+			"CULTURE_DORAMAN", "CULTURE_BUGIDO", "CULTURE_LORRIS"
+		]:
+			_check(
+				visuals.get_culture_texture(culture_id) != null,
+				"文化 %s 配置了详情贴图" % culture_id
+			)
+		_check(
+			visuals.get_identity_texture("IDENTITY_EKTOR_SECOND_SON") != null,
+			"埃克托家族次子配置了专属立绘"
+		)
+		_check(
+			visuals.get_identity_texture("IDENTITY_FRANI_MERCHANT") == null,
+			"未配置的身份贴图返回空，交给 UI 隐藏"
+		)
+
 	var cultures: Array = catalog.get_enabled_cultures()
 	_check(cultures.size() == 3, "默认有三个文化")
 	if cultures.size() == 3:
@@ -389,6 +445,132 @@ func _check_page(page_name: String) -> void:
 			and preview_page.visible == (page_name == "PreviewPage"),
 		"当前显示页面为 %s" % page_name
 	)
+
+
+func _check_culture_visual(expected_texture_file: String) -> void:
+	var texture_rect := _node("CultureDetailVisualTexture") as TextureRect
+	var frame := _node("CultureDetailVisualFrame") as PanelContainer
+	var scroll := _node("CultureDetailScroll") as ScrollContainer
+	var bonus := _node("CultureBonusPanel") as PanelContainer
+	_check(
+		texture_rect != null and frame != null
+			and scroll != null and bonus != null,
+		"文化详情贴图节点存在"
+	)
+	if texture_rect == null or frame == null \
+			or scroll == null or bonus == null:
+		return
+	_check(texture_rect.texture != null, "文化详情展示贴图")
+	_check(
+		texture_rect.texture != null
+			and texture_rect.texture.resource_path.contains(expected_texture_file),
+		"文化详情贴图与选项一致：%s" % expected_texture_file
+	)
+	_check(
+		frame.visible and texture_rect.visible,
+		"有贴图时显示整块立绘区域"
+	)
+	_check(
+		_node("CultureDetailVisualPlaceholder") == null,
+		"立绘区域不再创建占位文本"
+	)
+	_check(
+		texture_rect.stretch_mode == TextureRect.STRETCH_KEEP_ASPECT_CENTERED,
+		"贴图保持原始宽高比"
+	)
+	_check(
+		texture_rect.expand_mode == TextureRect.EXPAND_IGNORE_SIZE,
+		"贴图按可用展示区域缩放"
+	)
+	_check_visual_frame_style(frame)
+	var frame_rect: Rect2 = frame.get_global_rect()
+	var bonus_rect: Rect2 = bonus.get_global_rect()
+	_check(
+		frame_rect.end.y <= bonus_rect.position.y + 0.5,
+		"贴图位于加成栏上方"
+	)
+	_check(
+		scroll.get_global_rect().end.x <= frame_rect.position.x + 0.5,
+		"描述文本区域不与贴图重叠"
+	)
+	_check(
+		frame_rect.position.x > scroll.get_global_rect().position.x,
+		"贴图靠描述区右侧"
+	)
+
+
+## 立绘展示区域从 132×168 放大到约 198×252（约 1.5 倍）。
+func _check_visual_frame_style(frame: PanelContainer) -> void:
+	var style: StyleBox = frame.get_theme_stylebox("panel")
+	_check(
+		style is StyleBoxEmpty,
+		"立绘区域没有背景底色与边框"
+	)
+	var frame_rect: Rect2 = frame.get_global_rect()
+	_check(
+		frame_rect.size.x >= 190.0,
+		"立绘展示宽度约扩大 1.5 倍：%.0f" % frame_rect.size.x
+	)
+	_check(
+		frame_rect.size.y >= 150.0,
+		"立绘展示高度约扩大 1.5 倍：%.0f" % frame_rect.size.y
+	)
+
+
+func _check_identity_visual(expected_texture_file: String) -> void:
+	var texture_rect := _node("IdentityDetailVisualTexture") as TextureRect
+	var frame := _node("IdentityDetailVisualFrame") as PanelContainer
+	var bonus := _node("IdentityBonusPanel") as PanelContainer
+	_check(
+		texture_rect != null and frame != null and bonus != null,
+		"身份详情贴图节点存在"
+	)
+	if texture_rect == null or frame == null or bonus == null:
+		return
+	_check(
+		texture_rect.texture != null
+			and texture_rect.texture.resource_path.contains(expected_texture_file),
+		"身份详情贴图与选项一致：%s" % expected_texture_file
+	)
+	_check(
+		frame.visible and texture_rect.visible,
+		"有立绘时显示整块立绘区域"
+	)
+	_check(
+		texture_rect.stretch_mode == TextureRect.STRETCH_KEEP_ASPECT_CENTERED,
+		"身份立绘保持原始宽高比，不拉伸不裁剪"
+	)
+	_check(
+		texture_rect.expand_mode == TextureRect.EXPAND_IGNORE_SIZE,
+		"身份立绘按可用展示区域等比缩放"
+	)
+	_check_visual_frame_style(frame)
+	_check(
+		frame.get_global_rect().end.y <= bonus.get_global_rect().position.y + 0.5,
+		"身份立绘区域位于加成栏上方"
+	)
+
+
+func _check_identity_visual_hidden() -> void:
+	var texture_rect := _node("IdentityDetailVisualTexture") as TextureRect
+	var frame := _node("IdentityDetailVisualFrame") as PanelContainer
+	var bonus := _node("IdentityBonusPanel") as PanelContainer
+	_check(
+		texture_rect != null and frame != null and bonus != null,
+		"身份详情贴图节点存在"
+	)
+	if texture_rect == null or frame == null or bonus == null:
+		return
+	_check(
+		texture_rect.texture == null and not texture_rect.visible,
+		"未配置身份贴图时不显示贴图节点"
+	)
+	_check(not frame.visible, "未配置身份贴图时隐藏整块立绘区域")
+	_check(
+		_node("IdentityDetailVisualPlaceholder") == null,
+		"无立绘时不显示任何占位文字或空框"
+	)
+	_check(bonus.visible, "无立绘时加成栏正常显示")
 
 
 func _check_route(required_culture: String, required_detail: String) -> void:

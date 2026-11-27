@@ -21,15 +21,11 @@ var faction_id: String = ""
 ## 政治归属以下方的 owner_house_id 为权威；family_id 只负责视觉身份。
 var family_id: String = ""
 ## 直接拥有该地点的家族（HouseData.house_id）；空字符串表示无主。
+## 这是领地所有权的唯一权威来源；家族领袖、爵位或个人身份变化不影响它。
 var owner_house_id: String = ""
-## 实际代表家族管理封地的贵族（NobleData.noble_id）；可选。
-var owner_noble_id: String = ""
-## 旧字段别名：与 owner_noble_id 指向同一贵族，避免新旧所有权字段并存。
-var owner_lord_id: String:
-	get:
-		return owner_noble_id
-	set(value):
-		owner_noble_id = value
+## 旧存档迁移输入：Schema v10 之前的个人所有者字段（owner_noble_id / owner_lord_id）。
+## 读档后由 WorldContext 解析为贵族所属家族并清空，不作为任何现行所有权依据。
+var _legacy_owner_noble_id: String = ""
 
 ## 该地点对应的小场景路径。空字符串表示使用村庄/城镇/城堡的默认模板。
 ## 初期所有村庄共用同一个基础场景，后续可逐村替换。
@@ -97,7 +93,7 @@ func get_all_adventurer_candidates() -> Array[AdventurerCandidateData]:
 
 
 func has_owner() -> bool:
-	return not owner_house_id.is_empty() or not owner_noble_id.is_empty()
+	return not owner_house_id.is_empty()
 
 
 func to_dict() -> Dictionary:
@@ -112,10 +108,8 @@ func to_dict() -> Dictionary:
 		"world_position": [world_position.x, world_position.y],
 		"faction_id": faction_id,
 		"family_id": family_id,
+		# 领地所有权只保存家族 ID；不再写出个人所有者字段。
 		"owner_house_id": owner_house_id,
-		"owner_noble_id": owner_noble_id,
-		# 兼容旧读取方：所有权仍以 owner_noble_id 为唯一来源。
-		"owner_lord_id": owner_noble_id,
 		"scene_path": scene_path,
 		"population": population,
 		"prosperity": prosperity,
@@ -146,10 +140,9 @@ static func from_dict(data: Dictionary) -> SettlementData:
 	settlement.world_position = _read_vector2(data.get("world_position", []))
 	settlement.faction_id = str(data.get("faction_id", ""))
 	settlement.family_id = str(data.get("family_id", ""))
-	settlement.owner_house_id = str(
-		data.get("owner_house_id", settlement.family_id)
-	)
-	settlement.owner_noble_id = str(
+	settlement.owner_house_id = str(data.get("owner_house_id", ""))
+	# 旧存档兼容：个人所有者只作为迁移输入，由 WorldContext 转成家族所有权。
+	settlement._legacy_owner_noble_id = str(
 		data.get("owner_noble_id", data.get("owner_lord_id", ""))
 	)
 	settlement.scene_path = str(data.get("scene_path", ""))

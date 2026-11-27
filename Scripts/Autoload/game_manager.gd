@@ -55,17 +55,22 @@ func enter_main_menu() -> void:
 
 
 ## 新游戏：创建初始世界数据并进入大地图。进入大地图后默认暂停。
-## identity_id / identity_category_id / culture_id 由选择界面传入；本阶段只保存结果，
-## 不据此改变世界初始化内容。
+## identity_id / identity_category_id / culture_id 由选择界面传入；
+## 身份配置是出生位置、家族、爵位与政治关系的唯一初始化依据。
 func start_new_game(
 		identity_id: String = "",
 		identity_category_id: String = "",
 		culture_id: String = ""
 ) -> bool:
+	var identity := _resolve_start_identity(
+		identity_id, identity_category_id, culture_id
+	)
+	if identity == null:
+		return false
 	_teardown_world()
-	player_identity_id = identity_id
-	player_identity_category_id = identity_category_id
-	player_culture_id = culture_id
+	player_identity_id = identity.identity_id
+	player_identity_category_id = identity.category_id
+	player_culture_id = identity.culture_id
 	TimeManager.clear_pauses()
 	TimeManager.start_session()
 	TimeManager.set_base_world_speed(TimeManager.SPEED_PAUSED)
@@ -75,7 +80,7 @@ func start_new_game(
 	add_child(context)
 	world_context = context
 
-	if not WorldInitializer.create_new_world(context):
+	if not WorldInitializer.create_new_world(context, identity):
 		push_error("初始世界数据创建失败")
 		_teardown_world()
 		TimeManager.stop_session()
@@ -91,6 +96,36 @@ func start_new_game(
 		TimeManager.stop_session()
 		return false
 	return true
+
+
+## 通过身份 ID 从静态配置解析身份；空 ID 使用正式默认身份（仅兼容测试入口）。
+## 类别/文化与身份配置不一致时拒绝初始化，避免 UI 选择与实际开局错位。
+func _resolve_start_identity(
+		identity_id: String,
+		category_id: String,
+		culture_id: String
+) -> IdentityDefinition:
+	var catalog := IdentityCatalog.load_default()
+	if catalog == null:
+		push_error("文化/身份配置加载失败，无法开始新游戏")
+		return null
+	var resolved_id: String = identity_id
+	if resolved_id.is_empty():
+		resolved_id = WorldInitializer.DEFAULT_IDENTITY_ID
+	var identity := catalog.get_identity(resolved_id)
+	if identity == null:
+		push_error("身份 ID 不存在: %s" % resolved_id)
+		return null
+	if not identity.validate():
+		push_error("身份配置无效: %s" % resolved_id)
+		return null
+	if not category_id.is_empty() and category_id != identity.category_id:
+		push_error("身份类别与身份配置不一致: %s" % resolved_id)
+		return null
+	if not culture_id.is_empty() and culture_id != identity.culture_id:
+		push_error("身份文化与身份配置不一致: %s" % resolved_id)
+		return null
+	return identity
 
 
 ## 读档是 Continue 与 Load Game 共用的唯一恢复入口。
@@ -115,6 +150,9 @@ func load_game(slot_name: String) -> bool:
 		return false
 
 	player_party_id = context.player_party_id
+	player_identity_id = context.player_identity_id
+	player_identity_category_id = context.player_identity_category_id
+	player_culture_id = context.player_culture_id
 	TimeManager.restore_world_time(save.world_elapsed_seconds, save.world_base_speed)
 	_set_game_state(GameState.IN_GAME)
 	EventBus.game_session_started.emit()
@@ -156,6 +194,9 @@ func enter_game_world(context: WorldContext) -> void:
 	world_context = context
 	if context != null:
 		player_party_id = context.player_party_id
+		player_identity_id = context.player_identity_id
+		player_identity_category_id = context.player_identity_category_id
+		player_culture_id = context.player_culture_id
 	_set_game_state(GameState.IN_GAME)
 
 

@@ -30,9 +30,26 @@ func _run() -> void:
 	_context = WorldContext.new()
 	_context.name = "BattleReinforcementTestContext"
 	add_child(_context)
-	_check(WorldInitializer.create_new_world(_context), "初始化世界")
+	# 测试夹具：使用平民身份并注册独立玩家家族，
+	# 使玩家的政治关系不随 NPC 王国战争自动变化。
+	var catalog := IdentityCatalog.load_default()
+	var commoner := catalog.get_identity("IDENTITY_DORAMAN_MERCENARY") \
+		if catalog != null else null
+	_check(commoner != null, "加载平民身份配置")
+	_check(WorldInitializer.create_new_world(_context, commoner), "初始化世界")
 	if not _context.is_valid_world():
 		return
+	var player_house := _context.house_manager.register_house(
+		WorldInitializer.HOUSE_PLAYER_ID,
+		WorldInitializer.PLAYER_HOUSE_NAME,
+		WorldInitializer.FAMILY_PLAYER_ID,
+		true
+	)
+	_check(player_house != null, "注册独立玩家家族")
+	_context.player_house_id = player_house.house_id
+	var player_party := _context.get_player_party()
+	if player_party != null:
+		player_party.family_id = player_house.house_id
 
 	var player := _context.get_player_party()
 	var bandits := _find_party_by_name("山道强盗")
@@ -225,28 +242,23 @@ func _test_player_joins_bandit_side_reinforcement() -> void:
 	_finish_current_battle_scene()
 	var player := _context.get_player_party()
 	var bandits := _find_party_by_name(WorldInitializer.BANDIT_PARTY_NAME)
-	var guard := _find_party_by_name(WorldInitializer.GUARD_PARTY_NAME)
+	var ally := _find_party_by_name(WorldInitializer.BARI_KNIGHT_PARTY_NAME)
 	var east_bandits := _find_party_by_name(WorldInitializer.EAST_BANDIT_PARTY_NAME)
 	_check(
-		player != null and bandits != null and guard != null and east_bandits != null,
+		player != null and bandits != null and ally != null and east_bandits != null,
 		"右侧增援测试所需部队存在"
 	)
-	if player == null or bandits == null or guard == null or east_bandits == null:
+	if player == null or bandits == null or ally == null or east_bandits == null:
 		return
-	# 玩家与治安队友好；强盗因敌对关系位于第 1 侧（右侧）。
-	_context.faction_manager.set_relation(
-		FactionManager.PLAYER_FACTION_ID,
-		FactionManager.GUARD_FACTION_ID,
-		FactionManager.Relation.FRIENDLY
-	)
+	# 玩家与巴里骑士同属伯克纳王国；强盗因敌对关系位于第 1 侧（右侧）。
 	_reset_party_for_battle(bandits)
-	_reset_party_for_battle(guard)
+	_reset_party_for_battle(ally)
 	_reset_party_for_battle(player)
 	_reset_party_for_battle(east_bandits)
 	var position := Vector2(1500.0, 1500.0)
-	# 治安队与玩家为第 0 侧（左），强盗为第 1 侧（右）。
+	# 巴里骑士与玩家为第 0 侧（左），强盗为第 1 侧（右）。
 	_session = _context.battle_manager.start_battle(
-		[guard.party_id, player.party_id] as Array[String],
+		[ally.party_id, player.party_id] as Array[String],
 		[bandits.party_id] as Array[String],
 		position
 	)

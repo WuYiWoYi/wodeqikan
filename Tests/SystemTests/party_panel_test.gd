@@ -95,7 +95,11 @@ func _test_open_and_overview() -> void:
 		count_label != null and count_label.text.contains(str(_player.member_unit_ids.size())),
 		"成员数量与 PartyData 一致"
 	)
-	_check(speed_label != null and speed_label.text.contains("150"), "显示部队移动速度")
+	_check(
+		speed_label != null
+			and speed_label.text.contains("%.1f" % _player.movement_speed),
+		"显示部队移动速度"
+	)
 	_check(state_label != null and state_label.text.contains("可用"), "显示部队状态")
 	_check(movement_label != null and movement_label.text.contains("待命"), "显示待命状态")
 

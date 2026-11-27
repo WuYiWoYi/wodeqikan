@@ -7,6 +7,9 @@ extends Node
 
 const TAB_TROOPS: String = "troops"
 const TAB_FIEFS: String = "fiefs"
+## 测试夹具：以平民身份开局，再手工装配一个测试玩家家族与封地，
+## 以便验证“除玩家外没有家族成员”的空状态。
+const TEST_VILLAGE_NAME: String = "埃克托"
 
 var _failed: bool = false
 var _context: WorldContext = null
@@ -36,11 +39,14 @@ func _run() -> void:
 	_context = WorldContext.new()
 	_context.name = "FamilyPanelTestContext"
 	add_child(_context)
-	_check(WorldInitializer.create_new_world(_context), "初始化世界")
+	var catalog := IdentityCatalog.load_default()
+	var commoner := catalog.get_identity("IDENTITY_DORAMAN_MERCENARY") \
+		if catalog != null else null
+	_check(commoner != null, "加载平民身份配置")
+	_check(WorldInitializer.create_new_world(_context, commoner), "初始化世界")
 	if not _context.is_valid_world():
 		return
-	_house = _context.get_player_house()
-	_check(_house != null, "玩家拥有家族")
+	_check(_context.get_player_house() == null, "平民开局没有玩家家族")
 
 	GameManager.world_context = _context
 	GameManager.player_party_id = _context.player_party_id
@@ -51,6 +57,11 @@ func _run() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 
+	await _test_commoner_family_panel()
+	_setup_test_player_family()
+	_house = _context.get_player_house()
+	_check(_house != null, "玩家拥有家族")
+
 	await _test_entry_and_empty_state()
 	_create_family_noble_and_party()
 	await _test_troop_page()
@@ -58,6 +69,69 @@ func _run() -> void:
 
 	_map.queue_free()
 	_context.queue_free()
+
+
+## 平民身份不自动创建家族；测试手工装配玩家家族、玩家贵族与一处封地。
+func _setup_test_player_family() -> void:
+	_house = _context.house_manager.register_house(
+		WorldInitializer.HOUSE_PLAYER_ID,
+		WorldInitializer.PLAYER_HOUSE_NAME,
+		WorldInitializer.FAMILY_PLAYER_ID,
+		true
+	)
+	if _house == null:
+		return
+	_context.player_house_id = _house.house_id
+	var player_party := _context.get_player_party()
+	if player_party == null:
+		return
+	player_party.family_id = WorldInitializer.FAMILY_PLAYER_ID
+	var player_noble := _context.noble_manager.create_noble(
+		WorldInitializer.PLAYER_LORD_NAME,
+		WorldInitializer.PLAYER_FACTION_ID,
+		player_party.party_id,
+		_house.house_id,
+		NobleData.Rank.KNIGHT,
+		true,
+		true
+	)
+	if player_noble != null:
+		_context.player_lord_id = player_noble.lord_id
+		player_party.leader_noble_id = player_noble.lord_id
+	var village := _find_settlement(TEST_VILLAGE_NAME)
+	if village != null:
+		village.owner_house_id = _house.house_id
+
+
+## 平民身份没有家族：入口仍可用，面板显示空状态且不伪造家族。
+func _test_commoner_family_panel() -> void:
+	var button := _map.find_child("FamilyButton", true, false) as Button
+	_check(button != null, "平民身份仍有家族入口")
+	if button == null:
+		return
+	button.pressed.emit()
+	await get_tree().process_frame
+	_panel = _map.call("get_family_panel")
+	_check(_panel != null and _panel.visible, "平民打开家族面板不崩溃")
+	if _panel == null:
+		return
+	_check(_panel.get_family_name() == "暂无家族", "平民家族标题显示暂无家族")
+	_check(_panel.get_troop_entries().is_empty(), "平民家族部队为空")
+	var fiefs_button := _map.find_child(
+		"FamilyTabFiefsButton", true, false
+	) as Button
+	if fiefs_button != null:
+		fiefs_button.pressed.emit()
+		await get_tree().process_frame
+	_check(_panel.get_fief_entries().is_empty(), "平民家族封地为空")
+	var close_button := _map.find_child(
+		"FamilyPanelCloseButton", true, false
+	) as Button
+	_check(close_button != null, "平民家族面板有关闭按钮")
+	if close_button != null:
+		close_button.pressed.emit()
+		await get_tree().process_frame
+	_check(not _panel.visible, "平民关闭家族面板回到大地图")
 
 
 func _test_entry_and_empty_state() -> void:
@@ -106,7 +180,7 @@ func _test_entry_and_empty_state() -> void:
 
 
 func _create_family_noble_and_party() -> void:
-	var village := _find_settlement(WorldInitializer.PLAYER_VILLAGE_NAME)
+	var village := _find_settlement(TEST_VILLAGE_NAME)
 	if village == null or _house == null:
 		return
 	_party = _context.party_manager.create_party(
@@ -167,7 +241,7 @@ func _test_troop_page() -> void:
 		"部队摘要显示真实成员数量")
 	_check(
 		str(entry.get("party_text", "")).contains(
-			WorldInitializer.PLAYER_VILLAGE_NAME
+			TEST_VILLAGE_NAME
 		),
 		"部队摘要显示附近地点"
 	)
@@ -225,7 +299,7 @@ func _test_troop_page() -> void:
 func _test_fief_page_and_locate() -> void:
 	if _house == null:
 		return
-	var player_village := _find_settlement(WorldInitializer.PLAYER_VILLAGE_NAME)
+	var player_village := _find_settlement(TEST_VILLAGE_NAME)
 	var bari := _find_settlement(WorldInitializer.BARI_VILLAGE_NAME)
 	var olin_castle := _find_settlement(WorldInitializer.OLIN_CASTLE_NAME)
 	var burk_town := _find_settlement(WorldInitializer.BURKNANIA_TOWN_NAME)
@@ -257,7 +331,6 @@ func _test_fief_page_and_locate() -> void:
 
 	# 家族成员获得更多封地后立即出现，无需重开面板。
 	bari.owner_house_id = _house.house_id
-	bari.owner_noble_id = _noble.lord_id if _noble != null else ""
 	_panel.call("refresh", true)
 	now_fiefs = _panel.get_fief_entries()
 	_check(_contains_settlement(now_fiefs, bari.settlement_id),
@@ -272,7 +345,6 @@ func _test_fief_page_and_locate() -> void:
 
 	# 所有权转回其他家族后实时消失。
 	bari.owner_house_id = WorldInitializer.HOUSE_BARI_ID
-	bari.owner_noble_id = ""
 	_panel.call("refresh", true)
 	now_fiefs = _panel.get_fief_entries()
 	_check(not _contains_settlement(now_fiefs, bari.settlement_id),

@@ -31,12 +31,32 @@ func _run() -> void:
 	_context = WorldContext.new()
 	_context.name = "PlayerFactionRelationContext"
 	add_child(_context)
-	_check(WorldInitializer.create_new_world(_context), "初始化世界")
+	var catalog := IdentityCatalog.load_default()
+	var commoner := catalog.get_identity("IDENTITY_DORAMAN_MERCENARY") \
+		if catalog != null else null
+	_check(commoner != null, "加载平民身份配置")
+	_check(WorldInitializer.create_new_world(_context, commoner), "初始化世界")
 	if not _context.is_valid_world():
 		return
+	# 测试夹具：平民身份无家族；注册独立玩家家族并给一处封地，
+	# 用于验证“无王国玩家”的阵营关系与建筑底板。
+	var house := _context.house_manager.register_house(
+		WorldInitializer.HOUSE_PLAYER_ID,
+		WorldInitializer.PLAYER_HOUSE_NAME,
+		WorldInitializer.FAMILY_PLAYER_ID,
+		true
+	)
+	_check(house != null, "注册独立玩家家族")
+	_context.player_house_id = house.house_id
+	var player_settlement := _find_settlement("埃克托")
+	_check(player_settlement != null, "找到测试玩家封地")
+	if player_settlement != null:
+		player_settlement.owner_house_id = house.house_id
 	GameManager.world_context = _context
 	GameManager.player_party_id = _context.player_party_id
 	_player = _context.get_player_party()
+	# 玩家部队绑定测试家族，使部队级关系能走家族关系分支。
+	_player.family_id = house.house_id
 
 	var packed := load("res://Scenes/WorldMap/world_map.tscn") as PackedScene
 	_map = packed.instantiate()
@@ -51,22 +71,21 @@ func _run() -> void:
 	var vaila_party := _find_party("瓦伊拉骑士")
 	var bari_settlement := _find_settlement("巴里")
 	var moxixi_settlement := _find_settlement("墨西西")
-	var qinghe_settlement := _find_settlement("青禾村")
 	_check(
 		bari_party != null and burknania_party != null and moxixi_party != null
 			and taina_party != null and vaila_party != null
 			and bari_settlement != null and moxixi_settlement != null
-			and qinghe_settlement != null,
+			and player_settlement != null,
 		"测试所需部队与地点存在"
 	)
 	if bari_party == null or burknania_party == null or moxixi_party == null \
 			or taina_party == null or vaila_party == null \
 			or bari_settlement == null or moxixi_settlement == null \
-			or qinghe_settlement == null:
+			or player_settlement == null:
 		return
 
 	_test_initial_visuals(
-		bari_party, bari_settlement, moxixi_settlement, qinghe_settlement
+		bari_party, bari_settlement, moxixi_settlement, player_settlement
 	)
 	_test_kingdom_wide_hostility(
 		bari_party, burknania_party, moxixi_party, bari_settlement, moxixi_settlement
@@ -83,7 +102,7 @@ func _test_initial_visuals(
 	bari_party: PartyData,
 	bari_settlement: SettlementData,
 	moxixi_settlement: SettlementData,
-	qinghe_settlement: SettlementData
+	player_settlement: SettlementData
 ) -> void:
 	var factions := _context.faction_manager
 	_check(
@@ -110,7 +129,7 @@ func _test_initial_visuals(
 		"中立部队不显示阵营外环"
 	)
 	_check(
-		_tag_color(qinghe_settlement).is_equal_approx(
+		_tag_color(player_settlement).is_equal_approx(
 			SettlementNameTag.ALLIED_BACKGROUND_COLOR
 		),
 		"玩家自有建筑显示绿色底板"

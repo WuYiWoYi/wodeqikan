@@ -33,12 +33,12 @@ func _run() -> void:
 	var player := context.get_player_party() if context != null else null
 	var bandit := _find_party_by_name(context, WorldInitializer.BANDIT_PARTY_NAME)
 	var merchant := _find_party_by_name(context, WorldInitializer.TEST_ENEMY_PARTY_NAME)
-	var guard := _find_party_by_name(context, WorldInitializer.GUARD_PARTY_NAME)
+	var ally := _find_party_by_name(context, WorldInitializer.BARI_KNIGHT_PARTY_NAME)
 	_check(
-		player != null and bandit != null and merchant != null and guard != null,
+		player != null and bandit != null and merchant != null and ally != null,
 		"玩家与三方 NPC 部队存在"
 	)
-	if player == null or bandit == null or merchant == null or guard == null:
+	if player == null or bandit == null or merchant == null or ally == null:
 		return
 
 	# 固定测试场景，避免其他 AI 干扰。
@@ -58,10 +58,10 @@ func _run() -> void:
 	merchant.target_position = merchant.world_position
 	merchant.movement_state = PartyData.MovementState.IDLE
 	merchant.ai_type = PartyData.PartyAIType.NONE
-	guard.world_position = Vector2(2500.0, 1700.0)
-	guard.target_position = guard.world_position
-	guard.movement_state = PartyData.MovementState.IDLE
-	guard.ai_type = PartyData.PartyAIType.NONE
+	ally.world_position = Vector2(2500.0, 1700.0)
+	ally.target_position = ally.world_position
+	ally.movement_state = PartyData.MovementState.IDLE
+	ally.ai_type = PartyData.PartyAIType.NONE
 
 	TimeManager.set_base_world_speed(TimeManager.SPEED_DOUBLE)
 	TimeManager.push_pause(OTHER_PAUSE)

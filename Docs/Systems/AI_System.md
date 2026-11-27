@@ -111,7 +111,7 @@ Idle
   - 阶段 8 起，部队关系优先按政治身份解析：`leader_noble_id` → 家族 → 王国；无家族时回退阵营。
   - 关系：友好、中立、敌对；同阵营且无政治冲突时友好；未知组合默认中立。
   - `is_party_hostile()` / `is_party_friendly()` / `is_party_neutral()` 供 AI、视野与遭遇统一使用；`is_hostile()` 保留阵营级查询。
-  - 玩家家族默认中立；王国开战会传播到双方成员家族。
+  - 玩家未加入王国时默认中立；贵族身份会因所属家族与王国自动同阵营，王国开战会传播到双方成员家族。
 - `VisionManager` 是唯一视野查询入口：
   - 距离 `<= observer.sight_range` 即可见；
   - 观察者必须 `AVAILABLE` 且有存活士兵；
@@ -130,9 +130,8 @@ Idle
 
 ### 3.3 巡逻循环
 
-- 新游戏的北境巡逻队在创建时写入围绕实际驻地的 4 个 `ai_patrol_points`（`_patrol_points_around()`，全部收敛到可通行区域）。
-- 家族骑士同样拥有围绕家族驻地的 4 个专属巡逻点；`AIManager` 优先读取 `party.ai_patrol_points`。
-- `AIManager.PATROL_POINTS` 只作为旧存档/无专属巡逻点部队的回退数组；新世界不再依赖其旧坐标。
+- 新世界不再预置北境巡逻队；家族骑士拥有围绕家族驻地的 4 个专属巡逻点（`_patrol_points_around()`，全部收敛到可通行区域）。
+- `AIManager` 优先读取 `party.ai_patrol_points`；`AIManager.PATROL_POINTS` 只作为旧存档/无专属巡逻点治安部队的回退数组，新世界不依赖其旧坐标。
 - 到达目标后按顺序前进，不随机改变目标。
 - 目标仍由 `WorldMapManager.set_party_target()` 进行边界限制；新地图再由 `WorldTerrain` 绕开湖泊/山脉。
 
@@ -297,7 +296,7 @@ Idle
 `AIManager._tick_lord_strategic()` 对每个非玩家、存活的领主：
 
 1. 取领主 `party_id` 对应的部队；无效或不可用则跳过。
-2. 部队人数低于 `SettlementEconomyConfig.ai_lord_recruit_threshold`（默认 12）时，优先查找最近的、`owner_lord_id` 为自己的、采邑储备 > 0 的村庄。
+2. 部队人数低于 `SettlementEconomyConfig.ai_lord_recruit_threshold`（默认 12）时，优先查找最近的、`owner_house_id` 等于该领主所属家族、采邑储备 > 0 的村庄。
 3. 设置 `LordData.current_state = "RECRUITING"`、`current_goal = "FIEF_RECRUIT"` 与 `current_target_settlement_id`，让部队移动到该村。
 4. 抵达后调用 `FiefRecruitmentManager.recruit_group()`；无论成功失败都清除征召状态和目标。
 5. 若没有可用采邑，则按 `is_authorized_owner()` 查找自有村庄中仍有普通冒险者候选人、且部队能支付至少 1 名招募费用的最近村庄；设置 `current_goal = "ADVENTURER_RECRUIT"` 并前往。

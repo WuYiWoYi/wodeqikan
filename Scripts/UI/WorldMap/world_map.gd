@@ -3560,24 +3560,13 @@ func _open_settlement(settlement: SettlementData) -> void:
 func _refresh_settlement_info(settlement: SettlementData) -> void:
 	if settlement == null:
 		return
-	var owner_name: String = "无主"
-	if not settlement.owner_noble_id.is_empty():
-		var owner_noble: NobleData = _context.noble_manager.get_noble(
-			settlement.owner_noble_id
-		)
-		if owner_noble != null:
-			owner_name = owner_noble.display_name
-	elif not settlement.owner_house_id.is_empty():
-		var house_leader := _context.house_manager.get_house_leader(
-			settlement.owner_house_id
-		)
-		if house_leader != null:
-			owner_name = house_leader.display_name
-	_settlement_owner_label.text = "领主：%s" % owner_name
-	var family_name: String = "无"
+	# 领地所有权属于家族：面板只显示家族名称，不显示个人贵族。
 	var owner_house := _context.house_manager.get_house(
 		settlement.owner_house_id
 	) if _context.house_manager != null else null
+	var owner_name: String = owner_house.house_name if owner_house != null else "无主"
+	_settlement_owner_label.text = "所有者：%s" % owner_name
+	var family_name: String = "无"
 	if owner_house != null:
 		family_name = owner_house.house_name
 		var kingdom := _context.kingdom_manager.get_kingdom_for_house(
@@ -3612,14 +3601,12 @@ func _refresh_settlement_info(settlement: SettlementData) -> void:
 		_settlement_fief_label.text = "采邑储备：不适用"
 
 	var player_lord: LordData = _context.get_player_lord()
-	var player_noble := player_lord as NobleData
+	# 授权完全复用封地管理器的家族所有权判断，UI 不复制规则。
 	var owns: bool = is_village and player_lord != null \
-		and settlement.owner_noble_id == player_lord.lord_id
-	if not owns and is_village and player_noble != null \
-			and settlement.owner_noble_id.is_empty() \
-			and not settlement.owner_house_id.is_empty():
-		owns = player_noble.house_id == settlement.owner_house_id \
-			and player_noble.is_house_leader
+		and _context.fief_recruitment_manager != null \
+		and _context.fief_recruitment_manager.is_authorized_owner(
+			settlement, player_lord.lord_id
+		)
 	_settlement_recruit_button.visible = owns
 	_settlement_recruit_button.disabled = not owns \
 		or settlement.fief_recruitment_stock <= 0
@@ -4496,6 +4483,9 @@ func _update_player_info() -> void:
 			if house != null:
 				house_name = house.house_name
 		identity_text = "    身份：%s · %s" % [house_name, player_noble.get_rank_text()]
+	elif _context != null and not _context.player_identity_name.is_empty():
+		# 平民身份没有家族，但身份选择结果仍需在大地图可见。
+		identity_text = "    身份：%s（无家族）" % _context.player_identity_name
 	_player_info_label.text = "%s    移动速度：%.1f    坐标 (%d, %d)    状态：%s%s" % [
 		_player_party.party_name,
 		_get_party_speed(_player_party),

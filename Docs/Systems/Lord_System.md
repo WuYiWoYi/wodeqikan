@@ -69,14 +69,11 @@ Kingdom
 
 ## 5. 封地归属
 
-- 阶段 8 起 `SettlementData.owner_noble_id` / `owner_house_id` 是封地归属的权威字段；`owner_lord_id` 作为兼容副本同步维护。
-- 归属判断看 `owner_noble_id` 与 `owner_house_id`，不看 `faction_id` 或视觉 `family_id`。
-- `WorldContext.validate_world_ownership()` 校验每个非空归属都能找到领主，并校验玩家领主身份。
-- 新游戏初始封地：
-  - 巴里 → 巴里家族领主；
-  - 墨西西 → 墨西西家族领主；
-  - 青禾村 → 玩家领主；
-  - 其他地点无主或保持原配置。
+- 2026-11-27 起 `SettlementData.owner_house_id` 是封地归属的唯一权威字段；个人所有者字段已删除，也没有兼容副本。
+- 归属判断只看 `owner_house_id`，不看 `faction_id` 或视觉 `family_id`；家族领袖、爵位与称号变化不影响所有权。
+- `WorldContext.validate_world_ownership()` 校验每个非空归属都能找到家族。
+- 新游戏初始封地由 `WorldInitializer._family_specs()` 按 Settlement ID → 家族 ID 显式声明，共 59 处，覆盖 17 个家族；塞洛斯要塞、巴达洛斯要塞无主。
+- 贵族身份不会额外获得封地；玩家加入家族后即可与同家族成员一样征召家族村庄。
 - 当前没有封地转让、继承、战争占领或领主死亡处理。
 
 ## 6. AI 领主征召
@@ -144,7 +141,7 @@ LordAI
 | `LordData` 与序列化 | 已实现 |
 | `LordManager` 仓储 | 已实现 |
 | 玩家领主 / 玩家角色分离 | 已实现 |
-| 封地归属 `owner_lord_id` | 已实现 |
+| 封地归属 `owner_house_id` | 已实现（只归属家族） |
 | 读档所有权校验 | 已实现 |
 | AI 领主前往自有封地征召 | 已实现 |
 | 战略攻击/撤退决策 | TODO |

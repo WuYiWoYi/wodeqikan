@@ -34,6 +34,16 @@ func _test_data_layer() -> void:
 	_check(WorldInitializer.create_new_world(_context), "初始化世界")
 	if not _context.is_valid_world():
 		return
+	# 测试夹具：默认贵族身份通过家族所有权获得埃克托村庄。
+	var village: SettlementData = null
+	for settlement: SettlementData in _context.settlement_manager.get_all_settlements():
+		if settlement != null and settlement.display_name == "埃克托":
+			village = settlement
+			break
+	var player_house := _context.get_player_house()
+	_check(village != null and player_house != null, "找到玩家家族封地")
+	if village != null and player_house != null:
+		village.owner_house_id = player_house.house_id
 
 	var events: Array[Dictionary] = _context.event_center.get_events()
 	_check(not events.is_empty(), "初始世界存在待处理事件")

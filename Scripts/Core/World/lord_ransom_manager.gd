@@ -915,7 +915,7 @@ func _reset_party_runtime(party: PartyData, spawn_position: Vector2) -> void:
 
 
 func _find_spawn_settlement(
-	record: Dictionary, noble: NobleData, allow_any: bool
+	_record: Dictionary, noble: NobleData, allow_any: bool
 ) -> SettlementData:
 	if _house_manager != null and _settlement_manager != null:
 		var house_settlements: Array[SettlementData] = (
@@ -925,15 +925,9 @@ func _find_spawn_settlement(
 			func(a: SettlementData, b: SettlementData) -> bool:
 				return a.settlement_id < b.settlement_id
 		)
-		for settlement: SettlementData in house_settlements:
-			if settlement.owner_noble_id == noble.lord_id:
-				return settlement
+		# 领地归家族所有：同家族任意成员都在家族封地附近复位。
 		if not house_settlements.is_empty():
 			return house_settlements[0]
-		# 无家族封地时，退回该贵族的任意封地。
-		for settlement: SettlementData in _settlement_manager.get_all_settlements():
-			if settlement != null and settlement.owner_noble_id == noble.lord_id:
-				return settlement
 	if allow_any:
 		return _find_any_settlement()
 	return null

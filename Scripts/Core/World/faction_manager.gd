@@ -247,23 +247,15 @@ func get_player_relation_for_party(party_id: String) -> PlayerRelation:
 			return PlayerRelation.NEUTRAL
 
 
-## 地点与玩家的阵营关系。权威归属读取 owner_house_id；
-## 缺失时回退到 owner_noble_id 的家族；仍无归属则中立。
+## 地点与玩家的阵营关系。权威归属只读取 owner_house_id；
+## 无家族归属的地点保持中立，不从视觉旗帜或个人身份推导。
 func get_player_relation_for_settlement(settlement_id: String) -> PlayerRelation:
 	if settlement_id.is_empty() or _settlement_manager == null:
 		return PlayerRelation.NEUTRAL
 	var settlement := _settlement_manager.get_settlement(settlement_id)
-	if settlement == null:
+	if settlement == null or settlement.owner_house_id.is_empty():
 		return PlayerRelation.NEUTRAL
-	var house_id: String = settlement.owner_house_id
-	if house_id.is_empty() and not settlement.owner_noble_id.is_empty() \
-			and _noble_manager != null:
-		var owner := _noble_manager.get_noble(settlement.owner_noble_id)
-		if owner != null:
-			house_id = owner.house_id
-	if house_id.is_empty():
-		return PlayerRelation.NEUTRAL
-	return get_player_relation_for_house(house_id)
+	return get_player_relation_for_house(settlement.owner_house_id)
 
 
 ## 王国与玩家的阵营关系。玩家未加入王国时，只有主动宣战记录会产生敌对。

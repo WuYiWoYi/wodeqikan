@@ -245,13 +245,13 @@ func _build_signature() -> String:
 			house.house_id
 		):
 			parts.append("house_settlement:%s;%s" % [
-				settlement.settlement_id, settlement.owner_noble_id
+				settlement.settlement_id, settlement.owner_house_id
 			])
 	for settlement: SettlementData in _context.settlement_manager.get_all_settlements():
-		parts.append("settlement:%s;%s;%d;%s;%s;%s;%d;%d;%d;%d" % [
+		parts.append("settlement:%s;%s;%d;%s;%s;%d;%d;%d;%d" % [
 			settlement.settlement_id, settlement.display_name,
-			int(settlement.settlement_type), settlement.owner_noble_id,
-			settlement.owner_house_id, settlement.family_id,
+			int(settlement.settlement_type), settlement.owner_house_id,
+			settlement.family_id,
 			settlement.population, settlement.prosperity,
 			settlement.tax_income_per_day, settlement.fief_recruitment_stock,
 		])
@@ -635,26 +635,14 @@ func _settlement_text(settlement: SettlementData) -> String:
 	]
 
 
-## 地点所有者显示名：优先个人贵族，其次家族，最后视觉家族配置。
+## 地点所有者显示名：只显示家族所有权；无家族归属时不推断个人或视觉家族。
 func _settlement_owner_text(settlement: SettlementData) -> String:
-	if settlement == null:
+	if settlement == null or settlement.owner_house_id.is_empty():
 		return "无主"
-	if not settlement.owner_noble_id.is_empty() \
-			and _context.noble_manager != null:
-		var owner := _context.noble_manager.get_noble(settlement.owner_noble_id)
-		if owner != null:
-			return owner.display_name
-	if not settlement.owner_house_id.is_empty() \
-			and _context.house_manager != null:
-		var house := _context.house_manager.get_house(settlement.owner_house_id)
-		if house != null:
-			return house.house_name
-	if not settlement.family_id.is_empty() \
-			and _context.family_registry != null:
-		var family := _context.family_registry.get_config(settlement.family_id)
-		if family != null:
-			return family.display_name
-	return "无主"
+	if _context.house_manager == null:
+		return "无主"
+	var house := _context.house_manager.get_house(settlement.owner_house_id)
+	return house.house_name if house != null else "无主"
 
 
 func _house_relation(house_id: String) -> String:

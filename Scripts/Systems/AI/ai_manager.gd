@@ -38,7 +38,7 @@ const BANDIT_TARGET_DISTANCE_WEIGHT: float = 0.1
 ## 新目标至少高出该分数才主动切换，避免在相近目标间反复横跳。
 const BANDIT_TARGET_SWITCH_MARGIN: float = 30.0
 
-## 北境巡逻队的固定巡逻点，按数组顺序循环。
+## 旧存档/无专属巡逻点治安部队的回退巡逻点，按数组顺序循环。
 const PATROL_POINTS: Array[Vector2] = [
 	Vector2(2200.0, 500.0),
 	Vector2(2600.0, 900.0),
@@ -767,7 +767,7 @@ func _find_owned_recruit_settlement(
 		if settlement == null \
 				or settlement.settlement_type != SettlementData.SettlementType.VILLAGE:
 			continue
-		if settlement.owner_lord_id != lord.lord_id:
+		if not _is_lord_authorized_owner(settlement, lord):
 			continue
 		if settlement.fief_recruitment_stock <= 0:
 			continue
@@ -811,7 +811,9 @@ func _is_lord_authorized_owner(settlement: SettlementData, lord: LordData) -> bo
 		return _fief_recruitment_manager.is_authorized_owner(
 			settlement, lord.lord_id
 		)
-	return settlement.owner_lord_id == lord.lord_id
+	var noble := lord as NobleData
+	return noble != null and not settlement.owner_house_id.is_empty() \
+		and noble.house_id == settlement.owner_house_id
 
 
 func _has_available_normal_candidate(settlement: SettlementData) -> bool:

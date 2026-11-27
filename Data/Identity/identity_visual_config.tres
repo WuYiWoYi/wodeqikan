@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="IdentityVisualConfig" load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/identity_visual_config.gd" id="1_visual"]
+[ext_resource type="Texture2D" path="res://art/我的骑砍临时美术/正式美术_其他/UI美术/UI身份选择标签贴图/UI_身份选择_多拉曼人.png" id="2_doraman"]
+[ext_resource type="Texture2D" path="res://art/我的骑砍临时美术/正式美术_其他/UI美术/UI身份选择标签贴图/UI_身份选择_布吉多人.png" id="3_bugido"]
+[ext_resource type="Texture2D" path="res://art/我的骑砍临时美术/正式美术_其他/UI美术/UI身份选择标签贴图/UI_身份选择_洛里斯人.png" id="4_lorris"]
+[ext_resource type="Texture2D" path="res://art/我的骑砍临时美术/正式美术_其他/UI美术/UI身份选择标签贴图/UI_身份选择_埃克托家族次子.png" id="5_ektor"]
+
+[resource]
+script = ExtResource("1_visual")
+culture_textures = {
+"CULTURE_BUGIDO": ExtResource("3_bugido"),
+"CULTURE_DORAMAN": ExtResource("2_doraman"),
+"CULTURE_LORRIS": ExtResource("4_lorris")
+}
+identity_textures = {
+"IDENTITY_EKTOR_SECOND_SON": ExtResource("5_ektor")
+}

@@ -67,10 +67,10 @@ func _load_phase() -> void:
 	context.name = "RestartLoadContext"
 	add_child(context)
 	_check(context.load_from_save_data(save), "读取阶段：恢复 WorldContext")
-	_check(context.party_manager.get_all_parties().size() == 12, "读取阶段：12 支部队")
+	_check(context.party_manager.get_all_parties().size() == 56, "读取阶段：56 支部队")
 	_check(
-		context.settlement_manager.get_all_settlements().size() == 9,
-		"读取阶段：9 个地点"
+		context.settlement_manager.get_all_settlements().size() == 61,
+		"读取阶段：61 个地点"
 	)
 	var player := context.get_player_party()
 	_check(player != null, "读取阶段：玩家部队存在")

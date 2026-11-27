@@ -311,18 +311,18 @@ func get_candidate(
 
 
 ## 贵族冒险者是否允许由指定贵族招募。直接复用封地所有权授权规则：
-## 明确 owner_noble_id 时只认该贵族；未指定时认所有者家族领袖。
+## 贵族所属家族等于领地 owner_house_id 即获授权。
 func is_noble_recruit_authorized(
 	settlement: SettlementData, recruiter_lord_id: String
 ) -> bool:
 	if settlement == null or recruiter_lord_id.strip_edges().is_empty():
 		return false
-	if _fief_recruitment_manager != null:
-		return _fief_recruitment_manager.is_authorized_owner(
-			settlement, recruiter_lord_id
-		)
-	# 未装配封地管理器时只接受明确个人所有者，避免放宽权限。
-	return settlement.owner_noble_id == recruiter_lord_id
+	if _fief_recruitment_manager == null:
+		# 未装配封地管理器时拒绝授权，避免绕过统一的家族所有权规则。
+		return false
+	return _fief_recruitment_manager.is_authorized_owner(
+		settlement, recruiter_lord_id
+	)
 
 
 ## 玩家支付固定金币招募一名候选人。任何失败都不扣金币、不创建单位。

@@ -16,9 +16,7 @@
 | `world_position` | 大地图坐标（像素） |
 | `faction_id` | 所属阵营 |
 | `family_id` | 视觉家族 `FAMILY_*`；用于徽章、名称与外观 |
-| `owner_house_id` | 政治家族 `HOUSE_*`；封地归属与征召授权 |
-| `owner_noble_id` | 归属贵族；可独立于家族领袖 |
-| `owner_lord_id` | 兼容字段；阶段 8 起与 `owner_noble_id` 同步 |
+| `owner_house_id` | 政治家族 `HOUSE_*`；封地归属与征召授权的唯一权威，空字符串表示无主 |
 | `scene_path` | 该地点小场景路径；旧存档/城镇/城堡为空 |
 | `population` | 人口；采邑征召成本与补充周期因子 |
 | `prosperity` | 繁荣度；采邑征召成本与补充周期因子 |
@@ -43,21 +41,19 @@
 - `to_dict()` / `load_from_dict()` 存档序列化。
 - 不负责地图图标、交互面板或地点模拟。
 
-初始地点以 `Data/WorldMap/world_map_definition.tres` 为唯一来源：当前共 63 个（38 村庄、8 城镇、17 城堡），坐标由参考图像素 × 5 得到。地点 ID 由 `IdGenerator` 按创建顺序生成，不在文档中固定。
+初始地点以 `Data/WorldMap/world_map_definition.tres` 为唯一来源：当前共 61 个（36 村庄、8 城镇、17 城堡），坐标由参考图像素 × 5 得到。地点 ID 由 `IdGenerator` 按创建顺序生成，不在文档中固定。
 
-只有以下 9 个地点保留旧世界已确认的所有权，其余 54 个无主；重建地图不按位置补写归属：
+只有以下 7 个地点保留旧世界已确认的所有权，其余 54 个无主；重建地图不按位置补写归属：
 
 | 名称 | 类型 | 世界坐标 | 旗帜家族 `family_id` | 政治归属 `owner_house_id` |
 |---|---|---|---|---|
 | 巴里 | 村庄 | (3606, 2286) | `FAMILY_BARI` | `HOUSE_BARI` |
 | 灰石堡垒 | 城堡 | (3865, 944) | `FAMILY_BURKNANIA` | `HOUSE_BARI` |
 | 墨西西 | 村庄 | (5247.5, 4949) | `FAMILY_MOXIXI` | `HOUSE_MOXIXI` |
-| 北境村 | 村庄 | (725, 1225) | `FAMILY_MOXIXI` | `HOUSE_MOXIXI` |
 | 伯克纳尼亚 | 城镇 | (1944, 607.5) | `FAMILY_BURKNANIA` | `HOUSE_BURKNANIA` |
 | 伯克纳 | 村庄 | (2463, 973.5) | `FAMILY_BURKNANIA` | `HOUSE_BURKNANIA` |
 | 奥林德斯堡 | 城堡 | (4817.5, 4233) | `FAMILY_OLIN` | `HOUSE_OLIN` |
 | 奥林 | 村庄 | (5439, 4386) | `FAMILY_OLIN` | `HOUSE_OLIN` |
-| 青禾村 | 村庄 | (1250, 3500) | `FAMILY_PLAYER` | `HOUSE_PLAYER` |
 
 - 灰石堡垒体现“旗帜家族 ≠ 政治归属”：视觉旗帜来自伯克纳家族，所有权属于巴里家族。
 - 地点最短间距 ≥ 250 世界像素；全部位于不规则边界内且不在湖泊/山脉中。名称标签在默认 1.5x 缩放下不重叠，最小 0.5x 下可能重叠（KI545）。
@@ -174,7 +170,7 @@ Milestone 1 只做基础面板；阶段 6 起村庄面板增加进入小场景�
 | 市场入口 | 已实现（村庄与城镇显示，城堡不显示；按地点类型判断，名称不参与） |
 | 村庄/城镇市场库存 | 已实现（`MarketManager`，按地点独立存档；城堡无市场） |
 | 城镇/城堡小场景 | 未实现 |
-| 封地归属 `owner_noble_id` / `owner_house_id` | 已实现（阶段 8；读档校验贵族与家族存在且一致） |
+| 封地归属 `owner_house_id` | 已实现（2026-11-27 起只归属家族；读档校验家族存在） |
 | 地点层级 1/2/3 与仅村庄征召 | 已实现（阶段 8） |
 | 采邑储备/补充/税收缓存 | 已实现（`FiefRecruitmentManager`） |
 | 冒险者候选人 | 已实现（`AdventurerRecruitmentManager`） |
@@ -190,7 +186,7 @@ Milestone 1 只做基础面板；阶段 6 起村庄面板增加进入小场景�
 ## 9. 家族归属与固定屏幕名称（阶段 6 新增）
 
 - `SettlementData.family_id`：地点所属家族，持久化；只决定地图名称旁的家族旗帜，不改变 `faction_id` 或外交。
-- 新游戏地点坐标见第 1.1 节当前表；巴里、墨西西、北境村、灰石堡垒等全部由 `WorldMapDefinition` 提供，不再在 `Settlement` 文档或脚本中维护旧坐标。
+- 新游戏地点坐标见第 1.1 节当前表；巴里、墨西西、灰石堡垒等全部由 `WorldMapDefinition` 提供，不再在 `Settlement` 文档或脚本中维护旧坐标。
 - 地点名称不再由 `SettlementIcon` 在世界空间绘制；改为固定屏幕 UI 层 `SettlementNameTag`：
   - 每帧用 `get_viewport().get_canvas_transform() * settlement.world_position` 更新位置；
   - 字体与标签尺寸不随相机缩放；
@@ -200,19 +196,19 @@ Milestone 1 只做基础面板；阶段 6 起村庄面板增加进入小场景�
 
 ## 10. 封地归属、税收与征召入口（阶段 7 新增）
 
-- 阶段 8 起 `owner_noble_id` 与 `owner_house_id` 是封地归属的权威；`family_id` 仅用于视觉家族，`faction_id` 不参与权限判断。`owner_lord_id` 作为兼容副本同步维护。
+- 现行规则：`owner_house_id` 是封地归属的唯一权威；`family_id` 仅用于视觉家族，`faction_id` 不参与权限判断。没有个人所有者字段，也没有兼容副本。
 - 地点面板读取并显示：
   - 名称、类型；
-  - 归属领主显示名（无主时显示“无主”）；
+  - 所有者家族显示名（无主时显示“无主”）；
   - 家族显示名；
   - 人口、繁荣度；
   - `TaxCalculator` 计算后的每日税收缓存；
   - 采邑储备与补充状态。
-- 只有玩家自有村庄（`owner_noble_id == 玩家贵族`）显示“征召采邑”按钮；家族领袖也可征召本家族村庄。按钮在储备为 0 或地点非村庄时禁用。
-- 村庄头人对话只在玩家自有村庄且有储备时追加同一征召动作。
+- 只要玩家贵族所属家族等于 `owner_house_id` 即可显示“征召采邑”按钮；家族领袖、男爵、骑士与普通成员一致。按钮在储备为 0 或地点非村庄时禁用。
+- 村庄头人对话只在玩家家族拥有该村庄且有储备时追加同一征召动作。
 - 两个入口都调用 `FiefRecruitmentManager.recruit_group()`，UI 不计算编制、成本或周期。
 - 税收公式、人口/繁荣度成本和储备补充参数集中在 `SettlementEconomyConfig`；UI 与 `SettlementData` 不重复实现。
-- 读档时每个非空 `owner_noble_id` 必须指向存在的贵族，`owner_house_id` 必须存在且与贵族的家族一致；否则拒绝加载。旧存档仅有 `owner_lord_id` 时同步迁移。
+- 读档时每个非空 `owner_house_id` 必须指向存在的家族；旧存档个人所有者由 `WorldContext` 解析为贵族所属家族后清空。
 - 详细流程见 [Fief_Recruitment_System.md](Fief_Recruitment_System.md)，候选人见 [Adventurer_Recruitment_System.md](Adventurer_Recruitment_System.md)。
 
 ## 11. 村庄/城镇市场入口（阶段 11 新增，阶段 12 扩展）

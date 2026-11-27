@@ -815,8 +815,11 @@ func _can_player_recruit_fief() -> bool:
 	if _settlement.fief_recruitment_stock <= 0:
 		return false
 	var player_lord: LordData = _context.get_player_lord()
-	return player_lord != null \
-		and _settlement.owner_lord_id == player_lord.lord_id
+	if player_lord == null or _context.fief_recruitment_manager == null:
+		return false
+	return _context.fief_recruitment_manager.is_authorized_owner(
+		_settlement, player_lord.lord_id
+	)
 
 
 func _show_dialogue() -> void:

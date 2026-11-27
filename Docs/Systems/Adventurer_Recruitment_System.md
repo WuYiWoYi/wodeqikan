@@ -75,7 +75,7 @@
 `recruit_candidate(settlement_id, candidate_id, profile, recruiter_lord_id = "")`：
 
 1. 校验村庄、候选人存在、`AVAILABLE`、玩家档案有效。
-2. 贵族候选人额外校验 `is_noble_recruit_authorized(settlement, recruiter_lord_id)`：直接复用 `FiefRecruitmentManager.is_authorized_owner()`；明确 `owner_noble_id` 时只认该贵族，未指定时认所有者家族领袖。
+2. 贵族候选人额外校验 `is_noble_recruit_authorized(settlement, recruiter_lord_id)`：直接复用 `FiefRecruitmentManager.is_authorized_owner()`；条件为请求者所属家族等于 `owner_house_id`，同家族全部成员一致。
 3. 校验金币 >= `RecruitmentConfig.get_civilian_recruit_cost(candidate.tier)`：Tier1 = 5，Tier3 = 400。
 4. 校验玩家部队存在且 `is_available_for_world()`。
 5. 读取候选人兵种配置；优先使用候选人独立 `unit_data` 快照转化为真实单位，旧档缺失时新建。贵族保留三级属性与战马实例。

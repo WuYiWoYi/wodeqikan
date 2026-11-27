@@ -29,12 +29,18 @@ const OPTION_HEIGHT: float = 56.0
 const OPTION_SEPARATION: int = 10
 const PLACEHOLDER_HINT: String = "待设定"
 const ROUTE_PENDING_TEXT: String = "身份：待选择"
+const VISUAL_MAX_WIDTH: float = 198.0
+const VISUAL_MAX_HEIGHT: float = 252.0
+const VISUAL_MIN_HEIGHT: float = 156.0
+const VISUAL_GAP: float = 12.0
 
 
 class DetailView:
 	var title: Label = null
 	var type_label: Label = null
 	var description: Label = null
+	var visual_frame: PanelContainer = null
+	var visual_texture: TextureRect = null
 	var bonus_title: Label = null
 	var bonus_list: VBoxContainer = null
 
@@ -48,6 +54,7 @@ class SelectionView:
 
 
 var _catalog: IdentityCatalog = null
+var _visual_config: IdentityVisualConfig = null
 
 var _content_margin: MarginContainer = null
 var _header_title: Label = null
@@ -83,6 +90,7 @@ func _ready() -> void:
 	_build_background()
 	_build_layout()
 	_catalog = IdentityCatalog.load_default()
+	_visual_config = IdentityVisualConfig.load_default()
 	get_viewport().size_changed.connect(_apply_responsive_layout)
 	_apply_responsive_layout()
 	_enter_culture_page()
@@ -235,14 +243,29 @@ func _build_detail_view(prefix: String, parent: HBoxContainer) -> DetailView:
 	view.type_label.add_theme_color_override("font_color", TEXT_MUTED)
 	column.add_child(view.type_label)
 
-	# 长背景文本在独立区域内滚动；加成面板固定在滚动区下方，始终可见。
+	# 描述区与右下角贴图共享同一块纵向空间：贴图是固定在右下角的覆盖层，
+	# 描述滚动区预留右侧宽度，长文本始终在贴图左侧换行滚动，不会被遮挡。
+	var body := Control.new()
+	body.name = prefix + "DetailVisualBody"
+	body.clip_contents = true
+	body.custom_minimum_size = Vector2(0.0, VISUAL_MIN_HEIGHT)
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	column.add_child(body)
+
 	var scroll := ScrollContainer.new()
 	scroll.name = prefix + "DetailScroll"
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	column.add_child(scroll)
+	scroll.anchor_left = 0.0
+	scroll.anchor_top = 0.0
+	scroll.anchor_right = 1.0
+	scroll.anchor_bottom = 1.0
+	scroll.offset_left = 0.0
+	scroll.offset_top = 0.0
+	scroll.offset_right = -(VISUAL_MAX_WIDTH + VISUAL_GAP)
+	scroll.offset_bottom = 0.0
+	body.add_child(scroll)
 
 	view.description = _make_label("", 16)
 	view.description.name = prefix + "DescriptionLabel"
@@ -251,6 +274,30 @@ func _build_detail_view(prefix: String, parent: HBoxContainer) -> DetailView:
 	view.description.add_theme_constant_override("line_spacing", 8)
 	view.description.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(view.description)
+
+	# 贴图固定在描述区右下角，始终位于加成面板上方；保持比例缩放，不拉伸。
+	# 无背景与边框：贴图直接融入描述区，没有资源时整块隐藏。
+	view.visual_frame = PanelContainer.new()
+	view.visual_frame.name = prefix + "DetailVisualFrame"
+	view.visual_frame.anchor_left = 1.0
+	view.visual_frame.anchor_top = 1.0
+	view.visual_frame.anchor_right = 1.0
+	view.visual_frame.anchor_bottom = 1.0
+	view.visual_frame.offset_left = -VISUAL_MAX_WIDTH
+	view.visual_frame.offset_top = -VISUAL_MAX_HEIGHT
+	view.visual_frame.offset_right = 0.0
+	view.visual_frame.offset_bottom = 0.0
+	view.visual_frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	view.visual_frame.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+	body.add_child(view.visual_frame)
+
+	view.visual_texture = TextureRect.new()
+	view.visual_texture.name = prefix + "DetailVisualTexture"
+	view.visual_texture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	view.visual_texture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	view.visual_texture.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	view.visual_texture.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	view.visual_frame.add_child(view.visual_texture)
 
 	# 加成使用独立面板，与背景描述区分层级。
 	var bonus_panel := PanelContainer.new()
@@ -430,6 +477,14 @@ func _apply_responsive_layout() -> void:
 		_culture_selection.panel.custom_minimum_size.x = selection_width
 	if _identity_selection != null:
 		_identity_selection.panel.custom_minimum_size.x = selection_width
+
+	# 立绘高度随窗口变化；宽度固定为原尺寸的约 1.5 倍。
+	var visual_height: float = clampf(
+		viewport_size.y * 0.3, VISUAL_MIN_HEIGHT, VISUAL_MAX_HEIGHT
+	)
+	for view: DetailView in [_culture_detail, _identity_detail]:
+		if view != null and view.visual_frame != null:
+			view.visual_frame.offset_top = -visual_height
 
 
 func _enter_culture_page() -> void:
@@ -612,12 +667,17 @@ func _refresh_culture_detail(culture_id: String) -> void:
 		_culture_detail.description.text = "文化配置不可用，请查看日志。"
 		_culture_detail.bonus_title.text = "文化天赋"
 		_fill_bonus_list(_culture_detail.bonus_list, PackedStringArray([PLACEHOLDER_HINT]))
+		_refresh_detail_visual(_culture_detail, null)
 		return
 	_culture_detail.title.text = culture.display_name
 	_culture_detail.type_label.text = "文化"
 	_culture_detail.description.text = culture.description
 	_culture_detail.bonus_title.text = "文化天赋"
 	_fill_bonus_list(_culture_detail.bonus_list, culture.talent_lines)
+	var texture: Texture2D = null
+	if _visual_config != null:
+		texture = _visual_config.get_culture_texture(culture_id)
+	_refresh_detail_visual(_culture_detail, texture)
 
 
 func _refresh_identity_detail(identity_id: String) -> void:
@@ -630,6 +690,7 @@ func _refresh_identity_detail(identity_id: String) -> void:
 		_identity_detail.description.text = "从右侧选择一个身份，查看他的来历。"
 		_identity_detail.bonus_title.text = "身份加成"
 		_fill_bonus_list(_identity_detail.bonus_list, PackedStringArray([PLACEHOLDER_HINT]))
+		_refresh_detail_visual(_identity_detail, null)
 		return
 
 	var category := _catalog.get_category(identity.category_id)
@@ -639,6 +700,21 @@ func _refresh_identity_detail(identity_id: String) -> void:
 	_identity_detail.description.text = identity.description
 	_identity_detail.bonus_title.text = "身份加成"
 	_fill_bonus_list(_identity_detail.bonus_list, identity.bonus_lines)
+	var texture: Texture2D = null
+	if _visual_config != null:
+		texture = _visual_config.get_identity_texture(identity_id)
+	_refresh_detail_visual(_identity_detail, texture)
+
+
+## 贴图与当前展示的文化/身份同步；无贴图时整块隐藏，不显示占位文本或空白框。
+func _refresh_detail_visual(view: DetailView, texture: Texture2D) -> void:
+	if view == null or view.visual_frame == null:
+		return
+	var has_texture: bool = texture != null
+	view.visual_frame.visible = has_texture
+	if view.visual_texture != null:
+		view.visual_texture.texture = texture
+		view.visual_texture.visible = has_texture
 
 
 func _fill_bonus_list(list: VBoxContainer, lines: PackedStringArray) -> void:

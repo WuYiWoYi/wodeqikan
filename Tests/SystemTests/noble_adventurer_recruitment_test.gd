@@ -7,6 +7,10 @@ extends Node
 ##   Godot_v4.6.1-stable_win64_console.exe --headless --path . \
 ##     res://Tests/SystemTests/noble_adventurer_recruitment_test.tscn
 
+## 测试夹具：默认身份（埃克托次子）本身不拥有封地；
+## 为验证贵族招募权限，把埃克托村临时交给玩家。
+const TEST_VILLAGE_NAME: String = "埃克托"
+
 var _failed: bool = false
 var _context: WorldContext = null
 var _village_scene: VillageScene = null
@@ -34,6 +38,7 @@ func _run() -> void:
 	_check(WorldInitializer.create_new_world(_context), "初始化世界")
 	if not _context.is_valid_world():
 		return
+	_assign_player_village()
 
 	_test_noble_candidate_data()
 	await _test_village_noble_visual()
@@ -45,7 +50,7 @@ func _run() -> void:
 
 
 func _test_noble_candidate_data() -> void:
-	var village := _find_settlement(WorldInitializer.PLAYER_VILLAGE_NAME)
+	var village := _find_settlement(TEST_VILLAGE_NAME)
 	_check(village != null, "找到玩家村庄")
 	if village == null:
 		return
@@ -89,7 +94,7 @@ func _test_noble_candidate_data() -> void:
 	add_child(restored)
 	_check(restored.load_from_save_data(save), "贵族候选人存档可恢复")
 	var restored_village := _find_settlement_in(
-		restored, WorldInitializer.PLAYER_VILLAGE_NAME
+		restored, TEST_VILLAGE_NAME
 	)
 	if restored_village != null:
 		var restored_noble: AdventurerCandidateData = \
@@ -123,7 +128,7 @@ func _test_noble_candidate_data() -> void:
 func _test_village_noble_visual() -> void:
 	GameManager.world_context = _context
 	GameManager.player_party_id = _context.player_party_id
-	var village := _find_settlement(WorldInitializer.PLAYER_VILLAGE_NAME)
+	var village := _find_settlement(TEST_VILLAGE_NAME)
 	if village == null:
 		return
 	GameManager.current_settlement_id = village.settlement_id
@@ -184,30 +189,30 @@ func _test_village_noble_visual() -> void:
 
 
 func _test_owner_permission_and_recruitment() -> void:
-	var village := _find_settlement(WorldInitializer.PLAYER_VILLAGE_NAME)
+	var village := _find_settlement(TEST_VILLAGE_NAME)
 	var player_lord := _context.get_player_lord()
 	var noble: AdventurerCandidateData = \
 		village.get_noble_adventurer_candidate() if village != null else null
 	if village == null or player_lord == null or noble == null:
 		return
-	# 所有权变更后权限立即变化：玩家不再是所有者时授权失败。
+	# 家族所有权变更后权限立即变化：玩家家族不再是所有者时授权失败。
 	var bari_lord := _find_lord_of_family(WorldInitializer.FAMILY_BARI_ID)
-	var original_owner_id: String = village.owner_noble_id
+	var original_owner_house: String = village.owner_house_id
 	if bari_lord != null:
-		village.owner_noble_id = bari_lord.lord_id
+		village.owner_house_id = WorldInitializer.HOUSE_BARI_ID
 		_check(
 			not _context.adventurer_recruitment_manager.is_noble_recruit_authorized(
 				village, player_lord.lord_id
 			),
-			"村庄归属变更后原所有者立即失去贵族招募权限"
+			"领地归属变更后原家族立即失去贵族招募权限"
 		)
 		_check(
 			_context.adventurer_recruitment_manager.is_noble_recruit_authorized(
 				village, bari_lord.lord_id
 			),
-			"村庄新所有者立即获得贵族招募权限"
+			"新所有者家族成员立即获得贵族招募权限"
 		)
-		village.owner_noble_id = original_owner_id
+		village.owner_house_id = original_owner_house
 
 	_context.player_profile.gold = 500
 	var party := _context.get_player_party()
@@ -273,7 +278,7 @@ func _test_owner_permission_and_recruitment() -> void:
 
 
 func _test_noble_not_respawned_after_recruit() -> void:
-	var village := _find_settlement(WorldInitializer.PLAYER_VILLAGE_NAME)
+	var village := _find_settlement(TEST_VILLAGE_NAME)
 	if village == null:
 		return
 	_check(village.noble_adventurer_spawned, "招募后仍记录已生成")
@@ -290,7 +295,7 @@ func _test_noble_not_respawned_after_recruit() -> void:
 	add_child(restored)
 	_check(restored.load_from_save_data(save), "已招募贵族存档可恢复")
 	var restored_village := _find_settlement_in(
-		restored, WorldInitializer.PLAYER_VILLAGE_NAME
+		restored, TEST_VILLAGE_NAME
 	)
 	if restored_village != null:
 		_check(
@@ -306,15 +311,34 @@ func _test_noble_not_respawned_after_recruit() -> void:
 
 func _test_ai_normal_adventurer_recruitment() -> void:
 	var bari := _find_settlement(WorldInitializer.BARI_VILLAGE_NAME)
-	var lord := _find_lord_of_family(WorldInitializer.FAMILY_BARI_ID)
+	# 巴里家族有多名贵族；只让家族领袖在巴里村执行本次招募。
+	var lord := _context.house_manager.get_house_leader(
+		WorldInitializer.HOUSE_BARI_ID
+	)
 	if bari == null or lord == null:
 		return
 	var party := _context.party_manager.get_party(lord.party_id)
 	if party == null:
 		_check(false, "NPC 领主存在真实部队")
 		return
-	# 清空采邑储备，迫使 AI 走普通冒险者招募分支。
-	bari.fief_recruitment_stock = 0
+	# 把同家族其他贵族的部队移远，避免它们在同一 tick 抢招同一村庄候选人。
+	for other: NobleData in _context.house_manager.get_house_nobles(
+		WorldInitializer.HOUSE_BARI_ID
+	):
+		if other == null or other.lord_id == lord.lord_id:
+			continue
+		var other_party := _context.party_manager.get_party(other.party_id)
+		if other_party != null:
+			other_party.world_position = bari.world_position + Vector2(2200.0, 1800.0)
+			other_party.target_position = other_party.world_position
+			other_party.movement_state = PartyData.MovementState.IDLE
+	# 清空巴里家族所有村庄的采邑储备，迫使 AI 走普通冒险者招募分支。
+	for settlement: SettlementData in _context.house_manager.get_house_settlements(
+		WorldInitializer.HOUSE_BARI_ID
+	):
+		if settlement != null \
+				and settlement.settlement_type == SettlementData.SettlementType.VILLAGE:
+			settlement.fief_recruitment_stock = 0
 	# 普通 Tier1 招募统一为 5 金币/人；准备足够金币让 AI 招满全部候选人。
 	party.gold = 200
 	var candidates_before: int = bari.get_available_candidates().size()
@@ -379,6 +403,16 @@ func _test_ai_normal_adventurer_recruitment() -> void:
 		"NPC 不会招募贵族冒险者"
 	)
 	EventBus.adventurers_recruited.disconnect(on_recruited)
+
+
+func _assign_player_village() -> void:
+	var village := _find_settlement(TEST_VILLAGE_NAME)
+	var player_house := _context.get_player_house()
+	if village == null or player_house == null:
+		return
+	village.owner_house_id = player_house.house_id
+	# 贵族冒险者只在有主村庄生成；世界初始化后再补一次。
+	_context.adventurer_recruitment_manager.initialize_settlement(village, true)
 
 
 func _find_settlement(display_name: String) -> SettlementData:

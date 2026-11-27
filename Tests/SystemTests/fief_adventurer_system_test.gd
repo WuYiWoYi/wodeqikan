@@ -5,6 +5,10 @@ extends Node
 ##   Godot_v4.6.1-stable_win64_console.exe --headless --path . \
 ##     res://Tests/SystemTests/fief_adventurer_system_test.tscn
 
+## 默认身份（埃克托次子）通过家族所有权获得埃克托村庄的使用权；
+## 领地归家族所有，任何家族成员都可征召。
+const PLAYER_VILLAGE_NAME: String = "埃克托"
+
 var _failed: bool = false
 var _context: WorldContext = null
 
@@ -31,6 +35,7 @@ func _run() -> void:
 	_check(WorldInitializer.create_new_world(_context), "初始化世界")
 	if not _context.is_valid_world():
 		return
+	_assign_player_village()
 
 	_test_ownership()
 	_test_fief_recruitment()
@@ -56,12 +61,12 @@ func _test_ownership() -> void:
 	if player_village == null or player_lord == null:
 		return
 	_check(
-		player_village.owner_lord_id == player_lord.lord_id,
-		"玩家村庄归属玩家领主"
+		player_village.owner_house_id == _context.player_house_id,
+		"玩家村庄归属玩家所属家族"
 	)
 	_check(
-		player_village.family_id == WorldInitializer.FAMILY_PLAYER_ID,
-		"玩家村庄记录玩家家族"
+		player_village.family_id == WorldInitializer.FAMILY_EKTOR_ID,
+		"玩家村庄保留埃克托家族旗帜"
 	)
 	_check(player_village.fief_recruitment_stock == 4, "初始采邑储备为 4 组")
 	_check(player_village.adventurer_candidates.size() == 2, "村庄初始 2 名候选人")
@@ -76,8 +81,9 @@ func _test_ownership() -> void:
 	_check(bari_lord != null and bari != null, "NPC 领主与巴里村庄存在")
 	if bari_lord != null and bari != null:
 		_check(
-			not bari_lord.is_player_lord and bari.owner_lord_id == bari_lord.lord_id,
-			"NPC 领主拥有独立封地"
+			not bari_lord.is_player_lord
+				and bari.owner_house_id == WorldInitializer.HOUSE_BARI_ID,
+			"NPC 家族拥有独立封地"
 		)
 		_check(
 			not bari_lord.party_id.is_empty()
@@ -311,7 +317,7 @@ func _test_noble_adventurer_recruitment() -> void:
 
 
 func _test_candidate_refresh() -> void:
-	var village := _find_settlement("北境村")
+	var village := _find_settlement(WorldInitializer.BARI_VILLAGE_NAME)
 	if village == null:
 		return
 	village.adventurer_candidates.clear()
@@ -395,13 +401,12 @@ func _test_save_roundtrip() -> void:
 		restored.player_unit_id == _context.player_unit_id,
 		"玩家角色 ID 往返一致"
 	)
-	var restored_village := _find_settlement_in(restored,
-		WorldInitializer.PLAYER_VILLAGE_NAME)
+	var restored_village := _find_settlement_in(restored, PLAYER_VILLAGE_NAME)
 	_check(restored_village != null, "恢复玩家村庄")
 	if restored_village != null:
 		_check(
-			restored_village.owner_lord_id == _context.player_lord_id,
-			"封地所有权往返一致"
+			restored_village.owner_house_id == _context.player_house_id,
+			"封地家族所有权往返一致"
 		)
 		_check(
 			restored_village.fief_recruitment_stock == expected_stock,
@@ -433,8 +438,16 @@ func _test_save_roundtrip() -> void:
 	restored.queue_free()
 
 
+func _assign_player_village() -> void:
+	var village := _find_settlement(PLAYER_VILLAGE_NAME)
+	var player_house := _context.get_player_house()
+	if village == null or player_house == null:
+		return
+	village.owner_house_id = player_house.house_id
+
+
 func _player_village() -> SettlementData:
-	return _find_settlement(WorldInitializer.PLAYER_VILLAGE_NAME)
+	return _find_settlement(PLAYER_VILLAGE_NAME)
 
 
 func _find_settlement(display_name: String) -> SettlementData:

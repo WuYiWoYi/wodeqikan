@@ -38,7 +38,11 @@ func _run() -> void:
 	var olin_knight := _find_party(WorldInitializer.OLIN_KNIGHT_PARTY_NAME)
 	var player := _context.get_player_party()
 	var merchant := _find_party(WorldInitializer.TEST_ENEMY_PARTY_NAME)
-	var guard := _find_party(WorldInitializer.GUARD_PARTY_NAME)
+	# 新世界不再预置巡逻队；用测试夹具临时创建一支治安队，
+	# 验证商队—治安队的既有阵营关系仍然成立。
+	var guard := _context.party_manager.create_party(
+		FactionManager.GUARD_FACTION_ID, Vector2(200.0, 200.0), "测试治安队"
+	)
 	_check(
 		bandit != null and burknania_king != null and burknania_knight != null
 			and loriak_king != null and olin_knight != null and player != null

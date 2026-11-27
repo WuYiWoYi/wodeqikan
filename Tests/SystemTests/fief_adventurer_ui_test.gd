@@ -5,6 +5,9 @@ extends Node
 ##   Godot_v4.6.1-stable_win64_console.exe --headless --path . \
 ##     res://Tests/SystemTests/fief_adventurer_ui_test.tscn
 
+## 测试夹具：以平民身份开局，再手工装配测试玩家家族与一处封地。
+const TEST_VILLAGE_NAME: String = "埃克托"
+
 var _failed: bool = false
 var _context: WorldContext = null
 var _village: VillageScene = null
@@ -31,10 +34,15 @@ func _run() -> void:
 	_context = WorldContext.new()
 	_context.name = "FiefAdventurerUiContext"
 	add_child(_context)
-	_check(WorldInitializer.create_new_world(_context), "初始化世界")
+	var catalog := IdentityCatalog.load_default()
+	var commoner := catalog.get_identity("IDENTITY_DORAMAN_MERCENARY") \
+		if catalog != null else null
+	_check(commoner != null, "加载平民身份配置")
+	_check(WorldInitializer.create_new_world(_context, commoner), "初始化世界")
 	if not _context.is_valid_world():
 		return
-	_player_village = _find_settlement(WorldInitializer.PLAYER_VILLAGE_NAME)
+	_setup_test_player_family()
+	_player_village = _find_settlement(TEST_VILLAGE_NAME)
 	_check(_player_village != null, "找到玩家封地村庄")
 	if _player_village == null:
 		return
@@ -194,8 +202,9 @@ func _test_world_map_panel() -> void:
 	) as Label
 	var tax_label := _map.find_child("SettlementTaxLabel", true, false) as Label
 	_check(
-		owner_label != null and owner_label.text.contains("玩家领主"),
-		"面板显示封地领主"
+		owner_label != null and owner_label.text.contains("所有者")
+			and owner_label.text.contains(WorldInitializer.PLAYER_HOUSE_NAME),
+		"面板显示封地所有者家族"
 	)
 	_check(
 		family_label != null and family_label.text.contains("玩家家族"),
@@ -256,6 +265,38 @@ func _test_world_map_panel() -> void:
 		"非自有封地隐藏采邑征召入口"
 	)
 	_map.call("_on_settlement_leave_pressed")
+
+
+## 平民身份不自动创建家族；测试手工装配玩家家族、玩家贵族与一处封地。
+func _setup_test_player_family() -> void:
+	var house := _context.house_manager.register_house(
+		WorldInitializer.HOUSE_PLAYER_ID,
+		WorldInitializer.PLAYER_HOUSE_NAME,
+		WorldInitializer.FAMILY_PLAYER_ID,
+		true
+	)
+	if house == null:
+		return
+	_context.player_house_id = house.house_id
+	var player_party := _context.get_player_party()
+	if player_party == null:
+		return
+	player_party.family_id = WorldInitializer.FAMILY_PLAYER_ID
+	var noble := _context.noble_manager.create_noble(
+		WorldInitializer.PLAYER_LORD_NAME,
+		WorldInitializer.PLAYER_FACTION_ID,
+		player_party.party_id,
+		house.house_id,
+		NobleData.Rank.KNIGHT,
+		true,
+		true
+	)
+	if noble != null:
+		_context.player_lord_id = noble.lord_id
+		player_party.leader_noble_id = noble.lord_id
+	var village := _find_settlement(TEST_VILLAGE_NAME)
+	if village != null:
+		village.owner_house_id = house.house_id
 
 
 func _find_settlement(display_name: String) -> SettlementData:

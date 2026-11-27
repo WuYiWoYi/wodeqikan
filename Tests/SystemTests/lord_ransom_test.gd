@@ -660,9 +660,8 @@ func _next_lord_unit() -> Dictionary:
 	return {}
 
 
-## 新世界只给五个旧家族保留封地，其余家族没有据点；赎回流程要求
-## 领主家族拥有可返回的地点。测试为被选中的领主临时分配一座无主地点，
-## 只用于构造赎回前提，不改变产品代码的所有权规则。
+## 赎回流程要求领主家族拥有可返回的地点。本次配置下 17 个家族均有领地；
+## 仅为极端夹具保留“临时分配无主地点”的兜底，不改变产品代码的所有权规则。
 func _ensure_house_settlement(noble: NobleData) -> void:
 	if not _context.house_manager.get_house_settlements(noble.house_id).is_empty():
 		return
@@ -670,7 +669,6 @@ func _ensure_house_settlement(noble: NobleData) -> void:
 		if settlement == null or settlement.has_owner():
 			continue
 		settlement.owner_house_id = noble.house_id
-		settlement.owner_noble_id = noble.lord_id
 		_context.house_manager.refresh_settlement_links()
 		return
 
@@ -745,11 +743,8 @@ func _near_house_settlement(party: PartyData, noble: NobleData) -> bool:
 	)
 	if settlements.is_empty():
 		return false
+	# 领地归家族所有，所有成员都在家族首处封地附近复位。
 	var expected: SettlementData = settlements[0]
-	for settlement: SettlementData in settlements:
-		if settlement.owner_noble_id == noble.lord_id:
-			expected = settlement
-			break
 	return party.world_position.distance_to(expected.world_position) <= 120.0
 
 

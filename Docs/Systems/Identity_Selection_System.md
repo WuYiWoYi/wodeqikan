@@ -3,8 +3,9 @@
 **核心脚本：** `Scripts/UI/Identity/identity_select.gd`
 **场景：** `Scenes/Identity/identity_select.tscn`（独立全屏场景）
 **配置：** `Scripts/Config/identity_catalog.gd`、`culture_definition.gd`、`identity_definition.gd`、
-`Data/Cultures/*.tres`、`Data/Identity/Categories/*.tres`、`Data/Identity/Identities/*.tres`
-**状态：** 已实现文化选择 → 身份选择 → 最终路线预览三级全屏流程；文化天赋与身份加成只做展示，尚未接入实际游戏系统。
+`identity_visual_config.gd`、`Data/Cultures/*.tres`、`Data/Identity/Categories/*.tres`、
+`Data/Identity/Identities/*.tres`、`Data/Identity/identity_visual_config.tres`
+**状态：** 已实现文化选择 → 身份选择 → 最终路线预览三级全屏流程，并将所选身份接入实际开局：出生地点、玩家家族/贵族、家族领袖/国王、平民无家族。文化天赋与身份加成仍只做展示。
 
 ---
 
@@ -13,9 +14,10 @@
 - 主菜单「新游戏」通过 `SceneManager` 切到独立全屏选择场景，主菜单场景被释放，不存在附着弹窗或局部面板。
 - 三级流程全部在同一场景内完成；进入预览并确认前不创建 `WorldContext`、不启动世界时间、不写存档。
 - 只有最终路线预览页的「开始游戏」会调用 `GameManager.start_new_game(identity_id, category_id, culture_id)`。
-- 文化天赋与身份加成**仅用于界面展示**；不修改采邑恢复、部队上限、工资、驻军薪资或任何初始数据。
-- 选择结果只进入 `GameManager` 会话字段，不进入存档；读档不恢复，属于后续阶段。
-- 不修改世界初始化、存档 Schema、战斗、家族核心架构。
+- 文化天赋与身份加成**仅用于界面展示**；不修改采邑恢复、部队上限、工资或驻军薪资。
+- 身份选择结果决定实际开局数据：出生地点、玩家家族、贵族爵位、家族领袖/国王、平民是否启用家族系统。
+- 身份字段随 `WorldContext` 进入存档（可选字段），读档时恢复；不新增 Schema 版本。
+- 不修改战斗与家族核心架构；贵族身份复用现有家族/贵族系统，不为平民伪造贵族记录。
 
 ## 2. 流程
 
@@ -82,8 +84,44 @@
 | `bonus_lines` | 身份加成展示行；未确定项使用「待设定」占位 |
 | `sort_order` | 同文化内的显示顺序 |
 | `enabled` | 关闭后不显示 |
+| `spawn_location_id` | 开局出生点绑定的大地图地点 key（必填） |
+| `family_id` | 视觉/政治家族 ID（`FAMILY_*`）；贵族身份必填，平民留空 |
+| `family_system_enabled` | 是否启用家族/贵族系统；贵族 `true`，平民 `false` |
+| `starts_as_house_leader` | 开局是否接管该家族领袖；瓦伊拉领袖为 `true` |
+| `independent_house` | 家族是否保持独立、不建立/加入任何王国；瓦伊拉领袖为 `true` |
+| `starting_rank` | `NobleData.Rank` 数值；启用家族系统时必须 > 0 |
 
-### 3.4 注册表：`IdentityCatalog`
+- `validate()` 要求身份 ID、显示名、类型、文化、出生点非空；启用家族系统时家族 ID 与爵位必须有效，关闭时两者必须为空。
+- `independent_house = true` 时必须同时 `family_system_enabled = true` 且 `starts_as_house_leader = true`，否则无法脱离所属王国。
+- 所属王国不单独配置，由 `family_id` 对应 `HouseData.kingdom_id` 推导；独立家族推导结果为空。
+- 平民身份即使配置了 `family_id` 也视为无效配置（`validate()` 返回 `false`）。
+
+### 3.4 六个正式身份
+
+| 身份 | 类型 | 出生点 key | 家族 | 王国 | 爵位 | 家族领袖 |
+|---|---|---|---|---|---|---|
+| 埃克托家族的次子 | 贵族 | `ektor_town` | `FAMILY_EKTOR` → `HOUSE_EKTOR` | 伯克纳 | KNIGHT | 否（效忠原领袖） |
+| 多拉曼佣兵 | 平民 | `bafleborg` | 无 | 无 | 无 | 否 |
+| 丁达尼家族骑士 | 贵族 | `dindani_castle` | `FAMILY_DINDANI` → `HOUSE_DINDANI` | 弗拉尼 | KNIGHT | 否 |
+| 弗拉尼的商人 | 平民 | `frania` | 无 | 无 | 无 | 否 |
+| 瓦伊拉家族领袖 | 贵族 | `vaila_castle` | `FAMILY_VAILA` → `HOUSE_VAILA` | 无（独立家族） | DUKE | 是 |
+| 无赖骑士 | 平民 | `rosviknia` | 无 | 无 | 无 | 否 |
+
+### 3.5 详情贴图映射：`IdentityVisualConfig`
+
+`Data/Identity/identity_visual_config.tres`，独立于文化/身份定义管理左侧详情贴图。
+
+| 字段 | 说明 |
+|---|---|
+| `culture_textures` | 键为 `culture_id`，值为 `Texture2D` |
+| `identity_textures` | 键为 `identity_id`，值为 `Texture2D` |
+
+- UI 通过 `IdentityVisualConfig.load_default()` 读取映射，不硬编码贴图路径。
+- 未配置或贴图为空的条目由 UI 隐藏整块立绘区域，不显示占位文本、空白框或背景。
+- 新增文化/身份贴图只需在映射资源中增加条目，无需修改 UI。
+- 当前三个文化已配置 `Art/我的骑砍临时美术/正式美术_其他/UI美术/UI身份选择标签贴图/` 下的贴图；身份贴图已接入「埃克托家族次子」，其余身份尚未提供，无资源时隐藏。
+
+### 3.6 注册表：`IdentityCatalog`
 
 `IdentityCatalog.load_default()` 扫描 `Data/Cultures`、`Data/Identity/Categories`、`Data/Identity/Identities`：
 
@@ -105,10 +143,10 @@ IdentitySelect (Control，全屏)
     └── ContentColumn (VBoxContainer)
         ├── Header (HeaderTitle + HeaderSubtitle)
         ├── CulturePage (HBoxContainer)
-        │   ├── CultureDetailPanel（标题 / 类型 / 可滚动描述 / 独立天赋面板）
+        │   ├── CultureDetailPanel（标题 / 类型 / 描述滚动区 + 右下角贴图 / 独立天赋面板）
         │   └── CultureSelectionPanel（纵向文化选项 / 提示）
         ├── IdentityPage (HBoxContainer)
-        │   ├── IdentityDetailPanel（标题 / 身份类型 / 可滚动描述 / 独立加成面板）
+        │   ├── IdentityDetailPanel（标题 / 身份类型 / 描述滚动区 + 右下角贴图 / 独立加成面板）
         │   └── IdentitySelectionPanel（纵向身份选项 / 提示）
         ├── PreviewPage (PanelContainer，居中显示完整路线)
         ├── RoutePanel（底部「最终身份路线」实时预览）
@@ -126,6 +164,11 @@ IdentitySelect (Control，全屏)
 - 身份层：身份名称、「身份类型：贵族/平民」、背景描述、身份加成。
 - 未确定天赋/加成使用「待设定」占位文本并以弱化颜色显示。
 - 加成行数变化时列表自适应高度。
+- 描述区右下角、加成栏上方固定展示当前文化/身份贴图；贴图为独立节点，不随描述滚动。
+- 描述滚动区预留贴图宽度，长文本在贴图左侧换行滚动，不会与贴图重叠；悬浮预览时贴图同步切换，离开后恢复已选项。
+- 立绘区域无背景底色、边框与装饰轮廓，贴图直接融入左侧描述区；展示范围约为原尺寸的 1.5 倍（宽 198、高 156–252）。
+- 贴图按可用区域等比例缩放并水平/垂直居中（`STRETCH_KEEP_ASPECT_CENTERED` + `EXPAND_IGNORE_SIZE`）：超尺寸自动缩小，小图放大到展示区上限，始终保持原始比例且不裁剪主体。
+- 无贴图时整块立绘区域隐藏（不显示「暂无立绘」、空白框或背景），不影响描述文本、加成栏与交互；窗口变矮时降低最大高度。
 
 ### 4.2 右侧选项
 
@@ -182,18 +225,52 @@ IdentitySelect (Control，全屏)
 - 确认按钮的可用性由当前层选择状态决定；默认选择保证进入每层时始终可用。
 - 预览页的确认按钮文案为「开始游戏」，是唯一提交入口。
 
-## 8. 结果传递与数据归属
+## 8. 结果传递与实际开局
 
-| 数据 | 写入者 | 生命周期 |
+### 8.1 调用链
+
+```text
+选择场景「开始游戏」
+└── GameManager.start_new_game(identity_id, category_id, culture_id)
+    ├── IdentityCatalog.load_default().get_identity(identity_id)
+    ├── 校验 category_id / culture_id 与身份配置一致
+    ├── 写入 GameManager 会话字段
+    └── WorldInitializer.create_new_world(context, identity)
+        ├── 校验 spawn_location_id 存在
+        ├── 在出生点附近生成玩家部队
+        ├── 写入 context 身份字段
+        └── 贵族：绑定正式家族并创建玩家贵族
+            平民：不创建家族/贵族记录
+```
+
+- `identity_id` 为空时回退 `WorldInitializer.DEFAULT_IDENTITY_ID`（`IDENTITY_EKTOR_SECOND_SON`），保证旧调用方与测试仍得到有效世界。
+- `category_id` / `culture_id` 为空时不额外校验；非空且与身份配置不一致时报错，避免 UI 选择与实际身份错位。
+- 选择场景只在最终预览页调用 `start_new_game`；其他入口（旧测试、调试）可只传 `identity_id`。
+
+### 8.2 数据写入者
+
+| 数据 | 写入者 | 说明 |
 |---|---|---|
-| `GameManager.player_identity_id` | `GameManager.start_new_game()` | 会话级；返回主菜单/读档/新游戏重建时清空 |
-| `GameManager.player_identity_category_id` | `GameManager.start_new_game()` | 同上 |
-| `GameManager.player_culture_id` | `GameManager.start_new_game()` | 同上 |
+| `GameManager.player_identity_id/category_id/culture_id` | `GameManager.start_new_game()` / `load_game()` / `enter_game_world()` | 会话镜像，来自身份或 `WorldContext` |
+| `WorldContext.player_identity_id` | `WorldInitializer.create_new_world()` / `load_from_save_data()` | 权威会话身份 ID |
+| `WorldContext.player_identity_category_id` | 同上 | `NOBLE` / `COMMONER` |
+| `WorldContext.player_culture_id` | 同上 | 文化 ID |
+| `WorldContext.player_identity_name` | 同上 | 身份显示名，用于玩家贵族名与 UI |
+| `WorldContext.player_house_id` | `WorldInitializer` / 读档 | 贵族身份为正式家族；平民为空 |
+| `WorldContext.player_lord_id` | `WorldInitializer` / 读档 | 贵族身份为新建玩家贵族；平民为空 |
+| 玩家部队 `family_id` | `WorldInitializer` | 贵族身份 = 身份 `family_id`；平民为空 |
 
-- 选择场景只在预览页确认时调用 `GameManager.start_new_game(identity_id, category_id, culture_id)`。
-- `start_new_game()` 保留前两个参数默认值，旧调用方不受影响。
-- 当前 `WorldInitializer` 不读取这三个字段，也不产生任何初始化差异。
-- 不新增存档字段，`schema_version` 不变。
+- 玩家贵族使用身份显示名，`is_player_lord = true`；`rank` 来自 `starting_rank`，`is_house_leader` 来自 `starts_as_house_leader`。
+- `starts_as_house_leader = false` 时，玩家贵族效忠原家族领袖；`true` 时接管家族领袖。
+- `independent_house = false` 且接管的家族是某王国统治家族时，`KingdomManager` 同步玩家为该国国王。
+- `independent_house = true` 时跳过该王国的注册：家族保持 `kingdom_id` 为空，玩家只是家族领袖而非国王，世界王国数相应少 1（瓦伊拉领袖为 5 个王国）。
+- 平民不创建 `NobleData`；`get_player_house()` / `get_player_noble()` 返回 `null`，家族 UI 显示空状态而不是伪造家族。
+
+### 8.3 存档
+
+- `WorldContext.to_save_data().player` 追加可选字段 `identity_id`、`identity_category_id`、`culture_id`、`identity_name`。
+- 读档恢复上述字段；旧存档缺少这些字段时保持为空，不影响加载。
+- `schema_version` 保持 v10：字段为可选追加，不改变既有结构语义。
 
 ## 9. 瓦伊拉家族美术资源
 
@@ -205,16 +282,18 @@ IdentitySelect (Control，全屏)
   - `瓦伊拉风格盾牌.png`
 - 资源复制自当前玩家家族风格，但与 `family_player.tres` 分开存放、独立命名，不引用或覆盖玩家资源。
 - 目录、命名与加载方式沿用现有 `FamilyConfig` 与 `FamilyRegistry`；家族注册表自动扫描 `Data/Families`，无需额外注册。
-- 当前只补齐静态外观配置；「瓦伊拉家族领袖」身份不改变玩家初始家族，家族初始化属于后续阶段。
+- 「瓦伊拉家族领袖」身份已接入实际开局：玩家接管 `HOUSE_VAILA` 领袖，家族保持独立、不建立 `KINGDOM_VAILA`，玩家不是国王。
 
 ## 10. 测试
 
-- `Tests/SystemTests/identity_selection_ui_test.tscn`：配置加载（三文化、每文化两身份、先贵族后平民）、主菜单释放与全屏场景、文化层默认选中与悬浮预览、点击不跳转、确认进入身份层、身份层默认选中、悬浮不改变选中、确认进入预览、三级退回保留选择、路线预览完整、确认前无世界/无存档、确认后传递三个 ID 并进入 WorldMap、瓦伊拉美术文件存在且可解码、与玩家资源路径不同。
+- `Tests/SystemTests/identity_selection_ui_test.tscn`：配置加载（三文化、每文化两身份、先贵族后平民）、详情贴图映射加载、埃克托家族次子立绘映射、文化贴图随默认选中/悬浮/离开切换、无身份贴图时隐藏整块立绘区域且无占位节点、立绘无背景与边框、展示尺寸约为原来的 1.5 倍、贴图位于加成栏上方且不与描述文本重叠、保持比例与居中缩放、1280×720 布局、主菜单释放与全屏场景、文化层默认选中与悬浮预览、点击不跳转、确认进入身份层、身份层默认选中、悬浮不改变选中、确认进入预览、三级退回保留选择、路线预览完整、确认前无世界/无存档、确认后传递三个 ID 并进入 WorldMap、瓦伊拉美术文件存在且可解码、与玩家资源路径不同。
+- `Tests/SystemTests/identity_startup_test.tscn`：六个正式身份的配置校验、出生点距离与可通行、贵族/平民绑定、玩家爵位/效忠/家族领袖、瓦伊拉玩家保持独立家族领袖（不建立王国）、平民无家族/无贵族记录、青禾村/北境村/北境巡逻队已移除、17 个正式家族、身份字段存档往返、平民读档不被补成贵族。
+- `Tests/SystemTests/identity_faction_relation_test.tscn`：六个身份的开局阵营关系（家族→王国→战争→中立）、文化不参与判定、瓦伊拉独立家族不卷入他国战争、大地图部队外环与建筑底板统一读取 `FactionManager`。
 - `Tests/_debug/identity_select_probe.tscn`：非 headless 视觉验收，覆盖文化层、悬浮、选中、身份层、路线预览与 1280×720 小窗口布局。
 
 ## 11. 扩展方向
 
 - 文化与身份加成接入实际游戏系统（部队上限、薪资、采邑恢复等）。
-- 身份差异化初始化（金币、装备、兵力、出生点、领主/家族身份）。
-- 选择结果入档与读档恢复。
-- 文化/身份图标、背景图等更丰富的美术表现。
+- 身份差异化初始资源（金币、装备、兵力模板）。
+- 平民晋升/加入家族的长期路径（当前平民身份不启用家族系统）。
+- 继续为其他身份补充专属立绘，并在 `identity_visual_config.tres` 中扩展更多文化/身份贴图。

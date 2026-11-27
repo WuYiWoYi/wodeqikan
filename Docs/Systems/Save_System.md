@@ -45,8 +45,13 @@ Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录
   },
   "player": {
     "party_id": "PARTY_000001",
+    "player_house_id": "HOUSE_EKTOR",
     "player_lord_id": "LORD_000001",
     "player_unit_id": "UNIT_000005",
+    "identity_id": "IDENTITY_EKTOR_SECOND_SON",
+    "identity_category_id": "NOBLE",
+    "culture_id": "CULTURE_DORAMAN",
+    "identity_name": "埃克托家族的次子",
     "gold": 120,
     "inventory": ["weapon_sword_01", "bread"],
     "inventory_counts": { "weapon_sword_01": 1, "bread": 14 },
@@ -62,7 +67,7 @@ Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录
   "parties": { "PARTY_000001": { } },
   "lords": { "LORD_000001": { } },
   "nobles": { "LORD_000001": { } },
-  "houses": { "HOUSE_PLAYER": { } },
+  "houses": { "HOUSE_EKTOR": { } },
   "kingdoms": { "KINGDOM_BURKNANIA": { } },
   "settlements": { "SETTLEMENT_000001": { } },
   "markets": {
@@ -124,7 +129,7 @@ Windows 下实际路径为 Godot 的 `user://` 目录，不在项目资源目录
 | `world` | 世界 ID、创建时间、世界尺寸 |
 | `time` | 世界累计时间、基础倍率、`supply_last_settled_day`（上次补给结算日）与 `healing_last_settled_hour`（上次伤兵治疗结算小时）；缺失时分别取存档时刻所在日/小时，避免读档立即重复结算 |
 | `id_counters` | 各 ID 前缀的当前计数 |
-| `player` | 玩家部队 ID、玩家领主 ID、玩家角色单位 ID、金币与物品栏；`inventory` 为物品 ID 列表，`inventory_counts` 为可堆叠数量，`mount_instances` 为马匹实例数组；旧存档缺失 `inventory_counts` 时每个条目按 1 件处理 |
+| `player` | 玩家部队 ID、玩家家族/领主 ID、玩家角色单位 ID、身份/文化 ID 与身份显示名、金币与物品栏；`inventory` 为物品 ID 列表，`inventory_counts` 为可堆叠数量，`mount_instances` 为马匹实例数组；旧存档缺失 `inventory_counts` 时每个条目按 1 件处理，缺失身份字段时保持为空 |
 | `world_state` | 世界级标记（预留） |
 | `scene_state` | 局部状态（初期不使用） |
 | `world_log` | 最近 20 条世界日志；缺失时为空历史，超过 20 条时读档立即裁剪 |
@@ -289,13 +294,16 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 ## 9. 版本与迁移
 
 - `schema_version` 每次结构不兼容变更时加 1。
-- 当前版本 9；`SaveData.from_dict()` 接受 1..9。
+- 当前版本 10；`SaveData.from_dict()` 接受 1..10。
 - v3 → v4 新增 `lords` 与 `player.player_lord_id` / `player.player_unit_id`；旧存档缺失时由 `WorldContext` 补玩家领主身份，不伪造封地归属。
 - v4 → v5 新增 `nobles` / `houses` / `kingdoms` 与地点 `owner_house_id` / `owner_noble_id`；旧存档缺失时由 `lords`、`family_id` 与 `banner_id` 补建最小政治视图，并通过固定 ID 去重。
 - v5 → v6 新增马匹实例、NPC 背包与金币、市场马匹实例/`initialized_items`、`supply_last_settled_day`；读取 v5 及更早存档时执行一次补给初始化（只补完全没有任何补给记录的部队）与确定性马匹迁移。
 - v6 → v7 新增伤兵状态、俘虏归属与列表、`healing_last_settled_hour`、村庄候选人字段；读取 v6 及更早存档时补安全默认值并执行一次俘虏归属清洗。
 - v7 → v8 新增五级战斗经验（旧 1–10 级折算）、`UnitData.noble_id` 与 `ransoms`；读取 v7 及更早存档时执行一次等级折算、回填领主身份并补空赎回表。
 - v8 → v9 新增 `mercenaries` 全局池与 `UnitData.is_mercenary`；读取 v8 及更早存档时 `mercenaries` 为空，由 `WorldContext` 执行一次初始雇佣兵生成（之后 `initialized = true`，不会重复补发）；`is_mercenary` 按 `recruit_source` 回填。
+- v9 → v10 新增 `captivity` 与雇佣兵 `appearance`（见第 24 节）；旧存档缺失时使用安全默认值。
+- 身份字段 `identity_id` / `identity_category_id` / `culture_id` / `identity_name` 与 `player_house_id` 为兼容性可选追加字段，不提升 Schema；旧存档缺失时为空，平民读档不会被补成贵族。
+- 2026-11-27：领地所有权改为只认 `owner_house_id`，`SettlementData` 不再写出 `owner_noble_id` / `owner_lord_id`。旧存档读取时把个人所有者解析为贵族所属家族并清空原字段；若仍为空则回退视觉家族 `family_id` → `banner_id` 映射。结构仍兼容 v10，不提升 Schema。
 - 读取旧版本时执行迁移；`SaveData.from_dict()` 已保留 v1 → v2 入口，但完整字段迁移尚未完成。
 - 读取高于当前版本的存档直接拒绝。
 - 迁移逻辑集中在 `SaveData.from_dict()`，禁止散落。
@@ -320,8 +328,8 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
   - 同一部队最多一个领主；
   - 玩家领主最多一个且 `is_player_lord == true`。
 - 封地所有权（`WorldContext.validate_world_ownership()`）：
-  - 每个非空 `owner_noble_id` 必须指向存在的贵族；`owner_house_id` 必须存在且与贵族家族一致；
-  - `owner_lord_id` 兼容字段与 `owner_noble_id` 一致；
+  - 每个非空 `owner_house_id` 必须指向存在的家族；
+  - 旧存档的 `owner_noble_id` / `owner_lord_id` 只作为迁移输入，由 `_migrate_political_data()` 解析为贵族所属家族后清空，不参与现行校验；
   - `player_lord_id` 非空时必须存在且为玩家贵族。
 - 政治层级（`NobleManager` / `HouseManager` / `KingdomManager`）：
   - 贵族/家族/王国 ID 唯一；
@@ -383,7 +391,7 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 | 玩家金币 / 物品栏 | 已实现（`player` 字典，旧存档默认空） |
 | 战斗结果 / 控制权 / 待领取奖励 | 不持久化；结算后直接写回单位与玩家档案 |
 | 领主表 `lords` / 玩家领主 ID | 已实现（Schema v4，旧存档补玩家领主） |
-| 封地归属 `owner_lord_id` | 已实现（读档校验领主存在） |
+| 封地归属 `owner_house_id` | 已实现（读档校验家族存在；个人所有者字段只做迁移） |
 | 采邑储备/补充计时/人口/繁荣度/税收缓存 | 已实现（随地点保存） |
 | 冒险者候选人与刷新计时 | 已实现（随地点保存，含外观） |
 | 战斗中禁止保存 | 已实现（`ERR_BUSY`，含离屏战斗） |
@@ -476,9 +484,14 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 | 位置 | 字段 | 说明 |
 |---|---|---|
 | 顶层 | `lords` | `{ lord_id: LordData }` |
-| `player` | `player_lord_id` | 玩家领主 ID；与玩家角色分离 |
+| `player` | `player_house_id` | 玩家所属政治家族 ID；平民为空 |
+| `player` | `player_lord_id` | 玩家领主 ID；与玩家角色分离；平民为空 |
 | `player` | `player_unit_id` | 玩家角色单位 ID |
-| `SettlementData` | `owner_lord_id` | 封地归属领主 |
+| `player` | `identity_id` | 身份选择结果 ID（可选追加字段） |
+| `player` | `identity_category_id` | `NOBLE` / `COMMONER`（可选追加字段） |
+| `player` | `culture_id` | 所选文化 ID（可选追加字段） |
+| `player` | `identity_name` | 身份显示名；用于玩家贵族名与 UI（可选追加字段） |
+| `SettlementData` | `owner_house_id` | 封地归属家族（唯一所有权字段） |
 | `SettlementData` | `population` / `prosperity` | 采邑成本与补充周期因子 |
 | `SettlementData` | `tax_base` / `tax_income_per_day` | 税收基数与缓存 |
 | `SettlementData` | `fief_recruitment_stock/capacity/elapsed` | 采邑储备与补充计时 |
@@ -518,8 +531,7 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 | 顶层 | `nobles` | `{ noble_id: NobleData }`；贵族、爵位、宗主、领袖/国王、部队与存活 |
 | 顶层 | `houses` | `{ house_id: HouseData }`；领袖、贵族、封地、王国、宗主、`banner_id`、玩家家族 |
 | 顶层 | `kingdoms` | `{ kingdom_id: KingdomData }`；统治家族、国王、附庸、敌对、颜色、活动、可选 `people_name`（旧档缺失为空） |
-| `SettlementData` | `owner_house_id` | 政治家族归属 |
-| `SettlementData` | `owner_noble_id` | 贵族归属；与 `owner_lord_id` 同步 |
+| `SettlementData` | `owner_house_id` | 政治家族归属；唯一所有权字段 |
 | `PartyData` | `leader_noble_id` | 指挥该部队的贵族 |
 | 世界 | `world.size` | 新游戏为 7780×6615；旧存档保留原尺寸，读档按尺寸回退矩形地图 |
 
@@ -530,7 +542,7 @@ Continue 与 Load Game 调用同一个 `GameManager.load_game(slot)`，没有第
 3. `noble_manager.load_from_dict(save.nobles)`；`lord_manager` 指向同一实例。
 4. `kingdom_manager.load_from_dict(save.kingdoms)`。
 5. 旧存档只有 `lords` 且无政治表时，按旧领主补建最小家族/贵族视图，不伪造王国。
-6. 地点 `owner_house_id` / `owner_noble_id` 缺失时由 `family_id` → `banner_id` 解析现有家族；旧 `owner_lord_id` 同步到 `owner_noble_id`。
+6. 旧存档个人所有者 `owner_noble_id` / `owner_lord_id` 解析为贵族所属家族后清空；`owner_house_id` 仍为空时由 `family_id` → `banner_id` 解析现有家族。
 7. 校验贵族/家族/王国引用、循环、爵位、领袖/国王标记与封地归属；失败拒绝读档。
 8. 重建部队 → 贵族 → 家族 → 王国的链接，并刷新地块归属。
 

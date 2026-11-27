@@ -10,7 +10,7 @@ var _map: Node = null
 var _player: PartyData = null
 var _merchant: PartyData = null
 var _bandit: PartyData = null
-var _guard: PartyData = null
+var _ally: PartyData = null
 var _battle_position := Vector2(1430.0, 1350.0)
 
 
@@ -43,12 +43,12 @@ func _run() -> void:
 	_player = _context.get_player_party()
 	_merchant = _find_party(WorldInitializer.TEST_ENEMY_PARTY_NAME)
 	_bandit = _find_party(WorldInitializer.BANDIT_PARTY_NAME)
-	_guard = _find_party(WorldInitializer.GUARD_PARTY_NAME)
+	_ally = _find_party(WorldInitializer.BARI_KNIGHT_PARTY_NAME)
 	_check(
-		_player != null and _merchant != null and _bandit != null and _guard != null,
+		_player != null and _merchant != null and _bandit != null and _ally != null,
 		"找到玩家与三方 NPC"
 	)
-	if _player == null or _merchant == null or _bandit == null or _guard == null:
+	if _player == null or _merchant == null or _bandit == null or _ally == null:
 		return
 
 	for party: PartyData in _context.party_manager.get_all_parties():
@@ -59,7 +59,7 @@ func _run() -> void:
 	_player.target_position = _player.world_position
 	_merchant.world_position = _battle_position
 	_bandit.world_position = _battle_position + Vector2(60.0, 0.0)
-	_guard.world_position = Vector2(2700.0, 1800.0)
+	_ally.world_position = Vector2(2700.0, 1800.0)
 
 	var packed := load("res://Scenes/WorldMap/world_map.tscn") as PackedScene
 	_map = packed.instantiate()
@@ -97,7 +97,7 @@ func _run() -> void:
 		"参战部队的原图标暂时隐藏"
 	)
 	_check(
-		_icon(_guard).visible and _icon(_player).visible,
+		_icon(_ally).visible and _icon(_player).visible,
 		"未参战部队图标保持显示"
 	)
 	_check(
@@ -144,16 +144,16 @@ func _run() -> void:
 	_check(str(_map.call("get_hovered_battle_id")) == "", "清理悬浮战斗记录")
 
 	# 治安队加入商队一方：新部队自动进入同侧分组。
-	_guard.world_position = _battle_position + Vector2(20.0, 0.0)
+	_ally.world_position = _battle_position + Vector2(20.0, 0.0)
 	_check(
-		_context.battle_manager.try_join_battle(_guard.party_id, session.battle_id),
+		_context.battle_manager.try_join_battle(_ally.party_id, session.battle_id),
 		"治安队加入已有战斗"
 	)
 	await _wait_frames(2)
 	_map.call("apply_battle_hover_for_test", _battle_position)
 	summary = str(_map.call("get_battle_summary_text"))
-	_check(summary.contains(_guard.party_name), "新参战部队自动加入汇总")
-	_check(not _icon(_guard).visible, "新参战部队图标被隐藏")
+	_check(summary.contains(_ally.party_name), "新参战部队自动加入汇总")
+	_check(not _icon(_ally).visible, "新参战部队图标被隐藏")
 	_check(_count_markers() == 1, "新部队加入不会产生第二个战斗标记")
 
 	_context.battle_manager.finish_battle(
@@ -163,7 +163,7 @@ func _run() -> void:
 	_check(_map.call("get_battle_marker") == null, "战斗结束后移除战斗标记")
 	_check(_map.call("get_battle_summary_text") == "", "战斗结束后清空汇总")
 	_check(
-		_icon(_merchant).visible and _icon(_bandit).visible and _icon(_guard).visible,
+		_icon(_merchant).visible and _icon(_bandit).visible and _icon(_ally).visible,
 		"战斗结束后恢复参战部队普通图标"
 	)
 
@@ -207,13 +207,13 @@ func _test_parallel_battle_markers() -> void:
 	_check(east_bandits != null and _icon(east_bandits) != null, "找到第二场战斗部队图标")
 	if east_bandits == null:
 		return
-	_guard.world_position = second_position
+	_ally.world_position = second_position
 	east_bandits.world_position = second_position + Vector2(40.0, 0.0)
 	var first := _context.battle_manager.start_battle(
 		[_merchant.party_id], [_bandit.party_id], _battle_position, true
 	)
 	var second := _context.battle_manager.start_battle(
-		[_guard.party_id], [east_bandits.party_id], second_position, true
+		[_ally.party_id], [east_bandits.party_id], second_position, true
 	)
 	_check(first != null and second != null, "同时创建两场离屏战斗")
 	if first == null or second == null:
@@ -239,7 +239,7 @@ func _test_parallel_battle_markers() -> void:
 	)
 	_check(
 		not _icon(_merchant).visible and not _icon(_bandit).visible
-		and not _icon(_guard).visible and not _icon(east_bandits).visible,
+		and not _icon(_ally).visible and not _icon(east_bandits).visible,
 		"两场战斗的参战部队图标全部隐藏"
 	)
 	_check(_icon(_player).visible, "未参战部队图标保持显示")
@@ -270,7 +270,7 @@ func _test_parallel_battle_markers() -> void:
 	)
 	var second_summary := str(_map.call("get_battle_summary_text"))
 	_check(
-		second_summary.contains(_guard.party_name)
+		second_summary.contains(_ally.party_name)
 			and second_summary.contains(east_bandits.party_name),
 		"第二场悬浮信息显示自己的参战部队"
 	)
@@ -290,10 +290,10 @@ func _test_parallel_battle_markers() -> void:
 		"悬浮中的战斗结束后自动关闭信息面板"
 	)
 	# 重新创建第二场战斗用于后续“结束第一场不影响第二场”的检查。
-	_guard.world_position = second_position
+	_ally.world_position = second_position
 	east_bandits.world_position = second_position + Vector2(40.0, 0.0)
 	second = _context.battle_manager.start_battle(
-		[_guard.party_id], [east_bandits.party_id], second_position, true
+		[_ally.party_id], [east_bandits.party_id], second_position, true
 	)
 	_check(second != null, "重新创建第二场离屏战斗")
 	if second == null:
@@ -315,7 +315,7 @@ func _test_parallel_battle_markers() -> void:
 		"第一场存活部队恢复普通图标"
 	)
 	_check(
-		not _icon(_guard).visible and not _icon(east_bandits).visible,
+		not _icon(_ally).visible and not _icon(east_bandits).visible,
 		"第二场参战部队图标仍然隐藏"
 	)
 
@@ -325,7 +325,7 @@ func _test_parallel_battle_markers() -> void:
 	await _wait_frames(4)
 	_check(_count_markers() == 0, "第二场结束后清除全部标记")
 	_check(
-		_icon(_guard).visible and _icon(east_bandits).visible,
+		_icon(_ally).visible and _icon(east_bandits).visible,
 		"第二场结束后恢复其部队图标"
 	)
 

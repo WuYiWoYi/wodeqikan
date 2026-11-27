@@ -5,11 +5,11 @@ extends Node
 ##   Godot_v4.6.1-stable_win64_console.exe --headless --path . \
 ##     res://Tests/SystemTests/world_map_layout_test.tscn
 
-const EXPECTED_SETTLEMENT_COUNT: int = 63
-const EXPECTED_HOUSE_COUNT: int = 18
+const EXPECTED_SETTLEMENT_COUNT: int = 61
+const EXPECTED_HOUSE_COUNT: int = 17
 const EXPECTED_KINGDOM_COUNT: int = 6
-const EXPECTED_NOBLE_COUNT: int = 18
-const EXPECTED_PARTY_COUNT: int = 23
+const EXPECTED_NOBLE_COUNT: int = 52
+const EXPECTED_PARTY_COUNT: int = 56
 const MIN_SETTLEMENT_SPACING: float = 250.0
 const MIN_BOUNDARY_CLEARANCE_REFERENCE: float = 1.0
 ## 1 游戏小时 = 2 世界秒；玩家原始速度 450 × 0.08 = 36 世界像素/秒。
@@ -82,7 +82,7 @@ func _test_map_definition(definition: WorldMapDefinition) -> void:
 
 func _test_settlement_layout() -> void:
 	var settlements := _context.settlement_manager.get_all_settlements()
-	_check(settlements.size() == EXPECTED_SETTLEMENT_COUNT, "存在 63 个地点")
+	_check(settlements.size() == EXPECTED_SETTLEMENT_COUNT, "存在 61 个地点")
 
 	var names: Dictionary = {}
 	var positions: Dictionary = {}
@@ -108,9 +108,14 @@ func _test_settlement_layout() -> void:
 
 	_check(_all_settlements_spaced(settlements), "任意两个地点之间保留足够间距")
 	_check(
-		_settlement_named("埃克托") != null
-			and _settlement_named("埃克托村") != null,
-		"同名埃克托使用独立 key/显示名区分"
+		_settlement_named("埃克托尼亚") != null
+			and _settlement_named("埃克托") != null,
+		"埃克托城镇与埃克托村庄使用独立显示名区分"
+	)
+	_check(
+		_settlement_named("贝特努要塞") != null
+			and _settlement_named("贝特努城堡") == null,
+		"贝特努城堡已更名为贝特努要塞"
 	)
 
 
@@ -185,10 +190,10 @@ func _test_political_layout() -> void:
 	var kingdoms := _context.kingdom_manager.get_all_kingdoms()
 	var nobles := _context.noble_manager.get_all_nobles()
 	var parties := _context.party_manager.get_all_parties()
-	_check(houses.size() == EXPECTED_HOUSE_COUNT, "存在 18 个家族")
+	_check(houses.size() == EXPECTED_HOUSE_COUNT, "存在 17 个正式家族")
 	_check(kingdoms.size() == EXPECTED_KINGDOM_COUNT, "存在 6 个王国")
 	_check(nobles.size() == EXPECTED_NOBLE_COUNT, "存在 18 名贵族")
-	_check(parties.size() == EXPECTED_PARTY_COUNT, "存在 23 支部队")
+	_check(parties.size() == EXPECTED_PARTY_COUNT, "存在 22 支部队")
 
 	var expected: Array[Dictionary] = [
 		{
@@ -205,7 +210,7 @@ func _test_political_layout() -> void:
 		},
 		{
 			"id": WorldInitializer.KINGDOM_FRANI_ID,
-			"name": "弗拉尼伯国",
+			"name": "弗拉尼王国",
 			"people": "布吉多人",
 			"ruler": WorldInitializer.HOUSE_FRANI_ID,
 			"vassals": [
@@ -216,7 +221,7 @@ func _test_political_layout() -> void:
 		},
 		{
 			"id": WorldInitializer.KINGDOM_VAILA_ID,
-			"name": "瓦伊拉王国",
+			"name": "瓦伊拉伯国",
 			"people": "布吉多人",
 			"ruler": WorldInitializer.HOUSE_VAILA_ID,
 			"vassals": [],
@@ -234,7 +239,7 @@ func _test_political_layout() -> void:
 		},
 		{
 			"id": WorldInitializer.KINGDOM_TAINA_ID,
-			"name": "泰纳公国",
+			"name": "泰纳伯公国",
 			"people": "蒙卡人",
 			"ruler": WorldInitializer.HOUSE_TAINA_ID,
 			"vassals": [],
@@ -261,27 +266,40 @@ func _test_political_layout() -> void:
 		var king := _context.kingdom_manager.get_king(kingdom.kingdom_id)
 		_check(king != null and king.is_king, "国王有效: %s" % str(spec["name"]))
 
-	# 旧世界确认的所有权保留；其余地点无主。旗帜（family_id）不参与该判断。
-	var owned: Dictionary = {
+	# 领地所有权全部归属于家族；地图定义中的 59 处地点归 17 个家族，
+	# 塞洛斯要塞与巴达洛斯要塞不在本次配置内，保持无主。
+	var expected_owners: Dictionary = {
+		"巴夫勒堡": WorldInitializer.HOUSE_BAFLE_ID,
+		"巴夫勒": WorldInitializer.HOUSE_BAFLE_ID,
+		"埃克托尼亚": WorldInitializer.HOUSE_EKTOR_ID,
+		"埃克托": WorldInitializer.HOUSE_EKTOR_ID,
+		"贝特努要塞": WorldInitializer.HOUSE_TAINA_ID,
+		"灰石堡垒": WorldInitializer.HOUSE_BURKNANIA_ID,
 		"巴里": WorldInitializer.HOUSE_BARI_ID,
-		"灰石堡垒": WorldInitializer.HOUSE_BARI_ID,
-		"墨西西": WorldInitializer.HOUSE_MOXIXI_ID,
-		"北境村": WorldInitializer.HOUSE_MOXIXI_ID,
-		"伯克纳尼亚": WorldInitializer.HOUSE_BURKNANIA_ID,
-		"伯克纳": WorldInitializer.HOUSE_BURKNANIA_ID,
-		"奥林德斯堡": WorldInitializer.HOUSE_OLIN_ID,
-		"奥林": WorldInitializer.HOUSE_OLIN_ID,
-		"青禾村": WorldInitializer.HOUSE_PLAYER_ID,
 	}
 	var owner_count: int = 0
 	for settlement: SettlementData in _context.settlement_manager.get_all_settlements():
 		if settlement.has_owner():
 			owner_count += 1
 			_check(
-				owned.get(settlement.display_name, "") == settlement.owner_house_id,
-				"保留旧归属: %s" % settlement.display_name
+				_context.house_manager.get_house(settlement.owner_house_id) != null,
+				"领地家族存在: %s" % settlement.display_name
 			)
-	_check(owner_count == owned.size(), "只有 9 个地点保留明确所有权")
+	for unowned_name: String in ["塞洛斯要塞", "巴达洛斯要塞"]:
+		var unowned := _settlement_named(unowned_name)
+		_check(
+			unowned != null and not unowned.has_owner(),
+			"配置外城堡保持无主: %s" % unowned_name
+		)
+	for settlement_name: String in expected_owners:
+		var owned_settlement := _settlement_named(settlement_name)
+		_check(
+			owned_settlement != null
+				and owned_settlement.owner_house_id
+					== str(expected_owners[settlement_name]),
+			"领地归属正确: %s" % settlement_name
+		)
+	_check(owner_count == 59, "59 处领地的所有权归属于家族")
 
 
 func _test_flags() -> void:

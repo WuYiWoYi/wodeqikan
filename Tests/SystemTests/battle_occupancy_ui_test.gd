@@ -36,24 +36,24 @@ func _run() -> void:
 
 	var player := _context.get_player_party()
 	var knights := _find_party(WorldInitializer.MOXIXI_KNIGHT_PARTY_NAME)
-	var guard := _find_party(WorldInitializer.GUARD_PARTY_NAME)
+	var ally := _find_party(WorldInitializer.BARI_KNIGHT_PARTY_NAME)
 	var bandit := _find_party(WorldInitializer.BANDIT_PARTY_NAME)
 	_check(
-		player != null and knights != null and guard != null and bandit != null,
-		"玩家、墨西西骑士、治安队、强盗均存在"
+		player != null and knights != null and ally != null and bandit != null,
+		"玩家、墨西西骑士、巴里骑士、强盗均存在"
 	)
-	if player == null or knights == null or guard == null or bandit == null:
+	if player == null or knights == null or ally == null or bandit == null:
 		return
 
 	# 世界中先开始一场与玩家无关的离屏战斗。
-	guard.world_position = _battle_position
-	guard.target_position = _battle_position
-	guard.movement_state = PartyData.MovementState.IDLE
+	ally.world_position = _battle_position
+	ally.target_position = _battle_position
+	ally.movement_state = PartyData.MovementState.IDLE
 	bandit.world_position = _battle_position + Vector2(10.0, 0.0)
 	bandit.target_position = bandit.world_position
 	bandit.movement_state = PartyData.MovementState.IDLE
 	var active := _context.battle_manager.start_battle(
-		[guard.party_id], [bandit.party_id], _battle_position, true
+		[ally.party_id], [bandit.party_id], _battle_position, true
 	)
 	_check(active != null and active.offscreen, "创建离屏战斗")
 	if active == null:
@@ -88,7 +88,7 @@ func _run() -> void:
 	player.world_position = _battle_position + Vector2(20.0, 0.0)
 	player.target_position = player.world_position
 	player.movement_state = PartyData.MovementState.IDLE
-	_map.call("_open_party_dialogue", guard)
+	_map.call("_open_party_dialogue", ally)
 	_check(panel.visible, "参战方的对话可打开")
 	_check(not fight_button.disabled, "可加入时按钮可用")
 	_check(fight_button.text == "加入战斗", "按钮变为加入战斗")

@@ -1,6 +1,6 @@
 # 贵族 / 家族 / 王国体系
 
-**状态：** 阶段 8 已交付；2026-11-27 补全为六方势力（统治家族 + 附庸家族 + 民族）
+**状态：** 阶段 8 已交付；2026-11-27 补全为六方势力（统治家族 + 附庸家族 + 民族），并改为家族独占领地所有权、17 家族 51 名指定贵族
 **相关代码：** `Scripts/Entities/Noble/`、`Scripts/Entities/House/`、`Scripts/Entities/Kingdom/`、`Scripts/Core/World/noble_manager.gd`、`house_manager.gd`、`kingdom_manager.gd`、`faction_manager.gd`、`world_initializer.gd`
 **存档：** Schema v10（政治字段自 v5 起为 `nobles` / `houses` / `kingdoms`，保留 `lords` 兼容副本；v10 追加 `people_name` 等可选字段）
 
@@ -66,15 +66,16 @@
 
 ## 5. 封地与征召
 
-- `SettlementData.owner_house_id` / `owner_noble_id` 表达政治所有权；`family_id` 只决定地点旗帜，不参与授权。
-- 初始世界只有 9 处地点有明确所有者：巴里、灰石堡垒、墨西西、北境村、伯克纳尼亚、伯克纳、奥林德斯堡、奥林、青禾村；其余地点无主。重建地图不按位置补写所有权。
+- `SettlementData.owner_house_id` 是政治所有权的唯一字段；`family_id` 只决定地点旗帜，不参与授权。个人所有者字段已删除。
+- 初始世界由 `_family_specs()` 显式配置 17 家族的 59 处领地；塞洛斯要塞、巴达洛斯要塞无主。重建地图不按位置推断所有权。
+- 家族领袖、男爵、骑士或称号变化都不改变所有权；所有权只随 `owner_house_id` 变化。
 - 仅村庄可征召采邑。
 - `FiefRecruitmentManager.is_authorized_owner(settlement, lord_id)` 是唯一授权判断，条件：
-  - `settlement.owner_noble_id == lord_id`，或
-  - 请求者是 `owner_house_id` 家族的领袖。
+  - 请求者是存活贵族，且 `noble.house_id == settlement.owner_house_id`。
+  - 同家族全部成员（领袖、男爵、骑士、普通成员）权限一致，没有个人所有者旁路。
 - `can_recruit()` 先调用该授权判断；地点面板、事件中心与头人对话共用同一结果，不各自复制规则。
 - 贵族冒险者招募也调用同一 `is_authorized_owner()`，不另写贵族权限规则；所有权变更立即影响下一次招募判断。
-- 家族面板复用 `HouseManager.get_house_nobles()` 与 `SettlementData.owner_house_id` / `owner_noble_id` 实时读取部队和封地，不建立第二套家族成员或封地缓存。
+- 家族面板复用 `HouseManager.get_house_nobles()` 与 `SettlementData.owner_house_id` 实时读取部队和封地，不建立第二套家族成员或封地缓存。
 
 ## 6. 关系与战争
 
@@ -102,7 +103,7 @@
 
 1. 双方都有政治家族：以家族/王国关系为准。
 2. 一方或双方无家族：回退到阵营关系。
-3. 玩家家族默认中立；只有显式设置敌对方时才会敌对。
+3. 玩家未加入王国时默认中立；只有显式设置敌对方时才会敌对。贵族身份可能因所属家族而自动与王国同阵营。
 4. 王国开战会把敌对关系传播到双方所有成员家族。
 
 部队的政治身份解析：
@@ -119,7 +120,7 @@
 |---|---|
 | `get_player_relation_for_house(house_id)` | 家族与玩家的关系 |
 | `get_player_relation_for_party(party_id)` | 部队与玩家的关系 |
-| `get_player_relation_for_settlement(settlement_id)` | 地点与玩家的关系（权威归属 `owner_house_id`，回退 `owner_noble_id`） |
+| `get_player_relation_for_settlement(settlement_id)` | 地点与玩家的关系（权威归属 `owner_house_id`） |
 | `get_player_relation_for_kingdom(kingdom_id)` | 王国与玩家的关系 |
 
 判定顺序：
@@ -134,6 +135,9 @@
 - `get_house_relation()` 在任一方是玩家家族时改为委托上述接口，因此 AI、遭遇、战斗与百科自动获得同一结果。
 - 玩家本人部队仍为 `PartyData.player_party_id` 特判；玩家所属家族、加入的王国与当前政治身份是三个不同概念，不互相替代。
 - 玩家是国王属于“玩家家族所属王国”的特例：其成员家族与建筑通过王国归属判定为同阵营，不通过玩家个人家族 ID 推导。
+- 身份配置决定玩家开局政治归属：`identity.family_id` → `HOUSE_*`，王国由 `HouseData.kingdom_id` 推导。`identity.independent_house = true` 时初始化跳过该家族对应的王国注册，家族保持 `kingdom_id` 为空，玩家只是家族领袖。
+- 文化、出生地点、地点视觉旗帜 `family_id`、建筑/部队显示名称都不参与阵营判定；无政治家族或无归属时默认中立，不默认绿色。
+- 地点阵营只认 `owner_house_id`；无主地点保持中立，即使其视觉旗帜属于某家族或王国。
 
 ### 6.2 玩家主动攻击宣战
 
@@ -153,25 +157,28 @@
 - `HOUSE_*` 是政治实体 ID。
 - `HouseData.banner_id` 保存对应的 `FAMILY_*`。
 - 读档迁移通过 `banner_id` 把旧存档中的 `FAMILY_*` 解析为现有 `HOUSE_*`，避免重复创建家族。
-- 地点旗帜取自 `SettlementData.family_id`，政治归属取自 `owner_house_id` / `owner_noble_id`；两者可以不同。例：灰石堡垒旗帜为伯克纳家族（`FAMILY_BURKNANIA`），所有权属于巴里家族。
+- 地点旗帜取自 `SettlementData.family_id`，政治归属只取自 `owner_house_id`；两者可以不同。例：灰石堡垒旗帜为伯克纳家族（`FAMILY_BURKNANIA`），所有权属于巴里家族。
 - 新增家族时若不配置旗帜，关系解析会回退到阵营关系。
 
 ## 8. 初始世界（六方势力，2026-11-27）
 
 | 王国 | 民族 | 统治家族 | 统治者 | 附庸家族 |
 |---|---|---|---|---|
-| 伯克纳王国 `KINGDOM_BURKNANIA` | 多拉曼人 | `HOUSE_BURKNANIA` | 伯克纳国王 | 奥德斯特、埃克托、巴夫勒、巴里 |
-| 弗拉尼伯国 `KINGDOM_FRANI` | 布吉多人 | `HOUSE_FRANI` | 弗拉尼伯爵 | 丁达尼、康利亚、米奇奇 |
-| 瓦伊拉王国 `KINGDOM_VAILA` | 布吉多人 | `HOUSE_VAILA` | 瓦伊拉国王 | 无 |
-| 洛里亚克王国 `KINGDOM_LORIAK` | 洛里斯人 | `HOUSE_LORIAK` | 洛里亚克国王 | 奥林、墨西西、罗斯维克 |
-| 泰纳公国 `KINGDOM_TAINA` | 蒙卡人 | `HOUSE_TAINA` | 泰纳公爵 | 无 |
-| 瓦勒蒙联盟 `KINGDOM_VALEMON` | 蒙卡人 | `HOUSE_VALEMON` | 瓦勒蒙盟主 | 克里卡 |
+| 伯克纳王国 `KINGDOM_BURKNANIA` | 多拉曼人 | `HOUSE_BURKNANIA` | 奥东·德·伯克纳 | 奥德斯特、埃克托、巴夫勒、巴里 |
+| 弗拉尼王国 `KINGDOM_FRANI` | 布吉多人 | `HOUSE_FRANI` | 奥利维耶 | 丁达尼、康利亚、米奇奇 |
+| 洛里亚克王国 `KINGDOM_LORIAK` | 洛里斯人 | `HOUSE_LORIAK` | 菲利普 | 奥林、墨西西、罗斯维克 |
+| 泰纳伯公国 `KINGDOM_TAINA` | 蒙卡人 | `HOUSE_TAINA` | 贝洛夫 | 无 |
+| 瓦勒蒙联盟 `KINGDOM_VALEMON` | 蒙卡人 | `HOUSE_VALEMON` | 卢卡 | 克里卡 |
+| 瓦伊拉伯国 `KINGDOM_VAILA` | 布吉多人 | `HOUSE_VAILA` | 瓦尔登 | 无 |
 
 - 初始六方全部和平，`enemy_kingdom_ids` 为空；战争只由显式 `declare_war()` 产生，并传播到双方成员家族。
-- 当前共 18 个家族（17 个 NPC 家族 + 玩家家族）、18 名贵族（每 NPC 家族一名领袖 + 玩家贵族）、23 支部队。
-- 每个 NPC 家族恰好一名贵族、一支由该贵族指挥的家族骑士部队（`<简称>骑士`）；统治家族的领袖为国王/公爵/盟主，非统治家族领袖为 `<简称>领主`。
-- 玩家属于 `HOUSE_PLAYER`，骑士爵位，独立且中立。
-- 旧世界确认的 9 处封地所有权保留；重建地图的位置、旗帜、民族与附庸名称不会自动生成封地、战争或外交关系。
+- 统治者的展示称号统一为“国王/统治者”，不按公国/联盟/伯国改写；爵位字段仍按配置保留（伯克纳/弗拉尼/洛里亚克/泰纳为 `DUKE`，瓦伊拉/瓦勒蒙为 `BARON`）。
+- 当前共 17 个正式家族、51 名 NPC 贵族、56 支部队（51 名贵族各 1 支 + 玩家 + 商队 + 3 支强盗）；默认贵族身份（埃克托次子）下为 52 名贵族、56 支部队。
+- 每位 NPC 贵族独立指挥一支家族部队（`<简称>骑士`，非领袖使用 `<贵族名>骑士`），不再是一个家族仅一名贵族。
+- 初始 59 处地点有家族所有者，塞洛斯要塞、巴达洛斯要塞无主；所有权只由 `owner_house_id` 表达，家族领袖、爵位与称号变化不影响所有权。
+- 不创建 `HOUSE_PLAYER`。贵族身份复用正式家族（埃克托/丁达尼/瓦伊拉）并创建玩家贵族；平民身份不创建贵族记录，`get_player_house()` / `get_player_noble()` 返回 `null`。
+- 贵族身份若 `starts_as_house_leader`，玩家接管家族领袖；`independent_house = false` 时同时成为该王国国王，`true` 时跳过该王国注册、家族保持独立（瓦伊拉领袖：世界为 5 个王国 + 独立瓦伊拉家族）。否则保留原 NPC 领袖并让玩家效忠。
+- 重建地图的位置、旗帜、民族与附庸名称不会自动生成封地、战争或外交关系；所有所有权均来自 `_family_specs()` 的 Settlement ID → 家族 ID 配置。
 
 ## 9. 持久化
 

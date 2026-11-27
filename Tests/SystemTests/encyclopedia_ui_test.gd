@@ -37,9 +37,24 @@ func _run() -> void:
 	_context = WorldContext.new()
 	_context.name = "EncyclopediaTestContext"
 	add_child(_context)
-	_check(WorldInitializer.create_new_world(_context), "初始化世界")
+	var catalog := IdentityCatalog.load_default()
+	var commoner := catalog.get_identity("IDENTITY_DORAMAN_MERCENARY") \
+		if catalog != null else null
+	_check(commoner != null, "加载平民身份配置")
+	_check(WorldInitializer.create_new_world(_context, commoner), "初始化世界")
 	if not _context.is_valid_world():
 		return
+	# 测试夹具：平民开局不自动创建家族；手工注册一个独立玩家家族，
+	# 用于验证百科的“独立家族”展示分支。
+	_check(
+		_context.house_manager.register_house(
+			HOUSE_PLAYER,
+			WorldInitializer.PLAYER_HOUSE_NAME,
+			WorldInitializer.FAMILY_PLAYER_ID,
+			true
+		) != null,
+		"注册独立玩家家族"
+	)
 	GameManager.world_context = _context
 	GameManager.player_party_id = _context.player_party_id
 
@@ -102,9 +117,12 @@ func _run() -> void:
 	if kingdom_button != null:
 		_check(kingdom_button.text.contains("伯克纳王国"), "王国名称来自数据")
 		_check(kingdom_button.text.contains("伯克纳家族"), "统治家族来自数据")
-		_check(kingdom_button.text.contains("伯克纳国王"), "国王来自数据")
+		_check(
+			kingdom_button.text.contains(WorldInitializer.BURKNANIA_KING_NAME),
+			"国王来自数据"
+		)
 		_check(kingdom_button.text.contains("附庸家族：4"), "附庸数量来自数据")
-		_check(kingdom_button.text.contains("封地：4"), "封地数量来自数据")
+		_check(kingdom_button.text.contains("封地：19"), "封地数量来自数据")
 		_check(kingdom_button.text.contains("和平"), "初始和平状态来自数据")
 
 	# 二级：王国详情。
@@ -139,7 +157,7 @@ func _run() -> void:
 	await _click("EncyclopediaHouse_%s" % HOUSE_MOXIXI)
 	_check(_title.text.contains("墨西西家族"), "二级为家族详情")
 	_check(_subtitle_text().contains("所属王国：洛里亚克王国"), "家族详情显示所属王国")
-	_check(_list_has_text("墨西西领主"), "家族详情列出贵族")
+	_check(_list_has_text("墨西西里曼"), "家族详情列出贵族")
 	_check(_list_has_text("墨西西"), "家族详情列出封地")
 	_check(_list_has_text("敌对王国（0）"), "初始无敌对王国")
 	_check(_list_has_text("没有敌对王国。"), "家族无敌对王国时显示空状态")

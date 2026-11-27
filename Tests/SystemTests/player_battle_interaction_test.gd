@@ -34,12 +34,12 @@ func _run() -> void:
 	var player := context.get_player_party() if context != null else null
 	var merchant := _find_party_by_name(context, WorldInitializer.TEST_ENEMY_PARTY_NAME)
 	var bandit := _find_party_by_name(context, WorldInitializer.BANDIT_PARTY_NAME)
-	var guard := _find_party_by_name(context, WorldInitializer.GUARD_PARTY_NAME)
+	var ally := _find_party_by_name(context, WorldInitializer.BARI_KNIGHT_PARTY_NAME)
 	_check(
-		player != null and merchant != null and bandit != null and guard != null,
+		player != null and merchant != null and bandit != null and ally != null,
 		"玩家与 NPC 部队存在"
 	)
-	if player == null or merchant == null or bandit == null or guard == null:
+	if player == null or merchant == null or bandit == null or ally == null:
 		return
 
 	# 固定测试场景，避免其他 AI 干扰。
@@ -48,8 +48,8 @@ func _run() -> void:
 	_place_party(player, battle_position + Vector2(55.0, 0.0))
 	_place_party(merchant, battle_position)
 	_place_party(bandit, battle_position)
-	_place_party(guard, Vector2(2600.0, 1800.0))
-	guard.ai_type = PartyData.PartyAIType.NONE
+	_place_party(ally, Vector2(2600.0, 1800.0))
+	ally.ai_type = PartyData.PartyAIType.NONE
 	merchant.ai_type = PartyData.PartyAIType.NONE
 	bandit.ai_type = PartyData.PartyAIType.NONE
 

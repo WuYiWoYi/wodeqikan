@@ -55,8 +55,8 @@ WorldMap / Village WorldLogPanel（只读展示、滚动）
 | `EventBus.player_encounter_requested` | `PLAYER_ENCOUNTER` | 「玩家部队 与 A 部队 发生了遭遇。」 |
 | `EventBus.settlement_entered` | `SETTLEMENT_ENTERED` | 「玩家进入了巴里。」 |
 | `EventBus.settlement_exited` | `SETTLEMENT_EXITED` | 「玩家离开了巴里。」 |
-| `EventBus.fief_recruited` | `FIEF_RECRUITED` | 「巴里骑士 在巴里征召了 1 组采邑。」「你在青禾村征召了 1 组采邑。」 |
-| `EventBus.adventurer_recruited` | `ADVENTURER_RECRUITED` | 「你在青禾村招募了冒险者阿拉丁。」 |
+| `EventBus.fief_recruited` | `FIEF_RECRUITED` | 「巴里骑士 在巴里征召了 1 组采邑。」「你在埃克托村征召了 1 组采邑。」 |
+| `EventBus.adventurer_recruited` | `ADVENTURER_RECRUITED` | 「你在埃克托村招募了冒险者阿拉丁。」 |
 | `MarketManager.execute_player_trade()` | `PLAYER_TRADE` | 「你在伯克纳尼亚交易市场购买了普通战马 ×1，支付 100 金币。」“你在巴里购买了面包 ×10，支付 20 金币。” |
 | `EventBus.npc_supply_purchased` | 不写日志 | 大地图在部队图标上方显示「补给 面包+X 草料+Y」 |
 | `WorldLogManager.add_event()` | `OTHER` 或扩展类型 | 预留任务、经济、外交等事件 |

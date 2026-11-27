@@ -2117,7 +2117,7 @@
 
 ---
 
-## D108 · 封地归属使用 `owner_lord_id`，玩家领主与玩家角色分离
+## D108 · 封地归属使用 `owner_lord_id`，玩家领主与玩家角色分离（2026-11-27 由 D176 取代归属字段部分）
 
 **日期：** 2026-11-22
 **状态：** 已确定
@@ -3101,8 +3101,8 @@
 - 六方势力（伯克纳王国、弗拉尼伯国、瓦伊拉王国、洛里亚克王国、泰纳公国、瓦勒蒙联盟）的统治家族、附庸家族与民族由 `WorldInitializer._kingdom_specs()` 显式声明，不从地图位置、地点归属或家族驻地推断。
 - 初始全部和平；战争只由 `KingdomManager.declare_war()` 建立，并传播到双方成员家族。
 - 每个 NPC 家族恰好一名贵族领袖、一支由其指挥的家族骑士部队；不额外创建第二支同贵族部队。
-- `SettlementData.family_id` 只决定地点旗帜，`owner_house_id` / `owner_noble_id` 才决定政治归属与征召授权。两者可以不同，例如灰石堡垒旗帜为伯克纳家族、所有权为巴里家族。
-- 重建后只保留旧世界已确认的 9 处所有权；其余地点无主，不用地图位置补写。
+- `SettlementData.family_id` 只决定地点旗帜，`owner_house_id` 才决定政治归属与征召授权。两者可以不同，例如灰石堡垒旗帜为伯克纳家族、所有权为巴里家族。（2026-11-27 由 D176 修订：个人所有者字段已删除。）
+- 重建后只保留旧世界已确认的 9 处所有权（身份接入任务移除青禾村/北境村后为 7 处，见 D174）；其余地点无主，不用地图位置补写。
 - 家族旗帜统一命名为 `<家族>旗帜16_16.png`；缺失资源的家族回退默认旗帜/颜色，不伪造资源。
 - `KingdomData.people_name` 为可选持久化字段，旧存档缺失时为空，不升 Schema。
 
@@ -3204,3 +3204,59 @@
 **原因：** `world_map.gd` 达 5562 行；暂停账本分散在 11 个 `_xxx_pause_active` 布尔与 28 处手动 `pop_pause` 中，最容易出现暂停泄漏或重复弹出。覆盖层是职责最独立、边界最清晰、可以先拆的部分。
 
 **影响：** `world_map.gd` 降至 4762 行；存档结构、世界数据权威、UI 布局与交互规则均未改变。后续切片继续按同一模式拆顶栏信息、事件覆盖层、时间 UI、相机、悬浮、战斗交互、地点与遭遇面板；不新建 Autoload，不引入全局查找。
+
+---
+
+## D174 · 新游戏身份选择接入实际开局
+
+**日期：** 2026-11-27
+**状态：** 已确定
+
+**决策：**
+
+- `IdentityDefinition` 增加 `spawn_location_id`、`family_id`、`family_system_enabled`、`starts_as_house_leader`、`starting_rank`；`validate()` 强制贵族身份必须同时配置家族与爵位，平民身份必须两者为空。
+- `WorldInitializer.create_new_world(context, identity = null)` 成为唯一开局装配入口；`identity` 为空时回退 `IDENTITY_EKTOR_SECOND_SON`，保证旧调用方与测试仍得到有效世界。所属王国不单独配置，由家族 `HouseData.kingdom_id` 推导。
+- 贵族身份复用现有正式家族与贵族系统：接管对应 `HouseData.is_player_house`，创建 `is_player_lord` 贵族，按 `starting_rank` 设置爵位；`starts_as_house_leader` 决定是否接管家族领袖。瓦伊拉领袖的王国归属已由 D175 修订为独立家族（本条原文“保留 `KINGDOM_VAILA` 并让玩家成为国王”不再有效）。
+- 平民身份不创建 `HOUSE_PLAYER`、不创建贵族记录，也不写 `player_house_id` / `player_lord_id`；玩家部队 `family_id` 为空。家族面板显示空状态，`WorldContext.get_player_house()` / `get_player_noble()` 返回 `null`。
+- 彻底移除青禾村、北境村与北境巡逻队；初始地点 61、部队 22、正式家族 17。世界初始化只注册 NPC 家族，玩家通过身份加入，不再注册测试用 `HOUSE_PLAYER`。
+- `WorldContext` 新增会话身份字段并写入存档可选字段；旧存档缺失时为空，平民读档不会被 `load_from_save_data()` 的旧贵族兜底逻辑补成贵族。
+
+**原因：** 身份选择此前只影响 UI 展示，实际开局仍使用测试家族/测试出生村。把配置字段交给统一的世界初始化器，可让六个正式身份共享同一套家族、贵族与政治关系代码，同时保持平民扩展路径开放。
+
+**影响：** `identity_definition.gd`、六个身份 `.tres`、`world_initializer.gd`、`world_context.gd`、`game_manager.gd`、`world_map_definition.tres`、大地图玩家信息与相关测试；`schema_version` 保持 v10（可选字段追加）。
+
+---
+
+## D175 · 身份开局阵营归属：统一关系接口与独立家族
+
+**日期：** 2026-11-27
+**状态：** 已确定
+
+**决策：**
+
+- 玩家阵营归属只由身份配置决定：`identity.family_id` → `HOUSE_*`，王国由 `HouseData.kingdom_id` 推导；文化、出生地点、地图视觉旗帜 `family_id`、名称与出生附近地点都不参与判定。
+- 大地图部队外环与建筑名称底板统一调用 `FactionManager.get_player_relation_for_party()` / `get_player_relation_for_settlement()`；未知或缺失归属默认 `NEUTRAL`，不存在默认绿色兜底。
+- 贵族身份：玩家家族所属王国的成员家族、部队与有主建筑同阵营；敌国王国的对应实体敌对；其余中立。平民身份无家族无王国，只有玩家本人部队同阵营。
+- `IdentityDefinition` 新增 `independent_house`：为 `true` 时，`WorldInitializer` 跳过该统治家族对应的王国注册，家族保持 `kingdom_id` 为空，玩家只是家族领袖而非国王。瓦伊拉家族领袖使用该配置，世界为 5 个王国 + 独立瓦伊拉家族。
+- 建筑阵营只认 `SettlementData.owner_house_id`；无主建筑保持中立，即使其视觉旗帜属于某家族。（2026-11-27 由 D176 修订：个人所有者回退已删除。）
+
+**原因：** 旧实现把“接管统治家族”直接等同于“成为国王”，与瓦伊拉领袖“独立家族、不依附任何国家”的正式设定冲突；同时需要明确文化与视觉数据不得参与政治阵营，避免旧地图标记或同文化家族被误判为同阵营。
+
+**影响：** `identity_definition.gd`、`vaila_leader.tres`、`world_initializer.gd`、`Docs/Systems/Identity_Selection_System.md`、`Political_Hierarchy_System.md`、`identity_startup_test`，新增 `identity_faction_relation_test`；不改动存档 Schema、家族/王国核心接口与战斗/移动逻辑。
+
+## D176 · 领地只归属家族，贵族名单与领地由显式配置生成
+
+**日期：** 2026-11-27
+**状态：** 已确定（取代 D108 中“个人领主是封地唯一权威”的部分）
+
+**决策：**
+
+- `SettlementData.owner_house_id` 是领地所有权的唯一权威；删除 `owner_noble_id` / `owner_lord_id`，不保留并行的个人所有者字段。家族领袖、男爵、骑士、普通成员或称号变化都不改变所有权。
+- 征召授权只有一条规则：请求者存活且 `noble.house_id == settlement.owner_house_id`；同家族全部成员权限一致。`FiefRecruitmentManager.is_authorized_owner()` 仍是唯一实现，UI、村庄场景、AI 与贵族冒险者招募复用。
+- 旧存档的个人所有者只作为迁移输入：读档时解析为贵族所属家族后清空；仍为空时回退视觉家族 `family_id` → `banner_id`。结构兼容 Schema v10，不升版。
+- 新世界由 `WorldInitializer._family_specs()` 显式声明 17 家族的贵族（姓名/爵位/是否领袖）与领地（Settlement ID 列表），共 51 名 NPC 贵族、51 支家族部队、59 处领地；每位贵族独立指挥一支部队。不以名称、文化或地图位置推断归属。
+- 六方势力名称与统治者名单按配置生成；统治者的展示称号统一为国王/统治者，爵位字段仍按配置保留。
+
+**原因：** 个人所有权与家族所有权并存会产生两个写入源，导致“家族成员不能征召家族村庄”“换领袖即换主人”等矛盾；显式名单也让初始化可审计、可测试，避免依赖隐式推断。
+
+**影响：** `settlement_data.gd`、`world_initializer.gd`、`fief_recruitment_manager.gd`、`ai_manager.gd`、`village_scene.gd`、`lord_ransom_manager.gd`、`faction_manager.gd`、`world_context.gd`、`adventurer_recruitment_manager.gd`、地点/百科/家族面板 UI；`world_map_definition.tres` 3 处改名；相关测试与 `Docs/Systems/*` 同步更新。

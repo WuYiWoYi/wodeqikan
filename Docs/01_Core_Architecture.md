@@ -216,11 +216,14 @@ Manager → EventBus（只发事实）
 | `PartyData.member_unit_ids` | `PartyManager` | 与 `UnitData.current_party_id` 双向一致 |
 | `PartyData.battle_state` | `BattleManager`（战斗）、`CaptivityManager`（被俘/逃脱） | 锁定/解锁；全员阵亡→DISABLED；被俘玩家部队禁用、逃脱后恢复 |
 | `PartyData.control_type` / `party_kind` | `WorldInitializer` / 存档恢复（`PartyManager.apply_runtime_defaults()`） | 运行时只读；AI 调度只看 `control_type`，表现与配置按 `party_kind` 取 |
+| `WorldContext.player_identity_id/category_id/culture_id/identity_name` | `WorldInitializer` / `WorldContext.load_from_save_data()` | 身份选择结果的会话权威副本；`GameManager` 只做镜像 |
+| `WorldContext.player_house_id` / `player_lord_id` | `WorldInitializer` / 存档恢复 | 贵族身份绑定正式家族与玩家贵族；平民为空，不伪造数据 |
+| `HouseData.is_player_house` | `WorldInitializer` / 存档恢复 | 贵族身份加入正式家族时设置；平民身份不设置任何家族 |
 | `PartyData.ai_type` / `ai_route_settlement_ids` | `WorldInitializer` | 运行时只读，不靠部队名称判断行为 |
 | `PartyData.ai_route_index` | `AIManager` | 到达路线点后推进下一步索引 |
 | 遭遇原因与待处理遭遇 | `EncounterManager` | UI 只读 `get_pending_encounter_reason()`，离场规则由 `can_leave_encounter()` 统一判定 |
 | `LordData` 目标与状态 | `AIManager` / 领主 AI | 通过明确方法 |
-| `SettlementData.owner_lord_id` | `WorldInitializer` / 存档恢复 / 未来的领地系统 | UI 与征召只读 |
+| `SettlementData.owner_house_id` | `WorldInitializer` / 存档恢复 / 未来的领地系统 | 唯一所有权字段；UI 与征召只读 |
 | `SettlementData` 采邑储备/计时、人口/繁荣度、税收缓存 | `FiefRecruitmentManager` | 征召与 `WorldSimulation` 调用；UI 只读 |
 | `SettlementData.adventurer_candidates` / 刷新计时 | `AdventurerRecruitmentManager` | 村庄表现只读；离开时清理 |
 | 全局雇佣兵池 `MercenaryData`、池计时 | `MercenaryManager` | 酒馆 UI、NPC AI 只读；招募是唯一移除入口 |
@@ -247,15 +250,18 @@ Manager → EventBus（只发事实）
 ### 8.1 新游戏
 
 ```text
-MainMenu → GameManager.start_new_game()
+MainMenu → GameManager.start_new_game(identity_id, category_id, culture_id)
   ├── 清理旧 WorldContext
   ├── TimeManager.start_session()（默认暂停 0 倍速）
   ├── 创建 WorldContext（装配管理器）
-  ├── WorldInitializer.create_new_world()
-  │     ├── 生成 WORLD ID、世界尺寸
-  │     ├── 玩家部队 + NPC 部队（商队/巡逻/强盗/家族骑士等）
-  │     ├── 玩家领主 / NPC 领主 / 贵族/家族/王国归属
-  │     └── 九个初始地点（含玩家村庄“青禾村”）
+  ├── GameManager 解析身份配置（空 ID 回退埃克托次子）
+  └── WorldInitializer.create_new_world(context, identity)
+        ├── 生成 WORLD ID、世界尺寸
+        ├── 在身份出生点附近生成玩家部队
+        ├── NPC 部队（商队/强盗/家族骑士等）
+        ├── 贵族：绑定正式家族并创建玩家贵族（可选家族领袖/国王）
+        ├── 平民：不创建家族与贵族记录
+        └── 61 个正式地点（无青禾村/北境村/北境巡逻队）
   └── SceneManager.change_scene(WorldMap)
 ```
 

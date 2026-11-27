@@ -86,7 +86,14 @@ var player_party_id: String = ""
 ## 玩家领主身份（封地所有权）与玩家角色 UnitData 是两个独立 ID。
 var player_lord_id: String = ""
 ## 玩家所属家族；玩家本质上是贵族家族体系中的一员。
+## 平民身份为空：玩家身份与家族归属分离，不创建临时家族。
 var player_house_id: String = ""
+## 新游戏身份选择结果；平民身份没有家族，但仍保留身份 ID/类型/文化。
+var player_identity_id: String = ""
+var player_identity_category_id: String = ""
+var player_culture_id: String = ""
+## 身份显示名只用于 UI；从身份配置解析，不参与规则判断。
+var player_identity_name: String = ""
 var player_unit_id: String = ""
 var player_profile: PlayerProfile = PlayerProfile.new()
 
@@ -207,6 +214,16 @@ func get_player_house() -> HouseData:
 	return house_manager.get_player_house()
 
 
+## 平民身份：身份选择明确为 COMMONER，不创建家族/贵族记录。
+## 旧存档没有身份字段时返回 false，保持旧的玩家贵族恢复逻辑。
+func is_player_commoner() -> bool:
+	return player_identity_category_id == "COMMONER"
+
+
+func get_player_identity_name() -> String:
+	return player_identity_name
+
+
 func get_player_unit() -> UnitData:
 	var unit := unit_manager.get_unit(player_unit_id)
 	if unit != null:
@@ -222,7 +239,7 @@ func get_player_unit() -> UnitData:
 
 
 ## 玩家当前拥有的全部封地。所有权规则与征召授权共用同一判断：
-## 明确指定 owner_noble_id 时只认该贵族；未指定时认所有者家族的领袖。
+## 玩家贵族所属家族等于领地 owner_house_id 即视为家族领地。
 func get_player_owned_settlements() -> Array[SettlementData]:
 	var result: Array[SettlementData] = []
 	var noble := get_player_noble()
@@ -282,19 +299,7 @@ func validate_world_ownership() -> Array[String]:
 	for settlement: SettlementData in settlement_manager.get_all_settlements():
 		if settlement == null:
 			continue
-		if not settlement.owner_noble_id.is_empty():
-			var noble := noble_manager.get_noble(settlement.owner_noble_id)
-			if noble == null:
-				errors.append(
-					"地点 %s 引用了不存在的贵族 %s"
-					% [settlement.settlement_id, settlement.owner_noble_id]
-				)
-			elif not settlement.owner_house_id.is_empty() \
-					and noble.house_id != settlement.owner_house_id:
-				errors.append(
-					"地点 %s 的所有者贵族与所有者家族不一致"
-					% settlement.settlement_id
-				)
+		# 领地只校验家族所有权；个人所有者字段不再参与现行数据。
 		if not settlement.owner_house_id.is_empty():
 			if house_manager.get_house(settlement.owner_house_id) == null:
 				errors.append(
@@ -343,6 +348,11 @@ func to_save_data() -> SaveData:
 		"player_noble_id": player_lord_id,
 		"player_house_id": player_house_id,
 		"player_unit_id": player_unit_id,
+		# 身份选择结果（增量可选字段）：旧存档缺失时为空，沿用旧恢复逻辑。
+		"identity_id": player_identity_id,
+		"identity_category_id": player_identity_category_id,
+		"culture_id": player_culture_id,
+		"identity_name": player_identity_name,
 	}
 	# 金币、堆叠物品与独立马匹实例都由 PlayerProfile 统一序列化。
 	var profile_payload: Dictionary = player_profile.to_dict()
@@ -498,6 +508,10 @@ func load_from_save_data(save: SaveData) -> bool:
 		save.player.get("player_noble_id", save.player.get("player_lord_id", ""))
 	)
 	player_house_id = str(save.player.get("player_house_id", ""))
+	player_identity_id = str(save.player.get("identity_id", ""))
+	player_identity_category_id = str(save.player.get("identity_category_id", ""))
+	player_culture_id = str(save.player.get("culture_id", ""))
+	player_identity_name = str(save.player.get("identity_name", ""))
 	player_unit_id = str(save.player.get("player_unit_id", ""))
 	# 原地更新，保持 BattleManager 持有的 profile 引用一致。
 	var loaded_profile: PlayerProfile = PlayerProfile.from_dict(save.player)
@@ -564,10 +578,12 @@ func load_from_save_data(save: SaveData) -> bool:
 	captivity_manager.load_from_dict(save.captivity, save.world_elapsed_seconds)
 
 	# 旧存档没有贵族数据时，至少恢复玩家贵族身份；不伪造封地归属。
+	# 平民新存档（带身份字段）明确不创建贵族，读档不得补成贵族。
 	var player_noble: NobleData = noble_manager.get_noble(player_lord_id)
 	if player_noble == null:
 		player_noble = noble_manager.get_player_noble()
-	if player_noble == null and party_manager.get_party(player_party_id) != null:
+	if player_noble == null and not is_player_commoner() \
+			and party_manager.get_party(player_party_id) != null:
 		var player_house := get_player_house()
 		player_noble = noble_manager.create_noble(
 			"玩家领主",
@@ -712,7 +728,19 @@ func _migrate_political_data() -> void:
 		house_manager.ensure_leader(house.house_id)
 
 	for settlement: SettlementData in settlement_manager.get_all_settlements():
-		if settlement != null and settlement.owner_house_id.is_empty() \
+		if settlement == null:
+			continue
+		# 旧存档个人所有者 → 家族所有权；迁移后清空私有输入字段。
+		if not settlement._legacy_owner_noble_id.is_empty():
+			var legacy_owner := noble_manager.get_noble(
+				settlement._legacy_owner_noble_id
+			)
+			if legacy_owner != null and settlement.owner_house_id.is_empty():
+				settlement.owner_house_id = legacy_owner.house_id
+			settlement._legacy_owner_noble_id = ""
+		# 更早的存档完全没有所有权字段时，才以视觉家族兜底；
+		# 新游戏/新存档的无主地点（family_id 为空）不会被补写。
+		if settlement.owner_house_id.is_empty() \
 				and not settlement.family_id.is_empty():
 			settlement.owner_house_id = _resolve_house_id_for_family(
 				settlement.family_id

@@ -8,7 +8,7 @@ var _context: WorldContext = null
 var _map: Node = null
 var _player: PartyData = null
 var _merchant: PartyData = null
-var _guard: PartyData = null
+var _ally: PartyData = null
 var _village: SettlementData = null
 var _castle: SettlementData = null
 
@@ -41,12 +41,12 @@ func _run() -> void:
 
 	_player = _context.get_player_party()
 	_merchant = _find_party("河畔商队")
-	_guard = _find_party("北境巡逻队")
+	_ally = _find_party(WorldInitializer.BARI_KNIGHT_PARTY_NAME)
 	_village = _find_settlement("巴里")
 	_castle = _find_settlement("灰石堡垒")
-	_check(_player != null and _merchant != null and _guard != null, "找到测试部队")
+	_check(_player != null and _merchant != null and _ally != null, "找到测试部队")
 	_check(_village != null and _castle != null, "找到测试地点")
-	if _player == null or _merchant == null or _guard == null:
+	if _player == null or _merchant == null or _ally == null:
 		return
 
 	var packed := load("res://Scenes/WorldMap/world_map.tscn") as PackedScene
@@ -259,20 +259,20 @@ func _test_alt_input_switch() -> void:
 
 
 func _test_icon_count_updates() -> void:
-	var member_id: String = _guard.member_unit_ids[0]
-	var before: int = _guard.member_unit_ids.size()
-	_check(_context.party_manager.remove_member(_guard.party_id, member_id),
+	var member_id: String = _ally.member_unit_ids[0]
+	var before: int = _ally.member_unit_ids.size()
+	_check(_context.party_manager.remove_member(_ally.party_id, member_id),
 		"移除一名部队成员")
 	await get_tree().process_frame
 	var icon := _map.find_child(
-		"PartyIcon_%s" % _guard.party_id, true, false
+		"PartyIcon_%s" % _ally.party_id, true, false
 	) as PartyIcon
 	_check(icon != null and icon.get_count_text() == str(before - 1),
 		"人数变化后图标数字同步更新")
 
 
 func _test_chase_suppression() -> void:
-	if _village == null or _guard == null or _castle == null:
+	if _village == null or _ally == null or _castle == null:
 		return
 
 	var settlement_panel := _map.find_child("SettlementPanel", true, false) as PanelContainer
@@ -285,9 +285,9 @@ func _test_chase_suppression() -> void:
 	_merchant.world_position = Vector2(2600.0, 1800.0)
 	_merchant.target_position = _merchant.world_position
 	_merchant.movement_state = PartyData.MovementState.IDLE
-	_guard.world_position = Vector2(2500.0, 1700.0)
-	_guard.target_position = _guard.world_position
-	_guard.movement_state = PartyData.MovementState.IDLE
+	_ally.world_position = Vector2(2500.0, 1700.0)
+	_ally.target_position = _ally.world_position
+	_ally.movement_state = PartyData.MovementState.IDLE
 
 	# 普通寻路经过村庄：逐帧更新不会按距离自动打开地点面板。
 	_player.focus_party_id = ""
@@ -390,9 +390,9 @@ func _test_chase_suppression() -> void:
 			leave_button.pressed.emit()
 
 	# 主动点击目标部队后仍保留原对话逻辑；普通路过不再自动弹窗。
-	_player.focus_party_id = _guard.party_id
+	_player.focus_party_id = _ally.party_id
 	_player.movement_state = PartyData.MovementState.IDLE
-	_guard.world_position = _player.world_position
+	_ally.world_position = _player.world_position
 	_map.call("_check_party_interaction")
 	_check(party_panel.visible, "主动点击目标部队后打开对话")
 	if party_panel.visible:

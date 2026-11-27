@@ -44,12 +44,14 @@ func _run() -> void:
 		is_equal_approx(_enemy.movement_speed, WorldInitializer.MERCHANT_MOVE_SPEED),
 		"商队速度按基准 30 换算"
 	)
-	var guard_party := _find_party_by_name(WorldInitializer.GUARD_PARTY_NAME)
+	var ally_party := _find_party_by_name(WorldInitializer.BARI_KNIGHT_PARTY_NAME)
 	var bandit_party := _find_party_by_name(WorldInitializer.BANDIT_PARTY_NAME)
 	_check(
-		guard_party != null
-		and is_equal_approx(guard_party.movement_speed, WorldInitializer.GUARD_MOVE_SPEED),
-		"治安队速度按基准 30 换算"
+		ally_party != null
+		and is_equal_approx(
+			ally_party.movement_speed, WorldInitializer.FAMILY_KNIGHT_MOVE_SPEED
+		),
+		"家族骑士速度按基准 30 换算"
 	)
 	_check(
 		bandit_party != null
@@ -524,7 +526,7 @@ func _test_arrival_auto_pause() -> void:
 	# NPC 到达不触发玩家暂停。
 	TimeManager.set_base_world_speed(TimeManager.SPEED_NORMAL)
 	_stop_player()
-	var npc := _find_party_by_name(WorldInitializer.GUARD_PARTY_NAME)
+	var npc := _find_party_by_name(WorldInitializer.BARI_KNIGHT_PARTY_NAME)
 	_check(npc != null, "找到用于到达测试的 NPC 部队")
 	if npc != null:
 		npc.world_position = Vector2(2300.0, 1100.0)
@@ -669,8 +671,8 @@ func _test_camera_controls() -> void:
 
 
 func _test_npc_runtime_movement() -> void:
-	var patrol := _find_party_by_name("北境巡逻队")
-	_check(patrol != null, "北境巡逻队存在")
+	var patrol := _find_party_by_name(WorldInitializer.BARI_KNIGHT_PARTY_NAME)
+	_check(patrol != null, "巴里骑士存在")
 	if patrol == null:
 		return
 
@@ -692,7 +694,7 @@ func _test_npc_runtime_movement() -> void:
 	)
 	_check(
 		patrol.world_position.distance_to(patrol_start) > 1.0,
-		"巡逻队由 WorldTime tick 驱动移动"
+		"家族骑士由 WorldTime tick 驱动移动"
 	)
 	_check(
 		_player.world_position.distance_to(player_start) < 0.01,

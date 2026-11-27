@@ -3,7 +3,7 @@ extends RefCounted
 ## 封地采邑征召与补充的唯一业务入口。
 ##
 ## 职责：
-## - 校验封地所有权（只有 owner_lord_id 与领主 ID 相同才允许征召）；
+## - 校验封地所有权（贵族所属家族等于领地 owner_house_id 才允许征召）；
 ## - 以“组”为单位原子化生成 6 名士兵并加入领主部队；
 ## - 征召后扣除村庄人口、繁荣度并重算税收；
 ## - 按 WorldTime 推进采邑储备补充。
@@ -175,25 +175,25 @@ func tick(world_delta: float) -> void:
 
 
 ## 贵族是否拥有该封地；只判断所有权，不检查储备、部队状态等征召前置条件。
+## 领地归家族所有：贵族所属家族等于领地 owner_house_id 即获授权，
+## 家族领袖、男爵、骑士及其他成员一律同等对待；个人身份不参与判断。
 ## 供征召与只读经济/事件预览共用，避免 UI 复制授权规则。
 func is_authorized_owner(settlement: SettlementData, lord_id: String) -> bool:
 	if settlement == null or lord_id.strip_edges().is_empty():
+		return false
+	if settlement.owner_house_id.is_empty():
 		return false
 	var lord := _lord_manager.get_lord(lord_id) if _lord_manager != null else null
 	if lord == null or not lord.is_alive:
 		return false
 	var noble := lord as NobleData
-	if settlement.owner_noble_id == lord_id:
-		return true
-	if settlement.owner_noble_id.is_empty() \
-			and not settlement.owner_house_id.is_empty() and noble != null:
-		return noble.house_id == settlement.owner_house_id and noble.is_house_leader
-	return false
+	if noble == null:
+		return false
+	return noble.house_id == settlement.owner_house_id
 
 
 ## 贵族是否获得封地家族授权；空 ID 或无效贵族一律拒绝。
-## 本阶段规则：只有村庄可征召；封地明确指定 owner_noble_id 时只认该贵族；
-## 未指定个人所有者时，允许所有者家族的领袖征召。
+## 本阶段规则：只有村庄可征召；授权只看贵族所属家族与领地家族所有权。
 func can_recruit(settlement_id: String, lord_id: String) -> bool:
 	var settlement: SettlementData = null
 	if _settlement_manager != null:

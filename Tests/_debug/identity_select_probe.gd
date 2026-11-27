@@ -16,6 +16,25 @@ func _ready() -> void:
 
 	await _capture("identity_probe_culture.png")
 
+	# 多拉曼默认身份「埃克托家族次子」：检查专属立绘与无立绘身份的空置表现。
+	var confirm := screen.find_child("ConfirmButton", true, false) as Button
+	confirm.pressed.emit()
+	for i: int in range(4):
+		await get_tree().process_frame
+	await _capture("identity_probe_identity_ektor.png")
+	var doraman_mercenary := screen.find_child(
+		"IdentityOption_IDENTITY_DORAMAN_MERCENARY", true, false
+	) as Button
+	doraman_mercenary.mouse_entered.emit()
+	for i: int in range(3):
+		await get_tree().process_frame
+	await _capture("identity_probe_identity_no_visual.png")
+	doraman_mercenary.mouse_exited.emit()
+	var back_to_culture := screen.find_child("BackButton", true, false) as Button
+	back_to_culture.pressed.emit()
+	for i: int in range(3):
+		await get_tree().process_frame
+
 	var bugido := screen.find_child(
 		"CultureOption_CULTURE_BUGIDO", true, false
 	) as Button
@@ -29,7 +48,7 @@ func _ready() -> void:
 		await get_tree().process_frame
 	await _capture("identity_probe_culture_selected.png")
 
-	var confirm := screen.find_child("ConfirmButton", true, false) as Button
+	confirm = screen.find_child("ConfirmButton", true, false) as Button
 	confirm.pressed.emit()
 	for i: int in range(4):
 		await get_tree().process_frame

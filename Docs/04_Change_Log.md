@@ -6,6 +6,114 @@
 
 ---
 
+## 2026-11-27 · 家族领地所有权、17 家族贵族初始化与政治体系核定
+
+### 变更
+
+- **领地只归属家族**：`SettlementData` 删除 `owner_noble_id` / `owner_lord_id`，`owner_house_id` 成为唯一所有权权威；`has_owner()`、序列化、地点面板、百科、家族面板、阵营查询、AI 征召统一只读该字段。
+- **迁移**：旧存档个人所有者读档时由 `WorldContext._migrate_political_data()` 解析为贵族所属家族并清空，仍为空时回退视觉家族 `family_id` → `banner_id`；不提升 Schema（仍为 v10）。
+- **征召授权**：`FiefRecruitmentManager.is_authorized_owner()` 改为 `noble.house_id == settlement.owner_house_id`，同家族领袖、男爵、骑士与普通成员权限一致；村庄场景 UI 与 AI 只复用该接口。
+- **17 家族贵族初始化**：`WorldInitializer._family_specs()` 显式声明 17 家族的贵族名单、爵位、领袖与领地，共 51 名 NPC 贵族、51 支家族部队、59 处家族领地；每位贵族独立指挥一支部队，不再一家族一贵族。
+- **六方势力名称**：伯克纳王国、弗拉尼王国、洛里亚克王国、泰纳伯公国、瓦勒蒙联盟、瓦伊拉伯国；统治者统一显示为国王/统治者称号，爵位字段按配置保留。
+- **地名修正（仅 3 处）**：埃克托城镇 → 埃克托尼亚、埃克托村 → 埃克托、贝特努城堡 → 贝特努要塞；Settlement ID、坐标、类型与美术不变。
+- **表现与查询**：地点面板显示所有者家族；百科地点/家族详情只按家族所有者展示；部队与建筑阵营关系只由 `owner_house_id` 推导。
+
+### 验证
+
+- 更新并通过：`political_hierarchy_test`（6 王国、17 家族、51 NPC/52 含玩家、56 部队、59 领地、17 领袖与 6 国王姓名、同家族征召、存档 52 名贵族、领袖死亡选举）、`world_map_layout_test`（52 贵族/56 部队/117 实体、3 处改名、59 所有权）、`fief_adventurer_system_test`、`fief_adventurer_ui_test`、`noble_adventurer_recruitment_test`、`family_panel_ui_test`、`encyclopedia_ui_test`、`identity_startup_test`、`identity_faction_relation_test`、`event_center_test`、`player_faction_relation_ui_test`、`lord_ransom_test`、`milestone1_test`、`milestone1_restart_test`。
+- `--import` 无脚本错误。
+
+### 文档
+
+- 更新 `Political_Hierarchy_System.md`、`Settlement_System.md`、`Fief_Recruitment_System.md`、`Lord_System.md`、`Adventurer_Recruitment_System.md`、`Save_System.md`、`World_Map_System.md`、`AI_System.md`、`Encyclopedia_System.md`、`01_Core_Architecture.md`、`02_Development_Roadmap.md`、`Current_Status.md`、`Known_Issues.md`。
+
+---
+
+## 2026-11-27 · 身份选择立绘展示优化与埃克托立绘接入
+
+### 变更
+
+- 移除左侧详情立绘区域的背景底色、边框与装饰轮廓，贴图直接融入描述区。
+- 无立绘资源时整块隐藏立绘区域，不再显示「暂无立绘」占位文本或空白框。
+- 立绘展示范围扩大至约 1.5 倍（宽 198、高 156–252），仍限制在左侧描述面板右下角、加成栏上方。
+- 立绘统一按可用区域等比缩放并水平/垂直居中：超出缩小、小图放大到展示区上限，保持原始比例、不拉伸、不裁剪主体。
+- `identity_visual_config.tres` 接入「埃克托家族次子」专属立绘，选择多拉曼 → 贵族 → 埃克托家族次子时展示，悬浮预览与离开恢复同步。
+
+### 验证
+
+- 更新 `identity_selection_ui_test`：埃克托立绘映射与切换、无立绘时隐藏整块区域且无占位节点、立绘无背景与边框、约 1.5 倍展示尺寸、等比缩放模式、位于加成栏上方且不与描述文本重叠。
+
+### 文档
+
+- 更新 `Identity_Selection_System.md`。
+
+---
+
+## 2026-11-27 · 身份选择左侧详情贴图展示
+
+### 变更
+
+- 新增 `IdentityVisualConfig` 与 `Data/Identity/identity_visual_config.tres`，按文化/身份 ID 映射左侧详情贴图；UI 不硬编码贴图路径。
+- 身份选择左侧描述区右下角新增固定贴图区域，位于加成栏上方；描述滚动区预留右侧宽度，贴图保持原始比例，长文本不会与贴图重叠。
+- 未配置贴图的选项显示统一「暂无立绘」占位；三个文化已接入现有身份选择标签贴图，身份贴图暂未提供。
+- 仅调整选择界面布局与表现，不修改文化/身份加成、阵营、出生点、初始化或存档逻辑。
+
+### 验证
+
+- 扩展 `identity_selection_ui_test`：映射加载、文化贴图随默认/悬浮/恢复切换、身份占位、贴图位于加成栏上方且不与描述文本重叠、比例模式、1280×720 布局。
+- 运行并通过 `identity_selection_ui_test`；`identity_select_probe` 截图确认文化层与身份层布局。
+
+### 文档
+
+- 更新 `Identity_Selection_System.md`。
+
+---
+
+## 2026-11-27 · 开局阵营归属规则重整与独立家族身份
+
+### 变更
+
+- `IdentityDefinition` 新增 `independent_house`；`validate()` 要求独立家族必须启用家族系统并由家族领袖开局。
+- `vaila_leader.tres` 标记 `independent_house = true`：瓦伊拉家族领袖不再被注册为 `KINGDOM_VAILA` 国王，家族保持 `kingdom_id` 为空，世界为 5 个王国 + 独立瓦伊拉家族。
+- `WorldInitializer` 在独立家族身份下跳过对应统治家族的王国注册；其余身份仍建立六方势力。
+- 确认开局阵营关系统一走 `FactionManager.get_player_relation_for_house/party/settlement/kingdom`：贵族继承所属王国的成员家族、部队与有主建筑；敌国按正式战争传播；平民仅玩家本人同阵营；未知与无主默认中立，文化/出生点/名称/视觉旗帜不参与判定。
+- 无主建筑保持中立（仅 `owner_house_id` 决定政治归属）；未新增阵营缓存或默认绿色兜底。
+
+### 验证
+
+- 新增 `Tests/SystemTests/identity_faction_relation_test.tscn`：六个身份的家族/王国/部队/建筑关系、敌国战争传播、瓦伊拉独立不卷入他国战争、文化不产生同阵营、大地图部队外环与建筑底板统一刷新。
+- 更新 `identity_startup_test`：瓦伊拉领袖为独立家族、5 个王国、读档保持非国王身份。
+- 运行并通过 `identity_startup_test`、`identity_faction_relation_test`。
+
+### 文档
+
+- 更新 `Identity_Selection_System.md`、`Political_Hierarchy_System.md`、`Current_Status.md`，新增决策 D175 并在 D174 标注瓦伊拉旧结论已修订。
+
+---
+
+## 2026-11-27 · 新游戏身份选择接入实际开局
+
+### 变更
+
+- `IdentityDefinition` 新增 `spawn_location_id`、`family_id`、`family_system_enabled`、`starts_as_house_leader`、`starting_rank`，并在 `validate()` 中约束贵族/平民配置；六个正式身份 `.tres` 补齐出生点与家族数据。
+- `WorldInitializer.create_new_world(context, identity = null)` 成为唯一开局装配入口；空身份回退 `IDENTITY_EKTOR_SECOND_SON`。玩家部队在身份地点附近生成并通过 `WorldTerrain` 收敛到可通行位置。
+- 贵族身份加入现有正式家族（埃克托/丁达尼/瓦伊拉），创建玩家贵族并设置爵位；非领袖身份效忠原 NPC 领袖；瓦伊拉领袖接管家族并成为瓦伊拉国王。平民身份不创建 `HOUSE_PLAYER` 与贵族记录，玩家部队无家族旗帜。
+- 世界初始化不再注册测试玩家家族或北境巡逻队，彻底移除青禾村与北境村；初始地点 61、部队 22、正式家族 17，旧世界确认所有权保留 7 处。
+- `WorldContext` 新增 `player_identity_id/category_id/culture_id/identity_name`，写入存档可选字段；读档恢复身份，平民不会被旧贵族兜底逻辑补成贵族。Schema 保持 v10。
+- `GameManager.start_new_game()` 解析并校验身份/类型/文化，写入会话字段后传入世界初始化；读档与进入世界时同步身份字段。
+- 大地图玩家信息对平民身份显示“身份：<名称>（无家族）”；家族面板与家族入口在无家族时显示空状态。
+
+### 验证
+
+- 新增 `identity_startup_test`；更新 `world_map_layout_test`、`political_hierarchy_test`、`fief_adventurer_system_test`、`family_panel_ui_test`、`fief_adventurer_ui_test`、`noble_adventurer_recruitment_test`、`player_faction_relation_ui_test`、`encyclopedia_ui_test`、`battle_reinforcement_test`、`milestone1_test`、`milestone1_restart_test` 及移除巡逻队后的地图/遭遇/战斗测试。
+- 运行并通过上述测试以及 `identity_selection_ui_test`、`save_persistence_test`、`milestone1_flow_test`、`main_map_info_test`、`settlement_interaction_test`、`world_map_move_target_test`、`party_panel_test`、`event_center_test`、`captivity_escape_test`、`lord_ransom_test`、`mercenary_system_test`、`world_log_ui_test`、`save_migration_test`、`ai_manager_test`、`family_appearance_test`、`main_menu_ui_test`、`stage13_village_candidates_test`。
+
+### 文档
+
+- 重写 `Identity_Selection_System.md` 的身份配置、开局调用链、数据写入者与存档说明；同步 `Political_Hierarchy_System.md`、`World_Map_System.md`、`Settlement_System.md`、`Party_System.md`、`AI_System.md`、`Save_System.md`、`Lord_System.md`、`01_Core_Architecture.md`、`Known_Issues.md`、`Current_Status.md`，并新增决策 D174。
+
+---
+
 ## 2026-11-27 · 新游戏文化/身份选择三级流程与瓦伊拉家族美术
 
 ### 变更

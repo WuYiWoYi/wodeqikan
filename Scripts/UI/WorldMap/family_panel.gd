@@ -223,24 +223,12 @@ func _collect_fiefs() -> Array[Dictionary]:
 	if house == null or _context == null:
 		return entries
 
-	var member_ids: Dictionary = {}
-	for noble: NobleData in _context.house_manager.get_house_nobles(
-		house.house_id, true
-	):
-		if noble != null:
-			member_ids[noble.lord_id] = true
-
 	var seen: Dictionary = {}
 	for settlement: SettlementData in _context.settlement_manager.get_all_settlements():
 		if settlement == null or seen.has(settlement.settlement_id):
 			continue
-		# 家族封地以 owner_house_id 为权威；同时接受明确属于家族成员的
-		# owner_noble_id，绝不按名字或相邻关系推断。
-		var belongs: bool = settlement.owner_house_id == house.house_id
-		if not belongs and not settlement.owner_noble_id.is_empty() \
-				and member_ids.has(settlement.owner_noble_id):
-			belongs = true
-		if not belongs:
+		# 家族封地只认 owner_house_id；不从个人所有者或相邻关系推断。
+		if settlement.owner_house_id != house.house_id:
 			continue
 		seen[settlement.settlement_id] = true
 		entries.append(_build_fief_entry(settlement))
@@ -271,12 +259,13 @@ func _build_fief_entry(settlement: SettlementData) -> Dictionary:
 		_:
 			type_text = "地点"
 	var owner_text: String = ""
-	if not settlement.owner_noble_id.is_empty():
-		var owner_noble: NobleData = _context.noble_manager.get_noble(
-			settlement.owner_noble_id
+	if not settlement.owner_house_id.is_empty() \
+			and _context.house_manager != null:
+		var owner_house := _context.house_manager.get_house(
+			settlement.owner_house_id
 		)
-		if owner_noble != null:
-			owner_text = owner_noble.display_name
+		if owner_house != null:
+			owner_text = owner_house.house_name
 	return {
 		"settlement_id": settlement.settlement_id,
 		"name": settlement.display_name,

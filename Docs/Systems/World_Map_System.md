@@ -640,8 +640,8 @@ WorldSimulation 更新 PartyData.world_position
 | `TOWN` | 3 | 更大石墙 + 双屋顶 + 侧塔 | 否 |
 
 - `SettlementIcon` 新增 `_draw_town()` 与 `TOWN_NAME_ANCHOR_RADIUS = 44`。
-- 新地点通过 `owner_house_id` / `owner_noble_id` / `family_id` 归属家族。
-- 地点面板显示政治所有者家族/王国，并按 `owner_noble_id` 或家族领袖判断征召授权。
+- 新地点通过 `owner_house_id` 归属家族；`family_id` 只决定视觉旗帜。
+- 地点面板显示所有者家族/王国，并按请求者家族是否等于 `owner_house_id` 判断征召授权。
 
 ### 13.3 百科入口
 
@@ -659,7 +659,7 @@ WorldSimulation 更新 PartyData.world_position
 
 ### 14.1 地点布局
 
-> **已过时（2026-11-27）：** 本节的 5000×3000 世界与 9 个地点坐标已被大地图重建取代。当前世界尺寸、63 个地点坐标、道路与地形以 `Data/WorldMap/world_map_definition.tres` 为准，详见第 20 节。下表仅保留作阶段 9 历史记录，不再代表当前实现。
+> **已过时（2026-11-27）：** 本节的 5000×3000 世界与 9 个地点坐标已被大地图重建取代。当前世界尺寸、61 个地点坐标、道路与地形以 `Data/WorldMap/world_map_definition.tres` 为准，详见第 20 节。下表仅保留作阶段 9 历史记录，不再代表当前实现。
 
 阶段 9 只调整坐标与表现，不改变地点 ID、名称、类型、归属、家族、交互配置或村庄征召；当时世界尺寸为 5000×3000。
 
@@ -675,7 +675,7 @@ WorldSimulation 更新 PartyData.world_position
 | | 巴里（村庄） | (2600, 2100) |
 | | 灰石城堡（城堡） | (2900, 2350) |
 
-布局约束（由 `world_map_layout_test` 验证）：
+阶段 9 当时的布局约束（已随大地图重建失效，仅作历史记录）：
 
 - 同王国地点最大两两距离 ≤ 1100；两王国质心间距 600–1800，保留势力间隔。
 - 巴里家族封地（巴里/灰石城堡）与墨西西家族封地（墨西西/北境村）各自跨度 ≤ 500，并靠近所属王国区域。
@@ -853,7 +853,7 @@ WorldSimulation 更新 PartyData.world_position
 - 打开时压入 `GameManager.PAUSE_REASON_UI_PANEL` 并禁用时间控制；关闭或点击封地后弹出同一暂停原因，恢复原时间倍率，不修改时间逻辑。
 - 面板标题显示玩家家族名；没有家族时显示“暂无家族”与空状态。
 - 部队页（默认）：每次刷新从 `HouseManager.get_house_nobles()` 读取家族存活/死亡贵族，排除玩家本人；状态按实时单位与部队数据推导为正常/被俘/战斗中/已阵亡；被俘或无部队时显示“暂无部队”，不展示过期部队信息。
-- 封地页：按村庄/城镇/城堡分组，数据来自 `SettlementData.owner_house_id` 与家族成员的 `owner_noble_id`；不包含其他家族或盟友的封地，所有权变更后下一帧刷新。
+- 封地页：按村庄/城镇/城堡分组，数据来自 `SettlementData.owner_house_id == 玩家家族`；不包含其他家族或盟友的封地，所有权变更后下一帧刷新。
 - 点击封地条目调用 `focus_settlement_on_map()`：进入自由镜头并对准该地点，同时关闭面板；不修改地点数据。
 - 面板只读实时实体状态，不在 UI 内缓存成员或封地列表；详细字段来源见 [Political_Hierarchy_System.md](Political_Hierarchy_System.md)。
 
@@ -887,7 +887,7 @@ WorldSimulation 更新 PartyData.world_position
 |---|---|
 | 参考图尺寸与缩放 | `Data/WorldMap/world_map_definition.tres`：`reference_size = (1556, 1323)`、`reference_scale = 5.0` |
 | 世界尺寸 | `WorldMapDefinition.get_world_size()` = 7780×6615；`WorldContext.DEFAULT_WORLD_SIZE` 与之一致 |
-| 地点（63 个） | `settlements`：`key`、中文名、类型、参考像素坐标、视觉家族 |
+| 地点（61 个） | `settlements`：`key`、中文名、类型、参考像素坐标、视觉家族 |
 | 道路（46 条） | `roads`：只保存显式端点对；不自动补边 |
 | 不规则边界（46 点） | `boundary_points` |
 | 湖泊（11 点） | `lake_points` |
@@ -896,13 +896,13 @@ WorldSimulation 更新 PartyData.world_position
 
 - 参考图像素坐标乘 `reference_scale` 得到世界坐标；`WorldMapDefinition` 只做换算，场景与运行时实体不保存参考图坐标。
 - 世界坐标画布足够容纳全部地点与标签；不再使用阶段 9 的 5000×3000 坐标表。
-- 63 个地点 = 38 村庄 + 8 城镇 + 17 城堡；地点 ID 由 `IdGenerator` 生成，存档持久化。
+- 61 个地点 = 36 村庄 + 8 城镇 + 17 城堡；地点 ID 由 `IdGenerator` 生成，存档持久化。
 
 ### 20.2 地区构成
 
-- 地图按参考图分为西北、东北、中部、西南、东南与东南岛链等区域；六方势力分别为伯克纳王国、弗拉尼伯国、瓦伊拉王国、洛里亚克王国、泰纳公国与瓦勒蒙联盟。
-- 地点视觉旗帜由 `WorldMapDefinition.settlements[].family` → `FamilyConfig` 决定；政治所有权只由 `SettlementData.owner_house_id` / `owner_noble_id` 决定，两者刻意分离（例如灰石堡垒旗帜为伯克纳家族，所有权仍为巴里家族）。
-- 重建不从地图位置推断封地、战争或外交关系；只保留旧世界已确认的 9 处所有权，其余 54 处无主。
+- 地图按参考图分为西北、东北、中部、西南、东南与东南岛链等区域；六方势力分别为伯克纳王国、弗拉尼王国、洛里亚克王国、泰纳伯公国、瓦勒蒙联盟与瓦伊拉伯国。
+- 地点视觉旗帜由 `WorldMapDefinition.settlements[].family` → `FamilyConfig` 决定；政治所有权只由 `SettlementData.owner_house_id` 决定，两者刻意分离（例如灰石堡垒旗帜为伯克纳家族，所有权属于巴里家族）。
+- 重建不从地图位置推断封地、战争或外交关系；59 处所有权全部来自 `WorldInitializer._family_specs()` 的显式 Settlement ID → 家族 ID 配置，塞洛斯要塞、巴达洛斯要塞无主。
 
 ### 20.3 地形与不可通行
 
@@ -915,7 +915,7 @@ WorldSimulation 更新 PartyData.world_position
 
 ### 20.4 道路与时间标定
 
-- 道路只来自 `roads` 的 46 条显式连接；59 个地点参与道路网络，青禾村、北境村、塞洛斯要塞与巴达洛斯要塞没有显式道路，保持参考图状态。
+- 道路只来自 `roads` 的 46 条显式连接；59 个地点参与道路网络，塞洛斯要塞与巴达洛斯要塞没有显式道路，保持参考图状态。
 - 最近地点对的世界距离约 415 像素；玩家实际速度 = 450 × 0.08 = 36 世界像素/游戏秒；1x 下 1 游戏小时 = 2 世界秒，因此约 5.8 游戏小时（现实约 11.5 秒）。移动速度未随时间流速调整。
 - 道路当前不提供速度加成，只作为地图连接与视觉依据。
 
@@ -924,11 +924,11 @@ WorldSimulation 更新 PartyData.world_position
 `Tests/SystemTests/world_map_layout_test.gd` 自动验证：
 
 - 世界尺寸 7780×6615、边界 ≥ 40 点、湖泊 ≥ 6 点、山脉 5 座、道路 46 条；
-- 63 个地点名称/坐标唯一，全部位于边界内且不在湖泊/山脉中，任意两点间距 ≥ 250 世界像素；
+- 61 个地点名称/坐标唯一，全部位于边界内且不在湖泊/山脉中，任意两点间距 ≥ 250 世界像素；
 - 边界外、湖泊中心、每座山脉中心均不可通行；目标收敛到可通行点；
 - 穿越山脉的路线会绕行且全程可通行，无障碍路线保持两点直线；
 - 最近地点对行程 5.77±0.6 游戏小时（现实约 11.5 秒），`WORLD_MAP_SPEED_SCALE == 0.08`；
-- 18 家族、6 王国、18 贵族、23 部队；六方势力名称/民族/统治家族/附庸正确且初始无战争；9 处所有权保留；
+- 17 个正式家族、6 王国、51 名 NPC 贵族（默认贵族身份下 52 名）、56 支部队、59 处家族所有权；六方势力名称/民族/统治家族/附庸正确且初始无战争；
 - 地点引用到的家族旗帜资源存在，克里卡与伯克纳旗帜命名/引用正确。
 
 ### 20.6 旧存档兼容
@@ -952,7 +952,7 @@ WorldSimulation 更新 PartyData.world_position
 - `SettlementNameTag.set_player_relation()` 只替换 `SettlementNameBackground` 的 `StyleBoxFlat.bg_color`。
 - 中立：原 `BACKGROUND_COLOR`（黑色半透明）；同阵营：`ALLIED_BACKGROUND_COLOR` 绿色半透明；敌对：`HOSTILE_BACKGROUND_COLOR` 红色半透明。
 - 透明度、圆角、边框、底板尺寸、徽章、名称字体/位置/布局与建筑美术均不变。
-- 地点政治归属仍以 `SettlementData.owner_house_id`（回退 `owner_noble_id` 的家族）判定，视觉旗帜 `family_id` 不参与阵营关系。
+- 地点政治归属仍以 `SettlementData.owner_house_id` 判定，视觉旗帜 `family_id` 不参与阵营关系。
 
 ### 21.3 刷新机制
 

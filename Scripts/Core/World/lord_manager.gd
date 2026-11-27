@@ -5,7 +5,7 @@ extends RefCounted
 ## 只管理 LordData，不负责部队移动、封地模拟或 UI。
 ## 约束：
 ## - 一个领主的所属部队唯一；同一个 party_id 不能分配给两个领主。
-## - 封地通过 SettlementData.owner_lord_id 关联领主，两者分开存储。
+## - 封地通过 SettlementData.owner_house_id 归属家族，不再关联个人领主。
 ## - 玩家领主用 is_player_lord 标记，不等同于玩家角色。
 
 var _lords: Dictionary = {}
