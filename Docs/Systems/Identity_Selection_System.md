@@ -1,77 +1,98 @@
-# 新游戏身份选择
+# 新游戏文化与身份选择
 
 **核心脚本：** `Scripts/UI/Identity/identity_select.gd`
 **场景：** `Scenes/Identity/identity_select.tscn`（独立全屏场景）
-**配置：** `Scripts/Config/identity_catalog.gd`、`Data/Identity/Categories/*.tres`、`Data/Identity/Identities/*.tres`
-**状态：** 已实现全屏两级选择、纵向选项、点击身份即进入最终确认页与结果传递；尚未实现身份差异化初始化。
+**配置：** `Scripts/Config/identity_catalog.gd`、`culture_definition.gd`、`identity_definition.gd`、
+`Data/Cultures/*.tres`、`Data/Identity/Categories/*.tres`、`Data/Identity/Identities/*.tres`
+**状态：** 已实现文化选择 → 身份选择 → 最终路线预览三级全屏流程；文化天赋与身份加成只做展示，尚未接入实际游戏系统。
 
 ---
 
 ## 1. 范围与硬边界
 
-- 主菜单「新游戏」通过 `SceneManager` 切到独立全屏身份选择场景，主菜单场景被释放，不存在附着弹窗或局部面板。
-- 一级类别、二级身份、最终确认三个页面都在同一身份选择场景内完成。
-- 最终确认前不创建 `WorldContext`、不启动世界时间、不写存档。
-- 只有最终确认页的「最终确认」会调用 `GameManager.start_new_game(identity_id, category_id)`。
-- 当前身份只影响「选择结果」本身，不改变金币、装备、士兵、出生点或任何其他初始数据。
-- 身份选择结果**不进入存档**，读档不恢复；身份差异化初始化与存档字段属于后续阶段。
+- 主菜单「新游戏」通过 `SceneManager` 切到独立全屏选择场景，主菜单场景被释放，不存在附着弹窗或局部面板。
+- 三级流程全部在同一场景内完成；进入预览并确认前不创建 `WorldContext`、不启动世界时间、不写存档。
+- 只有最终路线预览页的「开始游戏」会调用 `GameManager.start_new_game(identity_id, category_id, culture_id)`。
+- 文化天赋与身份加成**仅用于界面展示**；不修改采邑恢复、部队上限、工资、驻军薪资或任何初始数据。
+- 选择结果只进入 `GameManager` 会话字段，不进入存档；读档不恢复，属于后续阶段。
+- 不修改世界初始化、存档 Schema、战斗、家族核心架构。
 
 ## 2. 流程
 
 ```text
 主菜单「新游戏」
 └── SceneManager -> IdentitySelect（独立全屏场景）
-    ├── 一级：身份类别（纵向按钮）
-    │   ├── 返回主菜单（切换回 MainMenu）
-    │   └── 选择类别
-    │       └── 二级：具体身份（纵向、可滚动按钮）
-    │           ├── 返回一级（保留类别与身份状态）
-    │           └── 点击身份 → 最终确认页（展示完整路径）
-    │               ├── 返回修改（回到一级类别页，保留状态）
-    │               └── 最终确认
-    │                   └── GameManager.start_new_game(identity_id, category_id)
-    │                       └── 现有新游戏初始化与进入大地图
+    ├── 文化选择
+    │   ├── 默认选中第一个文化
+    │   ├── 悬浮预览左侧描述，点击只选定
+    │   ├── 退回 -> 主菜单（不启动游戏）
+    │   └── 确认文化
+    │       └── 身份选择（默认选中该文化第一个身份）
+    │           ├── 悬浮预览左侧描述，点击只选定
+    │           ├── 退回 -> 文化选择（保留文化与身份）
+    │           └── 确认身份
+    │               └── 最终身份路线预览
+    │                   ├── 退回 -> 身份选择（保留身份）
+    │                   └── 开始游戏
+    │                       └── GameManager.start_new_game(...)
+    │                           └── 现有新游戏初始化与进入大地图
 ```
 
-- 一级与二级都不能直接创建世界或存档。
-- 点击任意具体身份**立即进入最终确认页**，不存在「完成选择」「确认选择」「下一步」等中间按钮。
-- 「最终确认」是正式提交身份选择结果的唯一入口。
-- 返回修改回到一级类别页（当前类别保持高亮）；再次进入同一类别恢复此前身份选择，再次点击具体身份直接重新进入确认页；切换到其他类别时清除具体身份。
+- 点击选项**不自动进入下一层**；只有底部确认按钮推进流程。
+- 每一级进入时都存在默认选中项，不存在空选择或确认按钮不可用状态。
+- 文化层退回主菜单；身份层/预览层退回上一级，不会一次退出整个流程。
 
 ## 3. 配置
 
-### 3.1 类别：`IdentityCategoryDefinition`
+### 3.1 文化：`CultureDefinition`
 
-`Data/Identity/Categories/*.tres`，每个类别一个资源。
+`Data/Cultures/*.tres`，每个文化一个资源。
 
 | 字段 | 说明 |
 |---|---|
-| `category_id` | 唯一类别 ID，例如 `NOBLE`、`COMMONER` |
-| `display_name` | 一级按钮、二级标题与确认路径中的名称 |
-| `sort_order` | 一级界面升序顺序 |
-| `enabled` | 关闭后不显示，但配置可保留 |
+| `culture_id` | 唯一文化 ID，例如 `CULTURE_DORAMAN` |
+| `display_name` | 文化选项与路线预览中的名称 |
+| `description` | 文化层左侧背景介绍，支持多段换行 |
+| `talent_lines` | 文化天赋展示行；未确定项使用「待设定」占位 |
+| `sort_order` | 文化列表升序顺序 |
+| `enabled` | 关闭后不显示，但配置保留 |
 
-### 3.2 身份：`IdentityDefinition`
+### 3.2 身份类型：`IdentityCategoryDefinition`
+
+`Data/Identity/Categories/*.tres`。当前为「贵族」「平民」，只作为身份类型名称与排序依据。
+
+| 字段 | 说明 |
+|---|---|
+| `category_id` | `NOBLE` / `COMMONER` |
+| `display_name` | 左侧「身份类型」与路线预览中的类型名称 |
+| `sort_order` | 同文化内的身份类型顺序（贵族 0、平民 1） |
+| `enabled` | 关闭后不显示 |
+
+### 3.3 身份：`IdentityDefinition`
 
 `Data/Identity/Identities/*.tres`，每个身份一个资源。
 
 | 字段 | 说明 |
 |---|---|
 | `identity_id` | 唯一身份 ID，不依赖显示名称 |
-| `display_name` | 二级按钮与确认路径中的名称 |
-| `category_id` | 关联的类别 ID |
-| `description` | 二级界面展示的背景故事 |
-| `sort_order` | 同类别内升序顺序 |
+| `display_name` | 身份选项与路线预览中的名称 |
+| `category_id` | 关联的身份类型 |
+| `culture_id` | 关联的文化；身份层按文化过滤 |
+| `description` | 身份背景故事，支持多段换行 |
+| `bonus_lines` | 身份加成展示行；未确定项使用「待设定」占位 |
+| `sort_order` | 同文化内的显示顺序 |
 | `enabled` | 关闭后不显示 |
 
-### 3.3 注册表：`IdentityCatalog`
+### 3.4 注册表：`IdentityCatalog`
 
-`IdentityCatalog.load_default()` 扫描两个默认目录并注册配置：
+`IdentityCatalog.load_default()` 扫描 `Data/Cultures`、`Data/Identity/Categories`、`Data/Identity/Identities`：
 
-- 类别 ID 重复、身份 ID 重复、身份引用不存在的类别、字段缺失、资源加载失败都会 `push_error` 并让加载失败。
+- 文化 ID 重复、身份 ID 重复、身份引用不存在的文化/类别、资源加载失败都会 `push_error` 并让加载失败。
 - 只读静态配置，不进入存档；UI 不直接读文件。
-- `get_enabled_categories()`、`get_enabled_identities(category_id)` 只返回启用项并按 `sort_order` 排序。
-- 新增类别/身份只需增加 `.tres`，无需改 UI；一级按钮、二级按钮、标题与确认路径都由配置生成。
+- `get_enabled_cultures()` 返回启用文化并按 `sort_order` 排序。
+- `get_enabled_identities_for_culture(culture_id)` 只返回该文化的启用身份，先按身份类型 `sort_order`、再按身份 `sort_order` 排序。
+- 新增文化/身份只需增加 `.tres`，无需改 UI。
+- 文化配置字段通过 `Resource` 动态读取，不依赖新 `class_name` 的全局类缓存；新增文化资源后无需先修改代码。
 
 ## 4. 全屏场景结构
 
@@ -79,74 +100,121 @@
 
 ```text
 IdentitySelect (Control，全屏)
-├── Background (TextureRect，纵向渐变)
-├── CenterGlow (TextureRect，径向暖光)
-├── TopGoldLine / BottomGoldLine (ColorRect)
-└── ContentMargin (MarginContainer，按窗口宽度计算左右留白)
+├── Background / CenterGlow / TopGoldLine / BottomGoldLine
+└── ContentMargin (MarginContainer，按窗口宽度计算留白)
     └── ContentColumn (VBoxContainer)
-        ├── CategoryPage
-        │   ├── CategoryTitle
-        │   ├── CategoryDescription
-        │   ├── CategoryButtonList (纵向类别按钮)
-        │   ├── CategoryStatusLabel
-        │   └── IdentityCancelButton
-        ├── IdentityPage
-        │   ├── IdentityPageTitle
-        │   ├── StoryPanel (StoryTitle + StoryLabel)
-        │   ├── SelectionLabel
-        │   ├── IdentityOptionScroll (ScrollContainer)
-        │   │   └── IdentityOptionList (纵向身份按钮)
-        │   └── IdentityFooter
-        │       └── IdentityBackButton（二级唯一按钮，无完成选择）
-        └── ConfirmPage
-            ├── ConfirmTitle
-            ├── ConfirmHint
-            ├── ConfirmPathPanel -> ConfirmPathLabel
-            ├── ConfirmStatusLabel
-            ├── ReturnModifyButton
-            └── FinalConfirmButton
+        ├── Header (HeaderTitle + HeaderSubtitle)
+        ├── CulturePage (HBoxContainer)
+        │   ├── CultureDetailPanel（标题 / 类型 / 可滚动描述 / 独立天赋面板）
+        │   └── CultureSelectionPanel（纵向文化选项 / 提示）
+        ├── IdentityPage (HBoxContainer)
+        │   ├── IdentityDetailPanel（标题 / 身份类型 / 可滚动描述 / 独立加成面板）
+        │   └── IdentitySelectionPanel（纵向身份选项 / 提示）
+        ├── PreviewPage (PanelContainer，居中显示完整路线)
+        ├── RoutePanel（底部「最终身份路线」实时预览）
+        └── Footer（BackButton / ConfirmButton）
 ```
 
-- 背景、暖光、金线、局部按钮样式均在本场景内定义，不修改共享 `UiTheme`。
-- 内容列最大宽度 640，左右留白按窗口宽度计算；文字自动换行。
-- 一级与二级选项均为 `VBoxContainer` 纵向排列，不允许横向并排。
-- 二级选项放在 `ScrollContainer` 中，最多显示 3 行；身份数量增加时只滚动选项区域，页面其余部分保持稳定。
-- 确认页按钮纵向排列（「返回修改」「最终确认」）。
-- 选中按钮使用按下样式（金色边框/底色）、金色文字，并在 `SelectionLabel` 显示「当前选择：名称」；返回与重新进入时按状态恢复。
+- 背景、暖光、金线与按钮样式均在本场景内定义，不修改共享 `UiTheme`。
+- 左侧详情与右侧选项为左右分区；左侧描述在独立 `ScrollContainer` 内滚动，加成区为独立面板。
+- 右侧选项纵向排列在 `ScrollContainer` 中；数量增加时只滚动选项区域。
+- 预览页隐藏左右选项区与底部路线条，居中展示完整三级路线。
 
-## 5. 状态管理
+### 4.1 左侧详情
+
+- 文化层：文化名称、类型「文化」、背景描述、文化天赋。
+- 身份层：身份名称、「身份类型：贵族/平民」、背景描述、身份加成。
+- 未确定天赋/加成使用「待设定」占位文本并以弱化颜色显示。
+- 加成行数变化时列表自适应高度。
+
+### 4.2 右侧选项
+
+- 文化层：三个文化按钮。
+- 身份层：当前文化对应的贵族/平民两条身份路线。
+- 选中项使用金色边框、金色文字与按下底色；悬浮项使用金色边框但不改变选中状态。
+- 选项按钮只显示名称，身份类型由左侧详情与路线预览展示。
+
+## 5. 交互规则
+
+| 操作 | 行为 |
+|---|---|
+| 进入任意一级 | 默认选中列表第一个选项；左侧展示其描述与加成；路线预览同步更新 |
+| 悬浮选项 | 左侧临时展示该选项内容；不改变选中项、不改变层级、不改变路线预览 |
+| 悬浮离开 | 左侧恢复当前已选选项 |
+| 点击选项 | 只更新选中项、左侧详情与路线预览；不进入下一层 |
+| 确认（文化层） | 进入身份层；切换过文化时旧身份清空，否则保留原身份 |
+| 确认（身份层） | 进入最终路线预览 |
+| 确认（预览层） | 调用现有新游戏初始化并进入大地图 |
+| 退回（文化层） | 返回主菜单，关闭选择界面，不启动游戏 |
+| 退回（身份层） | 返回文化层，保留文化与身份 |
+| 退回（预览层） | 返回身份层，保留身份 |
+
+## 6. 路线预览
+
+底部 `RoutePanel` 在文化与身份层持续可见，预览页居中放大显示同一内容：
+
+```text
+布吉多人
+  └── 平民
+       └── 弗拉尼的商人
+```
+
+- 尚未选择身份时显示：
+
+```text
+多拉曼人
+  └── 身份：待选择
+```
+
+- 路线始终由当前 `_selected_culture_id` / `_selected_identity_id` 生成，不允许与实际选择不一致。
+- 返回上一级时保留选择，因此路线继续展示已选身份。
+
+## 7. 状态管理
 
 | 状态 | 字段 | 规则 |
 |---|---|---|
-| 当前页面 | `_current_page` | `CATEGORY` / `IDENTITY` / `CONFIRM` |
-| 已选类别 | `_selected_category_id` | 返回一级时保留；切换类别时更新 |
-| 已选身份 | `_selected_identity_id` | 点击身份即写入并进入确认页；返回修改/返回一级时保留；切换到不同类别时清空 |
-| 完整路径 | `_build_selection_path_parts()` | 依次收集类别、身份显示名称，用 `→` 连接 |
+| 当前页面 | `_current_page` | `CULTURE` / `IDENTITY` / `PREVIEW` |
+| 已选文化 | `_selected_culture_id` | 返回文化层时保留；切换文化时更新 |
+| 已选身份 | `_selected_identity_id` | 切换文化时若不属于新文化则清空；返回各级时保留 |
+| 悬浮文化/身份 | `_hovered_culture_id` / `_hovered_identity_id` | 只影响左侧详情，离开后清空并恢复已选项 |
+| 路线文本 | `_build_route_text()` | 文化 → 身份类型 → 身份名称 |
 
-- 再次进入同一类别时按 `_selected_identity_id` 恢复按钮选中状态与故事文本。
-- 确认页每次进入都根据当前状态重新生成路径，因此返回修改后的改动会同步。
-- `_build_selection_path_parts()` 预留给未来多层选择：新增层级时按顺序追加显示名称，确认页无需重新设计。
+- 确认按钮的可用性由当前层选择状态决定；默认选择保证进入每层时始终可用。
+- 预览页的确认按钮文案为「开始游戏」，是唯一提交入口。
 
-## 6. 结果传递与数据归属
+## 8. 结果传递与数据归属
 
 | 数据 | 写入者 | 生命周期 |
 |---|---|---|
 | `GameManager.player_identity_id` | `GameManager.start_new_game()` | 会话级；返回主菜单/读档/新游戏重建时清空 |
 | `GameManager.player_identity_category_id` | `GameManager.start_new_game()` | 同上 |
+| `GameManager.player_culture_id` | `GameManager.start_new_game()` | 同上 |
 
-- 身份选择场景只在最终确认时调用 `GameManager.start_new_game(identity_id, category_id)`。
-- `start_new_game()` 保留无参默认值，旧调用方不受影响。
-- 未来的身份差异化初始化应读取这两个字段；当前 `WorldInitializer` 不读取，也不产生任何差异。
-- 不为身份新增存档字段，`schema_version` 不变。
+- 选择场景只在预览页确认时调用 `GameManager.start_new_game(identity_id, category_id, culture_id)`。
+- `start_new_game()` 保留前两个参数默认值，旧调用方不受影响。
+- 当前 `WorldInitializer` 不读取这三个字段，也不产生任何初始化差异。
+- 不新增存档字段，`schema_version` 不变。
 
-## 7. 测试
+## 9. 瓦伊拉家族美术资源
 
-- `Tests/SystemTests/identity_selection_ui_test.tscn`：主菜单释放与全屏场景进入、全屏尺寸、一级/二级纵向布局、故事切换、选中状态、点击身份立即进入确认页、不存在「完成选择/确认选择/下一步」中间按钮、确认路径与同步更新、返回修改回到一级并保留状态、切换类别清空状态、最终确认前无世界/无存档、最终确认后 ID 传递并进入 WorldMap。
-- `Tests/_debug/identity_select_probe.tscn`：非 headless 截图验收，覆盖一级、二级、最终确认页及 1280×720 小窗口布局。
+- `Data/Families/family_vaila.tres` 引用 `Art/正式人物美术/瓦伊拉家族风格美术/` 下的独立资源：
+  - `瓦伊拉旗帜16_16.png`
+  - `瓦伊拉风格罩袍_主.png` / `瓦伊拉风格罩袍_副.png`
+  - `瓦伊拉风格缨饰.png`
+  - `瓦伊拉风格长矛.png`
+  - `瓦伊拉风格盾牌.png`
+- 资源复制自当前玩家家族风格，但与 `family_player.tres` 分开存放、独立命名，不引用或覆盖玩家资源。
+- 目录、命名与加载方式沿用现有 `FamilyConfig` 与 `FamilyRegistry`；家族注册表自动扫描 `Data/Families`，无需额外注册。
+- 当前只补齐静态外观配置；「瓦伊拉家族领袖」身份不改变玩家初始家族，家族初始化属于后续阶段。
 
-## 8. 扩展方向
+## 10. 测试
 
+- `Tests/SystemTests/identity_selection_ui_test.tscn`：配置加载（三文化、每文化两身份、先贵族后平民）、主菜单释放与全屏场景、文化层默认选中与悬浮预览、点击不跳转、确认进入身份层、身份层默认选中、悬浮不改变选中、确认进入预览、三级退回保留选择、路线预览完整、确认前无世界/无存档、确认后传递三个 ID 并进入 WorldMap、瓦伊拉美术文件存在且可解码、与玩家资源路径不同。
+- `Tests/_debug/identity_select_probe.tscn`：非 headless 视觉验收，覆盖文化层、悬浮、选中、身份层、路线预览与 1280×720 小窗口布局。
+
+## 11. 扩展方向
+
+- 文化与身份加成接入实际游戏系统（部队上限、薪资、采邑恢复等）。
 - 身份差异化初始化（金币、装备、兵力、出生点、领主/家族身份）。
-- 身份选择结果入档与读档恢复。
-- 类别/身份的图标、背景图与更丰富的美术表现。
-- 多层选择（特殊出身等）：追加配置层与路径段，沿用同一确认页。
+- 选择结果入档与读档恢复。
+- 文化/身份图标、背景图等更丰富的美术表现。

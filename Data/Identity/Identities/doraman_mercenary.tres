@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="IdentityDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/identity_definition.gd" id="1_identity"]
+
+[resource]
+script = ExtResource("1_identity")
+identity_id = "IDENTITY_DORAMAN_MERCENARY"
+display_name = "多拉曼佣兵"
+category_id = "COMMONER"
+culture_id = "CULTURE_DORAMAN"
+description = "上周，你还和你的船队在海上祈祷你们的神明保佑，让你们活下来。\n\n因为遭遇了风暴，你们的船队损失了一半，剩下的活人也都因为缺乏食物而奄奄一息……\n\n不过好在你们的神明最终庇佑了你。\n\n一天早上，你站在船头，看到了海岸线。\n\n你们又继续行进了一会，终于，巴勒夫堡垒上，多拉曼人的旗帜正迎风猎猎作响。\n\n你们终于沿着前人的路线，到达了这块冒险家的土地……"
+bonus_lines = PackedStringArray("待设定：身份加成尚未确定")
+sort_order = 1
+enabled = true

@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="CultureDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/culture_definition.gd" id="1_culture"]
+
+[resource]
+script = ExtResource("1_culture")
+culture_id = "CULTURE_LORRIS"
+display_name = "洛里斯人"
+description = "洛里斯人？哪有什么洛里斯人。\n\n不过是因为200年前多拉曼人的入侵，导致布吉多人失去了足够的生存空间。\n\n100年前，部分贵族不愿意龟缩在山谷中，带领部队往南边夺取了那些野蛮的蒙卡人的地盘。\n\n他们抢来的蒙卡人的土地上拓荒耕种、砍伐森林、建立要塞，但是慢慢地，这些新的贵族不再以布吉多人自居，而是有了新的名字——洛里斯人。"
+talent_lines = PackedStringArray("待设定：文化天赋尚未确定")
+sort_order = 2
+enabled = true

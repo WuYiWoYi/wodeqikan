@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="IdentityDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/identity_definition.gd" id="1_identity"]
+
+[resource]
+script = ExtResource("1_identity")
+identity_id = "IDENTITY_FRANI_MERCHANT"
+display_name = "弗拉尼的商人"
+category_id = "COMMONER"
+culture_id = "CULTURE_BUGIDO"
+description = "你不是贵族，并不关心多拉曼人和布吉多人的战争。\n\n你只知道你从小生活在弗拉尼亚附近，从小跟随父母在市集上做生意。\n\n耳濡目染之下，你练就了一个商业头脑和一副好口才……\n\n你早已知晓王上和多拉曼人的和平协议已经不再可靠，但是那又如何呢？\n\n还是想想眼下应该去哪个村庄收购货物，并且把价钱压到最低，以赚取最大的利润……"
+bonus_lines = PackedStringArray("待设定：身份加成尚未确定")
+sort_order = 1
+enabled = true

@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="CultureDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/culture_definition.gd" id="1_culture"]
+
+[resource]
+script = ExtResource("1_culture")
+culture_id = "CULTURE_DORAMAN"
+display_name = "多拉曼人"
+description = "多拉曼人是天生的冒险者。\n\n200年前，多拉曼人从北边的海上乘坐三角帆船来到这片新大陆。船中装载的是盔甲、长矛和战马。\n\n他们占据了这片新大陆的西北部，贵族们纷纷在圈占的土地上建立军事据点，并推举了国王，以军事联盟为基础建立起王国。\n\n再后来，王国不断向南扩张，将原本的布吉多人赶到了中部的峡谷中。\n\n20年前，多拉曼人和山谷中的布吉多人签订了和平条约。但是这几年，前来这片新大陆的多拉曼移民与日俱增，王国中已经没有更多的土地可以和新移民共享。\n\n多拉曼人似乎又应该用剑去获得更多的土地……"
+talent_lines = PackedStringArray("统治的据点采邑恢复速度 +20%", "部队人数上限 +10", "部队薪资 +10%")
+sort_order = 0
+enabled = true

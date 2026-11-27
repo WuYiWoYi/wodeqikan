@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="IdentityDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/identity_definition.gd" id="1_identity"]
+
+[resource]
+script = ExtResource("1_identity")
+identity_id = "IDENTITY_VAILA_LEADER"
+display_name = "瓦伊拉家族领袖"
+category_id = "NOBLE"
+culture_id = "CULTURE_LORRIS"
+description = "100年前，你的家族选择了南下抢夺蒙卡人的地盘。\n\n很幸运，你们击退了那些野蛮人，终于和200年前一样，又重新拥有了自己家族的土地。\n\n你的家族因为有一定的军事实力，作为家主，你暂时并不想依附任何一个国家。\n\n北边的多拉曼人虎视眈眈，山谷的布吉多人渴望复国，而被迫出走的蒙卡人，也在筹备反击……\n\n你知道乱世要来了，这是一个千载难逢的机会……"
+bonus_lines = PackedStringArray("待设定：身份加成尚未确定")
+sort_order = 0
+enabled = true

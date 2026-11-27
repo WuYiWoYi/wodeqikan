@@ -6,6 +6,28 @@
 
 ---
 
+## 2026-11-27 · 新游戏文化/身份选择三级流程与瓦伊拉家族美术
+
+### 变更
+
+- 新游戏前置流程改为：文化选择 → 身份选择 → 最终身份路线预览 → 开始游戏；三级均在同一全屏场景内，点击选项只选定，必须点确认才推进。
+- 新增 `CultureDefinition` 与 `Data/Cultures/*.tres`（多拉曼、布吉多、洛里斯），记录背景、天赋展示行与排序；`IdentityCatalog` 增加文化加载、校验与按文化过滤身份。
+- `IdentityDefinition` 新增 `culture_id` 与 `bonus_lines`；身份数据改为 6 条路线（每文化贵族/平民各一），旧通用身份配置移除。
+- `identity_select.gd` 重构为左右分区：左侧名称/类型/可滚动背景/独立加成面板，右侧纵向选项；悬浮只预览左侧，不改变选中项；底部路线预览实时显示「文化 → 类型 → 身份」；逐级退回保留选择。
+- `GameManager.start_new_game()` 新增可选 `culture_id` 参数与 `player_culture_id` 会话字段；仍不进入存档、不改变世界初始化。
+- 新增瓦伊拉家族独立美术目录 `Art/正式人物美术/瓦伊拉家族风格美术/`（旗帜、主/副罩袍、缨饰、长矛、盾牌），复制玩家家族风格但不复用路径；`family_vaila.tres` 接入资源。
+
+### 验证
+
+- 重写 `identity_selection_ui_test` 覆盖配置、悬浮/点击/确认/退回、路线预览、ID 传递与瓦伊拉美术路径；更新 `identity_select_probe` 覆盖三级页面与 1280×720。
+- 已运行 `--import` 刷新瓦伊拉新资源，并通过：`identity_selection_ui_test`、`main_menu_ui_test`、`milestone1_flow_test`、`world_map_layout_test`、`family_panel_ui_test`。已运行 `identity_select_probe`，检查 1920×1080 与 1280×720 截图：三级页面无裁切，描述区独立滚动且加成面板固定可见，预览路线缩进对齐。
+
+### 文档
+
+- `Identity_Selection_System.md` 重写；`Current_Status.md` 同步当前流程与测试状态。
+
+---
+
 ## 2026-11-27 · 大地图日志折叠、玩家宣战与阵营视觉反馈
 
 ### 变更

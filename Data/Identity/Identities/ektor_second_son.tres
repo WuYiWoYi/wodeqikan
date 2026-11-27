@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="IdentityDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/identity_definition.gd" id="1_identity"]
+
+[resource]
+script = ExtResource("1_identity")
+identity_id = "IDENTITY_EKTOR_SECOND_SON"
+display_name = "埃克托家族的次子"
+category_id = "NOBLE"
+culture_id = "CULTURE_DORAMAN"
+description = "你的家族是最早一批登陆新大陆的家族。\n\n你的先祖在占领的土地上建立起了城堡、庄园，并且通过对外军事战争，不断扩大地盘，最终成为了这片土地上多拉曼人的一支不可忽视的力量。\n\n再后来，你们支持伯克纳家族成为王国统治者，成为了伯克纳王国统治的牢固基石……"
+bonus_lines = PackedStringArray("待设定：身份加成尚未确定")
+sort_order = 0
+enabled = true
