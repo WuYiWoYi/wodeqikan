@@ -105,6 +105,7 @@ func _ready() -> void:
 	register_static_configs()
 	_load_world_map_definition()
 	_register_king_appearance_override()
+	_register_noble_appearance_override()
 	if not TimeManager.world_tick.is_connected(world_simulation.on_world_tick):
 		TimeManager.world_tick.connect(world_simulation.on_world_tick)
 	if not EventBus.battle_finished.is_connected(_on_battle_finished):
@@ -113,6 +114,7 @@ func _ready() -> void:
 
 func _exit_tree() -> void:
 	UnitAppearance.clear_king_helmet_override(self)
+	UnitAppearance.clear_noble_helmet_override(self)
 	world_log_manager.dispose()
 	if TimeManager.world_tick.is_connected(world_simulation.on_world_tick):
 		TimeManager.world_tick.disconnect(world_simulation.on_world_tick)
@@ -159,6 +161,46 @@ func _register_king_appearance_override() -> void:
 	UnitAppearance.configure_king_helmet_override(
 		self, texture_path, Callable(self, "is_king_unit")
 	)
+
+
+## 贵族文化头盔覆盖：静态配置给出“文化 → 贴图”，本世界提供只读文化解析。
+func _register_noble_appearance_override() -> void:
+	var texture_paths: Dictionary = (
+		appearance_config.noble_culture_helmet_texture_paths
+		if appearance_config != null else {}
+	)
+	UnitAppearance.configure_noble_helmet_override(
+		self, texture_paths, Callable(self, "get_noble_culture_id")
+	)
+
+
+## 贵族判定：NPC 领袖单位由 noble_id 标记；玩家角色由玩家贵族记录承担。
+func is_noble_unit(unit: UnitData) -> bool:
+	if unit == null:
+		return false
+	if not unit.noble_id.is_empty():
+		return noble_manager.get_noble(unit.noble_id) != null
+	return unit.is_player_character and not player_lord_id.is_empty()
+
+
+## 贵族文化：玩家角色优先使用身份保存的文化；其他贵族读取家族静态 culture_id。
+## 非贵族单位一律返回空，避免普通士兵命中贵族专属头盔。
+func get_noble_culture_id(unit: UnitData) -> String:
+	if not is_noble_unit(unit):
+		return ""
+	if unit.is_player_character and not player_culture_id.is_empty():
+		return player_culture_id
+	var family_id: String = unit.family_id
+	if family_id.is_empty() and not unit.noble_id.is_empty():
+		var noble: NobleData = noble_manager.get_noble(unit.noble_id)
+		if noble != null:
+			var house := house_manager.get_house(noble.house_id)
+			if house != null:
+				family_id = house.banner_id
+	if family_id.is_empty():
+		return ""
+	var family := family_registry.get_config(family_id)
+	return family.culture_id if family != null else ""
 
 
 ## 单位当前是否具有国王身份。只读取现有政治数据，不修改任何状态：

@@ -9,6 +9,9 @@ extends Resource
 @export_category("Identity")
 @export var family_id: String = ""
 @export var display_name: String = ""
+## 所属文化（CultureDefinition.culture_id）。只用于静态外观映射，
+## 不进入存档，也不参与阵营、外交或天赋结算。
+@export var culture_id: String = ""
 
 @export_category("Colors")
 ## 主色用于家族旗帜底色、地图标记与主罩袍回退色。

@@ -183,9 +183,11 @@ func _test_identity_changes(king_unit: UnitData) -> void:
 			and _helmet_resource_path(king_visual).contains("头盔_3级"),
 		"失去国王身份后恢复普通头盔"
 	)
+	# 伯克纳家族属于多拉曼文化；失去国王身份后由贵族文化盔接管，
+	# 因此不应恢复普通家族缨饰。
 	_check(
-		king_visual.has_part("Plume"),
-		"失去国王身份后恢复原头盔缨饰"
+		not king_visual.has_part("Plume"),
+		"失去国王身份后多拉曼贵族仍隐藏缨饰"
 	)
 	_check(
 		_helmet_resource_path(heir_visual) == KING_HELMET_PATH,

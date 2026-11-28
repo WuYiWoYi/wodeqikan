@@ -63,7 +63,7 @@ func _test_family_configs() -> void:
 		return
 	_check(
 		_context.appearance_config.tier1_helmet_texture_paths.size() == 1
-			and _context.appearance_config.tier2_helmet_texture_paths.size() == 5
+			and _context.appearance_config.tier2_helmet_texture_paths.size() == 4
 			and _context.appearance_config.tier3_helmet_texture_paths.size() == 5,
 		"头盔池按 1/2/3 级分别配置"
 	)
@@ -239,12 +239,12 @@ func _test_family_visuals() -> void:
 			and tabard.texture.resource_path.ends_with("巴里风格罩袍_主.png"),
 		"家族领袖使用主罩袍贴图"
 	)
-	_check(visual.has_part("Plume"), "家族领袖显示家族缨饰")
+	_check(not visual.has_part("Plume"), "多拉曼领袖不显示原头盔缨饰")
 	var helmet := visual.get_part("Helmet") as Sprite2D
 	_check(
 		helmet != null and helmet.texture != null
-			and helmet.texture.resource_path.contains("头盔_3级"),
-		"三级领袖使用三级头盔贴图"
+			and helmet.texture.resource_path.ends_with("头盔_3级_多拉曼盔.png"),
+		"多拉曼三级领袖使用多拉曼盔"
 	)
 	var weapon := visual.get_part("Weapon") as Sprite2D
 	_check(
@@ -252,24 +252,36 @@ func _test_family_visuals() -> void:
 			and weapon.texture.resource_path.ends_with("巴里风格长矛.png"),
 		"无武器装备时使用家族长矛表现"
 	)
+	visual.queue_free()
 
-	# 装备 HEAD 时优先级高于随机外观头盔。
-	var equipment_before: Dictionary = leader.equipment.duplicate(true)
-	leader.equipment["HEAD"] = "test_head"
+	# 装备 HEAD 时优先级高于随机外观头盔。使用非多拉曼贵族，
+	# 避免文化专属头盔覆盖干扰通用装备优先级断言。
+	var moxixi_party := _find_party(WorldInitializer.MOXIXI_KNIGHT_PARTY_NAME)
+	var moxixi_leader := (
+		_context.party_manager.get_leader_unit(moxixi_party.party_id)
+		if moxixi_party != null else null
+	)
+	if moxixi_leader == null:
+		_check(false, "装备优先级测试找不到非多拉曼贵族")
+		return
+	var equipment_visual = UnitVisualScript.new()
+	add_child(equipment_visual)
+	equipment_visual.setup(moxixi_leader)
+	var equipment_before: Dictionary = moxixi_leader.equipment.duplicate(true)
+	moxixi_leader.equipment["HEAD"] = "test_head"
 	var head_config := EquipmentConfig.new()
 	head_config.equipment_id = "test_head"
 	head_config.slot = EquipmentConfig.Slot.HEAD
 	head_config.visual_texture_path = HumanVisualScript.HEAD_PATH
-	visual.set_equipment_configs({"HEAD": head_config})
-	helmet = visual.get_part("Helmet") as Sprite2D
+	equipment_visual.set_equipment_configs({"HEAD": head_config})
+	helmet = equipment_visual.get_part("Helmet") as Sprite2D
 	_check(
 		helmet != null and helmet.texture != null
 			and helmet.texture.resource_path == HumanVisualScript.HEAD_PATH,
 		"装备头盔优先于外观随机头盔"
 	)
-	leader.equipment = equipment_before
-	visual.setup(leader)
-	visual.queue_free()
+	moxixi_leader.equipment = equipment_before
+	equipment_visual.queue_free()
 
 
 func _test_tabard_probabilities() -> void:

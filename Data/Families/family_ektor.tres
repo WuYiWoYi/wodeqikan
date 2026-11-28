@@ -6,6 +6,7 @@
 script = ExtResource("1_familyconfig")
 family_id = "FAMILY_EKTOR"
 display_name = "埃克托家族"
+culture_id = "CULTURE_DORAMAN"
 primary_color = Color(0.75, 0, 0, 1)
 secondary_color = Color(0.88, 0.88, 0.88, 1)
 banner_texture_path = "res://art/正式人物美术/埃克托家族风格美术/埃克托旗帜16_16.png"

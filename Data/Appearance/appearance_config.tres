@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1_appearanceconfig")
 tier1_helmet_texture_paths = Array[String](["res://art/正式人物美术/头盔美术/头盔_1级_样式1.png"])
-tier2_helmet_texture_paths = Array[String](["res://art/正式人物美术/头盔美术/头盔_2级_样式1.png", "res://art/正式人物美术/头盔美术/头盔_2级_样式2.png", "res://art/正式人物美术/头盔美术/头盔_2级_样式3.png", "res://art/正式人物美术/头盔美术/头盔_2级_样式4.png", "res://art/正式人物美术/头盔美术/头盔_2级_样式5.png"])
+tier2_helmet_texture_paths = Array[String](["res://art/正式人物美术/头盔美术/头盔_2级_样式1.png", "res://art/正式人物美术/头盔美术/头盔_2级_样式2.png", "res://art/正式人物美术/头盔美术/头盔_2级_样式3.png", "res://art/正式人物美术/头盔美术/头盔_2级_样式4.png"])
 tier3_helmet_texture_paths = Array[String](["res://art/正式人物美术/头盔美术/头盔_3级_样式1.png", "res://art/正式人物美术/头盔美术/头盔_3级_样式2.png", "res://art/正式人物美术/头盔美术/头盔_3级_样式3.png", "res://art/正式人物美术/头盔美术/头盔_3级_样式4.png", "res://art/正式人物美术/头盔美术/头盔_3级_样式5.png"])
 tier1_primary_tabard_chance = 0.2
 tier2_primary_tabard_chance = 0.5
@@ -15,3 +15,6 @@ mercenary_tier3_tabard_texture_path = "res://art/我的骑砍临时美术/正式
 mercenary_plume_config_ids = Array[String](["mercenary_rogue_knight"])
 mercenary_plume_texture_path = "res://art/我的骑砍临时美术/正式美术_其他/雇佣兵美术/无赖骑士缨饰.png"
 king_helmet_texture_path = "res://art/正式人物美术/头盔美术/头盔_特殊_国王盔.png"
+noble_culture_helmet_texture_paths = {
+"CULTURE_DORAMAN": "res://art/正式人物美术/头盔美术/头盔_3级_多拉曼盔.png"
+}

@@ -6,6 +6,7 @@
 script = ExtResource("1_familyconfig")
 family_id = "FAMILY_OLIN"
 display_name = "奥林家族"
+culture_id = "CULTURE_LORRIS"
 primary_color = Color(0.72, 0.55, 0.22, 1)
 secondary_color = Color(0.66, 0.24, 0.18, 1)
 banner_texture_path = "res://art/正式人物美术/奥林家族风格美术/奥林旗帜16_16.png"

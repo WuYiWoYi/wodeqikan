@@ -20,6 +20,12 @@ static var _king_override_owner: Object = null
 static var _king_helmet_texture_path: String = ""
 static var _king_unit_predicate: Callable = Callable()
 
+## 贵族文化头盔同样是纯表现覆盖：WorldContext 注册文化解析器，
+## 只对贵族单位生效；结果不写入 UnitData/装备/存档。
+static var _noble_override_owner: Object = null
+static var _noble_helmet_texture_paths: Dictionary = {}
+static var _noble_culture_resolver: Callable = Callable()
+
 
 ## 注册当前世界的国王外观覆盖。资源缺失时清空路径，回退普通头盔。
 static func configure_king_helmet_override(
@@ -52,6 +58,47 @@ static func get_king_helmet_texture_path(unit: UnitData) -> String:
 	if not bool(_king_unit_predicate.call(unit)):
 		return ""
 	return _king_helmet_texture_path
+
+
+## 注册贵族文化头盔覆盖。缺失资源不进入映射，回退普通头盔；
+## 解析器返回 culture_id，非贵族或没有文化时返回空字符串。
+static func configure_noble_helmet_override(
+	owner: Object,
+	texture_paths_by_culture: Dictionary,
+	culture_resolver: Callable
+) -> void:
+	_noble_override_owner = owner
+	_noble_helmet_texture_paths.clear()
+	for culture_value: Variant in texture_paths_by_culture:
+		var culture_id: String = str(culture_value)
+		var texture_path: String = str(texture_paths_by_culture[culture_value])
+		if culture_id.is_empty() or texture_path.is_empty():
+			continue
+		if ResourceLoader.exists(texture_path):
+			_noble_helmet_texture_paths[culture_id] = texture_path
+	_noble_culture_resolver = culture_resolver
+
+
+## 世界销毁时清理注册；只允许当前拥有者清理，避免覆盖后来注册的世界。
+static func clear_noble_helmet_override(owner: Object) -> void:
+	if owner != null and _noble_override_owner != null \
+			and _noble_override_owner != owner:
+		return
+	_noble_override_owner = null
+	_noble_helmet_texture_paths.clear()
+	_noble_culture_resolver = Callable()
+
+
+## 贵族单位当前应显示的专属头盔；普通士兵、无文化或未配置时返回空。
+static func get_noble_helmet_texture_path(unit: UnitData) -> String:
+	if unit == null or _noble_helmet_texture_paths.is_empty():
+		return ""
+	if not _noble_culture_resolver.is_valid():
+		return ""
+	var culture_id: String = str(_noble_culture_resolver.call(unit))
+	if culture_id.is_empty():
+		return ""
+	return str(_noble_helmet_texture_paths.get(culture_id, ""))
 
 
 static func ensure_random(

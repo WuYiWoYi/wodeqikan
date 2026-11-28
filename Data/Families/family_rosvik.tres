@@ -6,6 +6,7 @@
 script = ExtResource("1_familyconfig")
 family_id = "FAMILY_ROSVIK"
 display_name = "罗斯维克家族"
+culture_id = "CULTURE_LORRIS"
 primary_color = Color(0.88, 0.38, 0, 1)
 secondary_color = Color(0.88, 0.63, 0.38, 1)
 banner_texture_path = "res://art/正式人物美术/罗斯维克家族风格美术/罗斯维克旗帜16_16.png"

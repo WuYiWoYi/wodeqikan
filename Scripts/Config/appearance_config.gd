@@ -30,6 +30,10 @@ extends Resource
 ## 国王身份对应的头盔外观覆盖。只在原本就会显示头盔时替换贴图；
 ## 不写入 UnitData.appearance / 装备数据，身份失效后自动恢复原头盔。
 @export var king_helmet_texture_path: String = ""
+## 文化专属贵族头盔：键为 CultureDefinition.culture_id。
+## 只对贵族单位生效，且只在原本就会显示头盔时替换；同时隐藏普通缨饰。
+## 路径为空或资源缺失时回退普通头盔，不写入存档。
+@export var noble_culture_helmet_texture_paths: Dictionary = {}
 
 
 func get_helmet_texture_paths(tier: int) -> Array[String]:

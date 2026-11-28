@@ -6,6 +6,7 @@
 script = ExtResource("1_familyconfig")
 family_id = "FAMILY_MOXIXI"
 display_name = "墨西西家族"
+culture_id = "CULTURE_LORRIS"
 primary_color = Color(0.42, 0.24, 0.56, 1)
 secondary_color = Color(0.78, 0.35, 0.22, 1)
 banner_texture_path = "res://art/正式人物美术/墨西西家族风格美术/墨西西旗帜16_16.png"

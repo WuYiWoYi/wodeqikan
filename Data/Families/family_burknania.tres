@@ -6,6 +6,7 @@
 script = ExtResource("1_familyconfig")
 family_id = "FAMILY_BURKNANIA"
 display_name = "伯克纳家族"
+culture_id = "CULTURE_DORAMAN"
 primary_color = Color(0.62, 0.16, 0.16, 1)
 secondary_color = Color(0.18, 0.32, 0.62, 1)
 banner_texture_path = "res://art/正式人物美术/伯克纳家族风格美术/伯克纳旗帜16_16.png"

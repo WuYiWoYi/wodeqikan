@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cq5nvmuhs70vk"
-path="res://.godot/imported/头盔_2级_样式5.png-0a55f9ee39c9f8ccb6c79639a08c2b8e.ctex"
+uid="uid://c7xk6htbcb0at"
+path="res://.godot/imported/头盔_3级_多拉曼盔.png-feb75cdf706718c1b7d60c5a84dbd0c3.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://art/正式人物美术/头盔美术/头盔_2级_样式5.png"
-dest_files=["res://.godot/imported/头盔_2级_样式5.png-0a55f9ee39c9f8ccb6c79639a08c2b8e.ctex"]
+source_file="res://art/正式人物美术/头盔美术/头盔_3级_多拉曼盔.png"
+dest_files=["res://.godot/imported/头盔_3级_多拉曼盔.png-feb75cdf706718c1b7d60c5a84dbd0c3.ctex"]
 
 [params]
 

@@ -659,8 +659,9 @@ Idle
 
 ### 10.2 配置与生成
 
-- `FamilyConfig`（`Data/Families/*.tres`）：`family_id`、名称、主/副色、旗帜、主/副罩袍、领袖缨饰、可选家族长矛。
-- `AppearanceConfig`（`Data/Appearance/appearance_config.tres`）：1/2/3 级头盔池与主罩袍概率。
+- `FamilyConfig`（`Data/Families/*.tres`）：`family_id`、名称、`culture_id`、主/副色、旗帜、主/副罩袍、领袖缨饰、可选家族长矛。`culture_id` 只服务静态外观映射，不进入存档。
+- `AppearanceConfig`（`Data/Appearance/appearance_config.tres`）：1/2/3 级头盔池、主罩袍概率与贵族文化头盔映射。
+- 2 级头盔样式 5 已从随机池移除，但美术资源保留；随机、初始化与刷新装备都不会再生成该样式。
 - `FamilyRegistry`：只读注册家族配置，不进入存档；家族不是阵营，也不承担外交。
 - `UnitAppearance.ensure_random()`：单位首次创建时生成外观；已有 `appearance` 时直接返回，不重新随机。
 - 头盔按兵种 `tier` 从对应池随机；`level` 与 `tier` 分离。
@@ -682,6 +683,7 @@ Idle
 4. 缨饰：家族配置存在且为领袖时显示；`set_plume_texture()` 仍可覆盖。
 5. 左手装备、攻击动画、属性、装备数据与碰撞规则均不受家族外观影响。
 6. 国王身份头盔覆盖：在“原本会显示头盔”时用 `AppearanceConfig.king_helmet_texture_path` 替换贴图；没有普通头盔时不凭空添加。见 10.5。
+7. 贵族文化头盔覆盖：国王盔之后、普通头盔/装备 `HEAD` 之前生效；多拉曼贵族使用专属盔并隐藏缨饰。见 10.6。
 
 ### 10.4 旧存档兼容
 
@@ -700,8 +702,18 @@ Idle
 - 装配：`WorldContext._ready()` 把解析器与资源路径注册到 `UnitAppearance`；`_exit_tree()` 清理。注册是只读表现层解析，不新增 Autoload。
 - 表现：`UnitVisual` 每次重建时查询当前身份；只有原本会显示头盔（`HEAD` 装备视觉或 `appearance.helmet_texture_path`）时才替换为国王盔，层级/锚点沿用默认头盔处理。
 - 缨饰联动：国王盔生效时，本次重建不创建 `Plume` 部件，保证国王盔与普通头盔缨饰不同时显示；
-  身份失效后下一次重建按 `appearance.plume_texture_path` 恢复原缨饰。
+  身份失效后下一次重建按 `appearance.plume_texture_path` 恢复原缨饰，但该单位同时命中贵族文化头盔覆盖时继续隐藏缨饰（见 10.6）。
 - 数据隔离：国王盔与缨饰隐藏都只作用于表现层，不写入 `appearance`、装备、背包或存档；身份失效后重建 `UnitVisual` 即恢复原头盔与缨饰。已显示的表现节点调用 `rebuild()` 即可响应身份变化，无需重新生成单位。
+
+### 10.6 贵族文化专属头盔
+
+- 配置：`AppearanceConfig.noble_culture_helmet_texture_paths`，键为 `CultureDefinition.culture_id`，值为头盔贴图路径；当前 `CULTURE_DORAMAN` → `头盔_3级_多拉曼盔.png`。
+- 文化来源：`WorldContext.get_noble_culture_id()` 只读查询。玩家角色优先使用身份选择保存的 `player_culture_id`；其他贵族读取所属家族的 `FamilyConfig.culture_id`（`family_id` 缺失时回退贵族 → 家族 `banner_id`）。
+- 贵族判定：`WorldContext.is_noble_unit()` 要求单位 `noble_id` 有效，或玩家角色对应玩家贵族记录；普通士兵、雇佣兵和冒险者不会命中。
+- 装配：`WorldContext._ready()` 注册解析器与“文化 → 贴图”映射，`_exit_tree()` 清理；映射中路径不存在时自动跳过并回退普通头盔。该机制沿用国王盔的只读表现覆盖模式，不新增 Autoload。
+- 表现：`UnitVisual._apply_helmet_visual()` 只在原本会显示头盔时替换贴图，优先级为国王盔 > 贵族文化盔 > 普通外观头盔 / 装备 `HEAD` 视觉；层级、朝向、翻转、遮挡与锚点沿用普通头盔。
+- 缨饰联动：贵族文化盔生效时本次重建不创建 `Plume`，不读写 `appearance.plume_texture_path`；覆盖结果不写入 `appearance`、装备或存档。
+- 范围：其他文化的贵族、所有文化的普通士兵保持原头盔与缨饰规则；多拉曼士兵的三级头盔仍来自随机等级池。
 
 ## 11. 伤兵、俘虏与售出状态（阶段 13 新增）
 
