@@ -33,7 +33,7 @@ func _test_legacy_levels() -> void:
 	_check(save != null, "旧存档可读取")
 	if save == null:
 		return
-	_check(save.schema_version == 10, "旧存档升级到 v10")
+	_check(save.schema_version == 11, "旧存档升级到 v11")
 	_check(save.captivity.is_empty(), "旧存档缺失被俘字段使用空载荷")
 	_check(int(save.units["UNIT_000001"]["level"]) == 5, "旧 10 级折算为 5 级")
 	_check(int(save.units["UNIT_000001"]["exp"]) == 123, "折算保留溢出经验")

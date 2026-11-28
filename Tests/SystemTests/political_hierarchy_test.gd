@@ -377,7 +377,7 @@ func _test_relations() -> void:
 
 func _test_save_roundtrip() -> void:
 	var save := _context.to_save_data()
-	_check(save.schema_version == 10, "存档版本为 v10")
+	_check(save.schema_version == 11, "存档版本为 v11")
 	_check(save.houses.size() == 17, "存档包含 17 个正式家族")
 	_check(save.kingdoms.size() == 6, "存档包含 6 个王国")
 	_check(save.nobles.size() == 52, "存档包含 52 名贵族")

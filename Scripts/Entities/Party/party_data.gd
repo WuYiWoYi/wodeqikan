@@ -139,8 +139,8 @@ var battle_response_until: float = 0.0
 ## NPC 部队使用与玩家完全相同的物品存储结构。
 ## 玩家部队的权威物品仍是 PlayerProfile，不由本字段代替。
 var inventory_data: InventoryData = InventoryData.new()
-## NPC 部队自有资金；玩家资金始终以 PlayerProfile.gold 为准。
-var gold: int = 0
+## NPC 部队自有资金；玩家资金始终以 PlayerProfile.gold 为准。允许小数。
+var gold: float = 0.0
 ## 正在执行的补给采购目标（持久化）；空字符串表示没有采购任务。
 var supply_purchase_active: bool = false
 var supply_purchase_settlement_id: String = ""
@@ -237,33 +237,70 @@ func restore_mount_instances(instances: Array[MountInstanceData]) -> void:
 	inventory_data.restore_mount_instances(instances)
 
 
+func add_item_instance(instance: ItemInstanceData) -> bool:
+	return inventory_data.add_item_instance(instance)
+
+
+func remove_item_instance(instance_id: String) -> ItemInstanceData:
+	return inventory_data.remove_item_instance(instance_id)
+
+
+func take_item_instance(item_id: String) -> ItemInstanceData:
+	return inventory_data.take_item_instance(item_id)
+
+
+func get_item_instance(instance_id: String) -> ItemInstanceData:
+	return inventory_data.get_item_instance(instance_id)
+
+
+func has_item_instance(instance_id: String) -> bool:
+	return inventory_data.has_item_instance(instance_id)
+
+
+func get_item_instances(item_id: String = "") -> Array[ItemInstanceData]:
+	return inventory_data.get_item_instances(item_id)
+
+
+func get_all_item_instances() -> Array[ItemInstanceData]:
+	return inventory_data.get_all_item_instances()
+
+
+func get_item_instance_count(item_id: String = "") -> int:
+	return inventory_data.get_item_instance_count(item_id)
+
+
 ## 交易回滚专用：整体恢复背包，不生成新实例。
 func restore_inventory_state(
 	counts: Dictionary,
 	inventory_list: Array,
-	instances: Array
+	instances: Array,
+	item_instance_list: Array = []
 ) -> void:
-	inventory_data.restore_state(inventory_list, counts, instances)
+	inventory_data.restore_state(
+		inventory_list, counts, instances, item_instance_list
+	)
 
 
 func migrate_legacy_mount_counts() -> void:
 	inventory_data.migrate_legacy_mount_counts()
+	inventory_data.migrate_legacy_instance_counts()
 
 
-func can_afford(amount: int) -> bool:
-	return amount >= 0 and gold >= amount
+func can_afford(amount: float) -> bool:
+	return GoldUtils.can_afford(gold, amount)
 
 
-func spend_gold(amount: int) -> bool:
-	if amount <= 0 or gold < amount:
+func spend_gold(amount: float) -> bool:
+	var normalized: float = GoldUtils.normalize(amount)
+	if normalized <= 0.0 or not GoldUtils.can_afford(gold, normalized):
 		return false
-	gold -= amount
+	gold = GoldUtils.normalize(gold - normalized)
 	return true
 
 
-func add_gold(amount: int) -> void:
-	if amount > 0:
-		gold += amount
+func add_gold(amount: float) -> void:
+	if amount > 0.0:
+		gold = GoldUtils.normalize(gold + amount)
 
 
 ## 稳定的类型键，供遭遇文本配置与 UI 显示使用。
@@ -435,7 +472,7 @@ static func from_dict(data: Dictionary) -> PartyData:
 	var inventory_value: Variant = data.get("inventory", {})
 	if inventory_value is Dictionary:
 		party.inventory_data = InventoryData.from_dict(inventory_value)
-	party.gold = maxi(0, int(data.get("gold", 0)))
+	party.gold = GoldUtils.normalize(float(data.get("gold", 0.0)))
 	party.supply_purchase_active = bool(data.get("supply_purchase_active", false))
 	party.supply_purchase_settlement_id = str(
 		data.get("supply_purchase_settlement_id", "")

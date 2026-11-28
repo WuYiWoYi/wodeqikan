@@ -18,7 +18,8 @@ func create_settlement(
 	world_position: Vector2,
 	faction_id: String = "",
 	population: int = 0,
-	prosperity: int = 0
+	prosperity: int = 0,
+	map_key: String = ""
 ) -> SettlementData:
 	if _id_generator == null:
 		push_error("SettlementManager 尚未初始化 IdGenerator")
@@ -27,11 +28,14 @@ func create_settlement(
 	var settlement := SettlementData.new()
 	settlement.settlement_id = _id_generator.next_id(IdGenerator.SETTLEMENT)
 	settlement.display_name = display_name
+	settlement.map_key = map_key
 	settlement.settlement_type = settlement_type
 	settlement.world_position = world_position
 	settlement.faction_id = faction_id
 	settlement.population = population
 	settlement.prosperity = prosperity
+	# 户数暂以人口作为占位默认值，后续地图/地点配置可直接覆盖该字段。
+	settlement.households = maxi(0, population)
 	_settlements[settlement.settlement_id] = settlement
 	return settlement
 
@@ -67,6 +71,23 @@ func get_all_settlements() -> Array[SettlementData]:
 		if settlement != null:
 			result.append(settlement)
 	return result
+
+
+## 村庄破坏状态接口：状态由 SettlementData 持有，UI 不直接改。
+## 本阶段只提供写入与查询，不实现具体破坏事件。
+func set_settlement_destroyed(settlement_id: String, destroyed: bool) -> bool:
+	var settlement := get_settlement(settlement_id)
+	if settlement == null:
+		return false
+	if settlement.settlement_type != SettlementData.SettlementType.VILLAGE:
+		return false
+	settlement.set_destroyed(destroyed)
+	return true
+
+
+func is_settlement_destroyed(settlement_id: String) -> bool:
+	var settlement := get_settlement(settlement_id)
+	return settlement != null and settlement.is_destroyed()
 
 
 func to_dict() -> Dictionary:

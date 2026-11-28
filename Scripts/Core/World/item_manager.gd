@@ -16,6 +16,9 @@ func register_item_config(config: ItemConfig) -> bool:
 		push_error("ItemConfig 重复注册，拒绝覆盖: %s" % config.item_id)
 		return false
 	_items[config.item_id] = config
+	# 非堆叠普通商品（例如猪）每件保存独立实例；马匹仍由 MOUNT 装备体系管理。
+	if not config.is_stackable and not MountInstanceData.is_mount_item(config.item_id):
+		ItemInstanceData.register_instance_item(config.item_id)
 	return true
 
 

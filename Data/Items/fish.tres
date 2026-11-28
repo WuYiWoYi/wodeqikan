@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="ItemConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/item_config.gd" id="1_itemconfig"]
+
+[resource]
+script = ExtResource("1_itemconfig")
+item_id = "fish"
+display_name = "鱼"
+description = "沿水村庄的特产物资。"
+item_type = 0
+icon_texture_path = "res://art/我的骑砍临时美术/正式美术_其他/道具物品贴图/道具贴图_鱼.png"
+is_stackable = true
+batch_purchase_amounts = Array[int]([10, 50])

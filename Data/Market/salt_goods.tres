@@ -1,0 +1,26 @@
+[gd_resource type="Resource" script_class="MarketGoodsConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/market_goods_config.gd" id="1_marketgoodsconfig"]
+
+[resource]
+script = ExtResource("1_marketgoodsconfig")
+item_id = "salt"
+buy_price = 2.0
+sell_price = 0.5
+initial_stock = 20
+is_tradeable = true
+scope = 2
+is_stackable = true
+batch_purchase_amounts = Array[int]([10, 50])
+village_buy_base_price = 1.0
+village_scarcity_price_min = 0.5
+village_scarcity_price_max = 1.0
+village_abundance_price_min = 1.0
+village_abundance_price_max = 2.0
+town_scarcity_price_min = 1.0
+town_scarcity_price_max = 3.0
+stock_cap_per_100_households = 100
+base_floor_per_100_households = 0
+village_initial_stock_ratio = 0.5
+daily_refill_ratio = 0.25
+associated_item_id = ""

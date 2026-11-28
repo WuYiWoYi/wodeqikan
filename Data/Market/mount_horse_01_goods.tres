@@ -5,10 +5,23 @@
 [resource]
 script = ExtResource("1_marketgoodsconfig")
 item_id = "mount_horse_01"
-buy_price = 100
-sell_price = 70
+buy_price = 150.0
+sell_price = 75.0
 initial_stock = 3
 is_tradeable = true
 scope = 0
 is_stackable = false
 batch_purchase_amounts = Array[int]([])
+village_buy_base_price = 150.0
+village_scarcity_price_min = 150.0
+village_scarcity_price_max = 300.0
+village_abundance_price_min = 60.0
+village_abundance_price_max = 150.0
+town_scarcity_price_min = 150.0
+town_scarcity_price_max = 400.0
+stock_cap_per_100_households = 10
+base_floor_per_100_households = 0
+village_initial_stock_ratio = 0.5
+daily_refill_ratio = 0.25
+associated_item_id = ""
+icon_texture_path = "res://art/正式人物美术/马匹美术/棕马马身体.png"

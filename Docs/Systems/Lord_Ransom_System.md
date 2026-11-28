@@ -317,7 +317,7 @@ CAPTIVE：领主进入玩家俘虏队伍
 | 家族/据点缺失的异常恢复 | 已实现（关押期无据点时继续等待） |
 | 右侧事件框与待处理提醒 | 已实现（无事件时隐藏，提醒不暂停世界） |
 | 详情弹窗与失效自动关闭 | 已实现 |
-| 存档/读档与去重（含来源与关押时间） | 已实现（v8 新增记录，当前 Schema v10 保持不变） |
+| 存档/读档与去重（含来源与关押时间） | 已实现（v8 新增记录；当前 Schema v11） |
 | 多家族竞价、赎金谈判、拒绝后的冷却 | 未实现 |
 | 领主人质期间的外交影响 | 未实现 |
 
@@ -326,5 +326,5 @@ CAPTIVE：领主进入玩家俘虏队伍
 - [Wounded_Prisoner_System.md](Wounded_Prisoner_System.md)：出售价格与俘虏归属。
 - [Political_Hierarchy_System.md](Political_Hierarchy_System.md)：贵族、家族与封地。
 - [World_Map_System.md](World_Map_System.md)：事件框、详情弹窗与大地图 UI。
-- [Save_System.md](Save_System.md)：当前 Schema v10 与 `ransoms`。
+- [Save_System.md](Save_System.md)：当前 Schema v11 与 `ransoms`。
 - [Time_System.md](Time_System.md)：世界累计时间与暂停。

@@ -19,6 +19,8 @@ const FAMILY_CONFIG_DIR: String = "res://Data/Families"
 const APPEARANCE_CONFIG_PATH: String = "res://Data/Appearance/appearance_config.tres"
 const SETTLEMENT_ECONOMY_CONFIG_PATH: String = \
 	"res://Data/Settlements/settlement_economy_config.tres"
+const VILLAGE_SPECIALTY_CONFIG_PATH: String = \
+	"res://Data/Settlements/village_specialties.tres"
 const RECRUITMENT_CONFIG_PATH: String = \
 	"res://Data/Recruitment/recruitment_config.tres"
 ## 旧存档升级 v6 时，为完全没有补给数据的部队补几天起步物资与少量资金。
@@ -36,6 +38,8 @@ var supply_manager: SupplyManager = SupplyManager.new()
 var wounded_healing_manager: WoundedHealingManager = WoundedHealingManager.new()
 ## 阶段 13：俘虏出售统一业务入口（价格集中配置、原子结算）。
 var prisoner_trade_manager: PrisonerTradeManager = PrisonerTradeManager.new()
+## 牲畜宰杀统一业务入口：只处理猪/马 → 肉，UI 不直接增删背包。
+var slaughter_manager: SlaughterManager = SlaughterManager.new()
 ## NPC 领主出售后的家族赎回生命周期（等待 → 请求 → 接受/取消）。
 var lord_ransom_manager: LordRansomManager = LordRansomManager.new()
 ## 事件中心脚本用 preload 引用，避免新增 class_name 尚未进入编辑器缓存时无法解析。
@@ -49,6 +53,8 @@ var family_registry: FamilyRegistry = FamilyRegistry.new()
 var appearance_config: AppearanceConfig = null
 ## 封地经济/征召/冒险者刷新参数；只读静态资源，不进入存档。
 var economy_config: SettlementEconomyConfig = null
+## 村庄特产静态配置；只读，不进入存档（存档只保存地点自身的特产字段）。
+var village_specialty_config: VillageSpecialtyConfig = null
 ## 统一招募价格与雇佣兵世界刷新参数；只读静态资源，不进入存档。
 var recruitment_config: RecruitmentConfig = null
 ## 贵族/家族/王国是本阶段的政治实体层级；lord_manager 指向同一个 NobleManager，
@@ -582,6 +588,10 @@ func load_from_save_data(save: SaveData) -> bool:
 		else save.lords
 	noble_manager.load_from_dict(noble_payload)
 	settlement_manager.load_from_dict(save.settlements)
+	# 旧存档没有 map_key / 特产 / 户数：按稳定 key 或名称补齐，不覆盖已有值。
+	if village_specialty_config != null:
+		for settlement: SettlementData in settlement_manager.get_all_settlements():
+			village_specialty_config.apply_defaults(settlement)
 	# 市场库存按村庄/城镇独立恢复；旧存档缺失时 ensure_markets() 只补初始库存。
 	market_manager.load_from_dict(save.markets)
 	if not market_manager.ensure_markets():
@@ -859,6 +869,15 @@ func register_static_configs() -> bool:
 			push_error("家族配置注册失败: %s" % path)
 			success = false
 
+	village_specialty_config = load(
+		VILLAGE_SPECIALTY_CONFIG_PATH
+	) as VillageSpecialtyConfig
+	if village_specialty_config == null:
+		push_warning(
+			"无法加载村庄特产配置，村庄将没有特产: %s"
+			% VILLAGE_SPECIALTY_CONFIG_PATH
+		)
+
 	appearance_config = load(APPEARANCE_CONFIG_PATH) as AppearanceConfig
 	if appearance_config == null:
 		push_error("无法加载外观配置: %s" % APPEARANCE_CONFIG_PATH)
@@ -947,6 +966,7 @@ func _wire_managers() -> void:
 	market_manager.setup(
 		settlement_manager, unit_manager, item_manager, world_log_manager
 	)
+	slaughter_manager.setup(item_manager)
 	# 玩家补给使用 PlayerProfile，NPC 使用自己的 PartyData 背包；规则完全一致。
 	supply_manager.setup(
 		party_manager, unit_manager, player_profile, player_party_id
@@ -1033,6 +1053,7 @@ func _wire_managers() -> void:
 		wounded_healing_manager,
 		lord_ransom_manager,
 		mercenary_manager,
-		captivity_manager
+		captivity_manager,
+		market_manager
 	)
 	event_center.setup(self)

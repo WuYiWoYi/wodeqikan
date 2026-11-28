@@ -11,8 +11,16 @@ enum SettlementType {
 	CASTLE,
 }
 
+## 村庄经济状态。Destroyed 村庄暂停物资产出与每日补货，但保留现有库存。
+enum EconomicState {
+	NORMAL,
+	DESTROYED,
+}
+
 var settlement_id: String = ""
 var display_name: String = ""
+## 大地图定义中的稳定 key；用于恢复特产配置，不参与位置/所有权判断。
+var map_key: String = ""
 var settlement_type: SettlementType = SettlementType.VILLAGE
 
 var world_position: Vector2 = Vector2.ZERO
@@ -33,6 +41,15 @@ var scene_path: String = ""
 
 var population: int = 0
 var prosperity: int = 0
+
+## 村庄户数：决定村庄库存上限。0 表示尚未配置，上限回退为目标库存。
+## 新游戏默认取人口作为占位；后续可由地图/地点配置覆盖。
+var households: int = 0
+## 该村庄的特产物品 ID；为空表示没有特产。
+## 特产决定该村庄生产并出售哪些商品；库存上限与价格来自商品配置。
+var village_specialty_item_ids: Array[String] = []
+## 村庄经济状态（持久化）。只有村庄使用；城镇/城堡保持 NORMAL。
+var economic_state: EconomicState = EconomicState.NORMAL
 
 ## 封地经济参数与缓存。tax_income_per_day 必须由 TaxCalculator 计算；
 ## 不允许 UI 或场景节点自行维护另一套税收公式。
@@ -96,6 +113,19 @@ func has_owner() -> bool:
 	return not owner_house_id.is_empty()
 
 
+func is_village_specialty(item_id: String) -> bool:
+	return not item_id.is_empty() and village_specialty_item_ids.has(item_id)
+
+
+func is_destroyed() -> bool:
+	return economic_state == EconomicState.DESTROYED
+
+
+func set_destroyed(destroyed: bool) -> void:
+	economic_state = EconomicState.DESTROYED if destroyed \
+		else EconomicState.NORMAL
+
+
 func to_dict() -> Dictionary:
 	var candidates: Array[Dictionary] = []
 	for candidate: AdventurerCandidateData in adventurer_candidates:
@@ -104,6 +134,7 @@ func to_dict() -> Dictionary:
 	return {
 		"settlement_id": settlement_id,
 		"display_name": display_name,
+		"map_key": map_key,
 		"settlement_type": int(settlement_type),
 		"world_position": [world_position.x, world_position.y],
 		"faction_id": faction_id,
@@ -113,6 +144,9 @@ func to_dict() -> Dictionary:
 		"scene_path": scene_path,
 		"population": population,
 		"prosperity": prosperity,
+		"households": households,
+		"village_specialty_item_ids": village_specialty_item_ids.duplicate(),
+		"economic_state": int(economic_state),
 		"tax_base": tax_base,
 		"tax_income_per_day": tax_income_per_day,
 		"fief_recruitment_stock": fief_recruitment_stock,
@@ -134,6 +168,8 @@ static func from_dict(data: Dictionary) -> SettlementData:
 	var settlement := SettlementData.new()
 	settlement.settlement_id = str(data.get("settlement_id", ""))
 	settlement.display_name = str(data.get("display_name", ""))
+	# 旧存档没有 map_key：保持为空，由 VillageSpecialtyConfig 按名称回填。
+	settlement.map_key = str(data.get("map_key", ""))
 	settlement.settlement_type = int(
 		data.get("settlement_type", SettlementType.VILLAGE)
 	) as SettlementType
@@ -148,6 +184,14 @@ static func from_dict(data: Dictionary) -> SettlementData:
 	settlement.scene_path = str(data.get("scene_path", ""))
 	settlement.population = maxi(0, int(data.get("population", 0)))
 	settlement.prosperity = maxi(0, int(data.get("prosperity", 0)))
+	# 旧存档没有户数字段：以人口作为占位，保证库存上限至少为目标库存。
+	settlement.households = maxi(
+		0, int(data.get("households", settlement.population))
+	)
+	# 旧存档没有经济状态：按正常村庄恢复；被破坏状态由后续接口写入。
+	var state_value: int = int(data.get("economic_state", EconomicState.NORMAL))
+	settlement.economic_state = EconomicState.DESTROYED \
+		if state_value == int(EconomicState.DESTROYED) else EconomicState.NORMAL
 	settlement.tax_base = maxi(0, int(data.get("tax_base", 20)))
 	settlement.tax_income_per_day = maxi(
 		0, int(data.get("tax_income_per_day", 0))
@@ -191,6 +235,14 @@ static func from_dict(data: Dictionary) -> SettlementData:
 			settlement.noble_adventurer_candidate != null
 		)
 	)
+
+	var specialty_values: Variant = data.get("village_specialty_item_ids", [])
+	if specialty_values is Array:
+		for value: Variant in specialty_values:
+			var item_id: String = str(value)
+			if not item_id.is_empty() \
+					and not settlement.village_specialty_item_ids.has(item_id):
+				settlement.village_specialty_item_ids.append(item_id)
 
 	var garrison_values: Variant = data.get("garrison_unit_ids", [])
 	if garrison_values is Array:

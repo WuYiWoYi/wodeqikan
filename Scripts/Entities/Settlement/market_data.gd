@@ -5,13 +5,18 @@ extends RefCounted
 ## 每个地点拥有独立 MarketData，不与其他地点或背包共享。
 ## - stock: { item_id: 数量 }，只保存可堆叠商品。
 ## - mount_instances: 市场中待售的每一匹马，拥有独立外观与实例 ID。
+## - item_instances: 市场中待售的猪等非堆叠普通商品，每件一个实例。
 
 var settlement_id: String = ""
 var stock: Dictionary = {}
 var mount_instances: Array[MountInstanceData] = []
+var item_instances: Array[ItemInstanceData] = []
 ## 已按商品配置初始化过的 item_id。用于区分“商品卖光”和“旧存档缺少该商品”，
 ## 避免读档时把卖光的库存重新补满。
 var initialized_items: Dictionary = {}
+## 上一次完成每日村庄产出的游戏日（TimeManager.total_days）。
+## -1 表示尚未初始化；读档后首个 tick 以当前日为起点，不补发历史产出。
+var daily_production_day: int = -1
 
 
 func get_stock(item_id: String) -> int:
@@ -19,25 +24,37 @@ func get_stock(item_id: String) -> int:
 		return 0
 	if MountInstanceData.is_mount_item(item_id):
 		return get_mount_count(item_id)
+	if ItemInstanceData.is_instance_item(item_id):
+		return get_item_instance_count(item_id)
 	return maxi(0, int(stock.get(item_id, 0)))
 
 
 func set_stock(item_id: String, count: int) -> void:
 	if item_id.is_empty():
 		return
-	if MountInstanceData.is_mount_item(item_id):
-		push_warning("马匹库存必须通过实例管理，不能直接设置数量: %s" % item_id)
+	if MountInstanceData.is_mount_item(item_id) \
+			or ItemInstanceData.is_instance_item(item_id):
+		push_warning("非堆叠商品必须通过实例管理，不能直接设置数量: %s" % item_id)
 		return
 	stock[item_id] = maxi(0, count)
 
 
-func add_stock(item_id: String, count: int) -> void:
+## 增加库存。max_count >= 0 时不超过该上限；返回实际增加数量。
+## 村庄商品出售时的上限控制由调用方传入；城镇商品与旧交易调用不传上限。
+func add_stock(item_id: String, count: int, max_count: int = -1) -> int:
 	if item_id.is_empty() or count <= 0:
-		return
-	if MountInstanceData.is_mount_item(item_id):
-		push_warning("马匹不能按数量加入市场库存: %s" % item_id)
-		return
-	stock[item_id] = get_stock(item_id) + count
+		return 0
+	if MountInstanceData.is_mount_item(item_id) \
+			or ItemInstanceData.is_instance_item(item_id):
+		push_warning("非堆叠商品不能按数量加入市场库存: %s" % item_id)
+		return 0
+	var current: int = get_stock(item_id)
+	var next: int = current + count
+	if max_count >= 0:
+		next = mini(next, max_count)
+	next = maxi(current, next)
+	stock[item_id] = next
+	return next - current
 
 
 ## 库存不足时返回 false 且不修改库存。
@@ -49,6 +66,13 @@ func remove_stock(item_id: String, count: int) -> bool:
 			return false
 		for i: int in range(count):
 			if take_mount_instance(item_id) == null:
+				return false
+		return true
+	if ItemInstanceData.is_instance_item(item_id):
+		if get_item_instance_count(item_id) < count:
+			return false
+		for i: int in range(count):
+			if take_item_instance(item_id) == null:
 				return false
 		return true
 	var current: int = get_stock(item_id)
@@ -134,6 +158,74 @@ func mark_initialized(item_id: String) -> void:
 
 
 # ---------------------------------------------------------------------------
+# 非堆叠普通商品实例（猪）
+# ---------------------------------------------------------------------------
+
+
+func get_item_instance_count(item_id: String = "") -> int:
+	if item_id.is_empty():
+		return item_instances.size()
+	var count: int = 0
+	for instance: ItemInstanceData in item_instances:
+		if instance != null and instance.item_id == item_id:
+			count += 1
+	return count
+
+
+func get_item_instances(item_id: String = "") -> Array[ItemInstanceData]:
+	var result: Array[ItemInstanceData] = []
+	for instance: ItemInstanceData in item_instances:
+		if instance != null and (item_id.is_empty() or instance.item_id == item_id):
+			result.append(instance)
+	return result
+
+
+func get_item_instance(instance_id: String) -> ItemInstanceData:
+	if instance_id.is_empty():
+		return null
+	for instance: ItemInstanceData in item_instances:
+		if instance != null and instance.instance_id == instance_id:
+			return instance
+	return null
+
+
+func add_item_instance(instance: ItemInstanceData) -> bool:
+	if instance == null or instance.instance_id.is_empty() \
+			or instance.item_id.is_empty():
+		return false
+	if get_item_instance(instance.instance_id) != null:
+		push_error("市场商品实例 ID 重复: %s" % instance.instance_id)
+		return false
+	item_instances.append(instance)
+	return true
+
+
+func remove_item_instance(instance_id: String) -> ItemInstanceData:
+	for index: int in range(item_instances.size()):
+		var instance := item_instances[index]
+		if instance != null and instance.instance_id == instance_id:
+			item_instances.remove_at(index)
+			return instance
+	return null
+
+
+func take_item_instance(item_id: String) -> ItemInstanceData:
+	for index: int in range(item_instances.size()):
+		var instance := item_instances[index]
+		if instance != null and instance.item_id == item_id:
+			item_instances.remove_at(index)
+			return instance
+	return null
+
+
+func restore_item_instances(instances: Array[ItemInstanceData]) -> void:
+	item_instances.clear()
+	for instance: ItemInstanceData in instances:
+		if instance != null:
+			item_instances.append(instance)
+
+
+# ---------------------------------------------------------------------------
 # 序列化
 # ---------------------------------------------------------------------------
 
@@ -143,11 +235,17 @@ func to_dict() -> Dictionary:
 	for instance: MountInstanceData in mount_instances:
 		if instance != null:
 			instances.append(instance.to_dict())
+	var item_instance_payloads: Array[Dictionary] = []
+	for instance: ItemInstanceData in item_instances:
+		if instance != null:
+			item_instance_payloads.append(instance.to_dict())
 	return {
 		"settlement_id": settlement_id,
 		"stock": stock.duplicate(true),
 		"mount_instances": instances,
+		"item_instances": item_instance_payloads,
 		"initialized_items": initialized_items.duplicate(true),
+		"daily_production_day": daily_production_day,
 	}
 
 
@@ -181,12 +279,31 @@ static func from_dict(data: Dictionary) -> MarketData:
 		for key: Variant in (initialized_value as Dictionary).keys():
 			market.initialized_items[str(key)] = true
 
-	# 旧存档没有初始化标记：已有库存键或马匹实例的商品视为已初始化。
+	var item_instance_value: Variant = data.get("item_instances", [])
+	if item_instance_value is Array:
+		for value: Variant in item_instance_value:
+			if not value is Dictionary:
+				continue
+			var instance := ItemInstanceData.from_dict(value)
+			if instance.instance_id.is_empty() or instance.item_id.is_empty():
+				continue
+			if market.get_item_instance(instance.instance_id) != null:
+				continue
+			market.item_instances.append(instance)
+
+	# 旧存档没有村庄产出字段：保持 -1，由 MarketManager 在首个世界 tick
+	# 以当前游戏日为起点，避免读档后补发历史每日产出。
+	market.daily_production_day = int(data.get("daily_production_day", -1))
+
+	# 旧存档没有初始化标记：已有库存键、马匹实例或商品实例的商品视为已初始化。
 	for item_id_value: Variant in market.stock.keys():
 		market.initialized_items[str(item_id_value)] = true
 	for instance: MountInstanceData in market.mount_instances:
 		if instance != null:
 			market.initialized_items[instance.equipment_id] = true
+	for instance: ItemInstanceData in market.item_instances:
+		if instance != null:
+			market.initialized_items[instance.item_id] = true
 
 	# 旧存档可能把马匹数量存在 stock 中：转成确定性实例，保证只迁移一次。
 	var legacy_mount_ids: Array[String] = []

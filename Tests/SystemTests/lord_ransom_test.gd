@@ -178,7 +178,7 @@ func _test_sale_and_accept_with_ui() -> void:
 
 	# 已完成状态写入存档，且读档后不重新生成事件。
 	var save := _context.to_save_data()
-	_check(save.schema_version == 10, "存档升级到 v10")
+	_check(save.schema_version == 11, "存档升级到 v11")
 	_check(save.ransoms.has(ransom_id), "存档保存赎回记录")
 	var restored_context := WorldContext.new()
 	restored_context.name = "LordRansomRestoredContext"

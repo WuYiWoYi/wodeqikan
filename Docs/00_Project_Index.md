@@ -21,7 +21,7 @@
 | 攻击朝向 | 武器攻击判定支持 360°；人物贴图仍左右镜像，默认朝左 |
 | 静态配置 | Godot `Resource`（`Data/**/*.tres`） |
 | 运行时实体 | `RefCounted` 纯数据类（`UnitData`、`PartyData` 等） |
-| 存档 | JSON，带 `schema_version`（当前 v10），只保存持久化数据 |
+| 存档 | JSON，带 `schema_version`（当前 v11），只保存持久化数据 |
 | 世界时间 | 固定步长 0.1 秒，由 `TimeManager` 统一推进 |
 | 全局单例 | 仅 5 个 Autoload：`EventBus`、`TimeManager`、`SaveManager`、`SceneManager`、`GameManager` |
 | 代码规范 | 静态类型 GDScript；标识符英文，注释与文档中文 |
@@ -95,7 +95,7 @@ WorldContext（一局游戏，跨场景常驻；持有全部世界管理器）
 
 ## 6. 当前状态
 
-- 当前阶段：大地图重建、六方势力与家族旗帜命名（2026-11-27）已完成；此前的身份选择、雇佣兵美术与独立招募、装备管理、玩家被俘与逃脱保持有效；存档 Schema v10。
+- 当前阶段：村庄经济升级（2026-11-28：35 村特产、动态库存、每日补货、比例定价、猪/肉、宰杀、小数金币）已完成；此前的身份选择、雇佣兵、装备、玩家被俘与大地图重建保持有效；存档 Schema v11。
 - 已实现能力、明确未做项、当前风险与测试状态的**唯一权威位置**是 [Development/Current_Status.md](Development/Current_Status.md)；本索引不维护状态快照，避免与状态文档失同步。
 
 ## 7. 文档权威性

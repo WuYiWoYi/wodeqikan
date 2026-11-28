@@ -2,7 +2,7 @@
 
 **核心数据：** `Scripts/Entities/Settlement/settlement_data.gd`
 **核心逻辑：** `Scripts/Core/World/settlement_manager.gd`
-**状态：** 数据仓储、地图图标、基础交互面板、村庄小场景入口、封地归属、采邑储备、冒险者候选人、村庄/城镇市场入口与城镇酒馆入口已实现
+**状态：** 数据仓储、地图图标、基础交互面板、村庄小场景入口、封地归属、采邑储备、冒险者候选人、村庄/城镇市场入口、村庄特产/户数/经济状态与城镇酒馆入口已实现
 
 ---
 
@@ -29,6 +29,10 @@
 | `adventurer_refresh_elapsed` | 距离下一名候选人的累计世界秒 |
 | `garrison_unit_ids` | 驻军单位 ID |
 | `is_under_siege` | 是否被围城 |
+| `map_key` | 大地图定义的稳定地点 key；用于匹配村庄特产配置，旧存档缺失时按显示名回退 |
+| `households` | 村庄户数；决定村庄动态库存上限。旧存档缺失时以 `population` 为占位默认值 |
+| `village_specialty_item_ids` | 村庄特产物品 ID 列表；由 `VillageSpecialtyConfig` 按 `map_key` 配置，旧存档自动补齐 |
+| `economic_state` | `NORMAL` / `DESTROYED`；破坏村庄停止产出与补货但保留库存 |
 
 初期只需要基础信息，其他字段逐步增加。
 
@@ -223,7 +227,7 @@ Milestone 1 只做基础面板；阶段 6 起村庄面板增加进入小场景�
   4. 继续持有同一个 `PAUSE_REASON_UI_PANEL` 暂停原因，世界保持暂停。
 - 市场关闭/取消后恢复地点面板，不擅自恢复 1x/2x；只有玩家离开地点时才成对释放 `ui_panel`。
 - 市场面板是屏幕覆盖层，不切换 Town 场景；`Scenes/Town/town.tscn` 仍保持空场景占位。
-- 村庄市场出售面包/草料，城镇市场额外出售马匹；库存按地点独立持久化，卖光后读档不会补满。
+- 村庄市场出售基础面包/草料与本村特产（猪特产同时出售肉），城镇市场按 `scope` 出售面包/草料/马匹；库存按地点独立持久化，读档不会补满已售罄商品，村庄只在每日 00:00 按动态上限补货。
 - 市场库存与交易规则见 [Inventory_Economy_System.md](Inventory_Economy_System.md) 第 4.3 节。
 
 ## 12. 城镇酒馆入口（阶段 13 新增）
@@ -238,3 +242,13 @@ Milestone 1 只做基础面板；阶段 6 起村庄面板增加进入小场景�
 - 售价只取 `PrisonerPriceConfig`（按兵种 tier：一级 5、二级 20、三级 60；NPC 领主统一 100），UI 不写死价格，也不按装备、伤势或经验等级改价。
 - 成功出售后金币进入 `PlayerProfile`，Unit 退出玩家控制并写入 `sold_to_settlement_id`；失败不改任何金币或归属。
 - 详细规则见 [Wounded_Prisoner_System.md](Wounded_Prisoner_System.md)。
+
+## 13. 村庄特产、户数与库存（2026-11-28 升级）
+
+- `SettlementData.map_key`：大地图定义的稳定 key，持久化。新游戏由 `WorldInitializer` 写入；旧存档缺失时由 `VillageSpecialtyConfig` 按显示名回退。
+- `SettlementData.households`：村庄户数，持久化。新游戏优先使用特产配置中的可选户数，未配置时以人口占位；户数变化只重算动态上限，不清空现有库存。
+- `SettlementData.village_specialty_item_ids`：村庄特产列表，持久化；由 `Data/Settlements/village_specialties.tres` 按 `map_key` 写入 35 个村庄的特产。旧存档缺失时自动补齐，已有列表视为权威。
+- `SettlementData.economic_state`：`NORMAL` / `DESTROYED`；破坏村庄停止每日产出与补货，但保留现有库存。当前没有玩家可触发的破坏入口。
+- 价格区间、每百户上限、基础保底、初始库存比例与每日补货比例属于商品静态配置（`MarketGoodsConfig`），不写入 `SettlementData`；`SettlementData` 只提供户数、特产身份与经济状态。
+- 村庄库存的完整规则（动态上限、每日 25% 补货、按库存比例定价、猪/肉关联、大地图特产图标）见 [Inventory_Economy_System.md](Inventory_Economy_System.md) 第 4.4 节。
+- 城镇不参与村庄库存机制；城堡仍然没有市场。

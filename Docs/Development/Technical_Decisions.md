@@ -3260,3 +3260,22 @@
 **原因：** 个人所有权与家族所有权并存会产生两个写入源，导致“家族成员不能征召家族村庄”“换领袖即换主人”等矛盾；显式名单也让初始化可审计、可测试，避免依赖隐式推断。
 
 **影响：** `settlement_data.gd`、`world_initializer.gd`、`fief_recruitment_manager.gd`、`ai_manager.gd`、`village_scene.gd`、`lord_ransom_manager.gd`、`faction_manager.gd`、`world_context.gd`、`adventurer_recruitment_manager.gd`、地点/百科/家族面板 UI；`world_map_definition.tres` 3 处改名；相关测试与 `Docs/Systems/*` 同步更新。
+
+## D177 · 村庄经济：动态上限、库存比例定价与配置化特产
+
+**日期：** 2026-11-28
+**状态：** 已确认（取代同日早先的“目标库存 + 缓慢恢复 + 每日缺口比例”模型）
+
+**决策：**
+
+- 村庄库存只有一个容量概念：`动态上限 = floor((基础保底每百户 + 特产每百户) × 户数 ÷ 100)`。不再区分“目标库存”和“上限”，不保存派生上限，也不保留 `recovery_progress`。
+- 每日 00:00 按上限的固定比例（当前 25%）补货，单日一次、跨日补算；暂停与被破坏村庄不补，破坏期间仍推进补货日期，避免恢复后补发。
+- 村庄购买价只由“当前库存 ÷ 动态上限”决定，按四段平滑插值并钳制在配置区间；不引入随机、供需或声望修正。配置反直觉时也照配置执行（盐的紧缺高价端低于标准价）。
+- 特产是地点身份（`SettlementData.village_specialty_item_ids`），每百户数值是商品属性（`MarketGoodsConfig`）；两者分属不同实体，不在交易逻辑里硬编码村庄。
+- 村庄商品范围 = 基础保底 + 本村特产 + 特产关联产出；商品 `scope` 只约束城镇，避免“马是城镇限定所以不能当村庄特产”的冲突。
+- 猪使用通用 `ItemInstanceData` 非堆叠实例，马继续使用 `MountInstanceData`；交易接口同时接受两类实例 ID，旧式数量传参由 `MarketManager` 转换为实例，避免拆散个体。
+- 金币统一为浮点并以 `GoldUtils` 保留两位小数；物品数量仍为整数。宰杀是背包中唯一的新写操作，由 `SlaughterManager` 独占结算。
+
+**原因：** 旧模型同时存在目标、上限、恢复进度与多种倍率，派生状态多且互相影响；统一为“上限 + 固定补货 + 比例定价”后，每个数值只有一个来源，读档与测试更容易确定结果。
+
+**影响：** `MarketManager`、`MarketGoodsConfig`、`MarketData`、`TradeSession`、`PlayerProfile` / `PartyData` / `InventoryData`、`SlaughterManager`、`VillageSpecialtyConfig`、`WorldContext`、`WorldInitializer`、大地图名称标签、市场/背包 UI、Schema v11、相关测试与文档。

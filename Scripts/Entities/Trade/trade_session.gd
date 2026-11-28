@@ -7,7 +7,8 @@ extends RefCounted
 ## - 重置交易直接恢复打开时的快照，不做反向回放；
 ## - 确认交易时才把差异提交给 MarketManager，由它统一校验与结算。
 ##
-## 马匹是独立实例：预览按 instance_id 移动具体个体，普通物品按数量移动。
+## 马匹与非堆叠商品（猪）是独立实例：预览按 instance_id 移动具体个体，
+## 可堆叠物品按数量移动。金币与价格允许小数。
 
 var settlement_id: String = ""
 var holder: Variant = null
@@ -16,18 +17,23 @@ var market_manager: MarketManager = null
 var _market: MarketData = null
 var _settlement_type: int = -1
 
-## 预览中的市场 / 玩家普通物品数量。
+## 预览中的市场 / 玩家可堆叠物品数量。
 var _market_counts: Dictionary = {}
 var _player_counts: Dictionary = {}
 ## 预览中的市场 / 玩家马匹实例（保存具体个体，不复制马匹数据）。
 var _market_mounts: Array[MountInstanceData] = []
 var _player_mounts: Array[MountInstanceData] = []
+## 预览中的市场 / 玩家非堆叠普通商品实例（猪等）。
+var _market_items: Array[ItemInstanceData] = []
+var _player_items: Array[ItemInstanceData] = []
 
 ## 打开交易时的快照，用于“重置交易”。
 var _initial_market_counts: Dictionary = {}
 var _initial_player_counts: Dictionary = {}
 var _initial_market_mount_ids: Array[String] = []
 var _initial_player_mount_ids: Array[String] = []
+var _initial_market_item_ids: Array[String] = []
+var _initial_player_item_ids: Array[String] = []
 
 var _trade_serial: int = 0
 
@@ -52,10 +58,14 @@ func refresh_from_state() -> bool:
 	_player_counts.clear()
 	_market_mounts.clear()
 	_player_mounts.clear()
+	_market_items.clear()
+	_player_items.clear()
 	_initial_market_counts.clear()
 	_initial_player_counts.clear()
 	_initial_market_mount_ids.clear()
 	_initial_player_mount_ids.clear()
+	_initial_market_item_ids.clear()
+	_initial_player_item_ids.clear()
 
 	if market_manager == null or holder == null or settlement_id.is_empty():
 		return false
@@ -68,12 +78,15 @@ func refresh_from_state() -> bool:
 	_settlement_type = settlement.settlement_type
 
 	for config: MarketGoodsConfig in market_manager.get_all_goods_configs():
-		if config == null or not config.is_available_at(_settlement_type):
+		if config == null or not market_manager.is_goods_available_at(config, settlement):
 			continue
 		var item_id: String = config.item_id
 		if MountInstanceData.is_mount_item(item_id):
 			_market_mounts.append_array(_market.get_mount_instances(item_id))
 			_player_mounts.append_array(holder.get_mount_instances(item_id))
+		elif ItemInstanceData.is_instance_item(item_id):
+			_market_items.append_array(_market.get_item_instances(item_id))
+			_player_items.append_array(holder.get_item_instances(item_id))
 		else:
 			_market_counts[item_id] = _market.get_stock(item_id)
 			_player_counts[item_id] = int(holder.get_item_count(item_id))
@@ -84,6 +97,10 @@ func refresh_from_state() -> bool:
 		_initial_market_mount_ids.append(instance.instance_id)
 	for instance: MountInstanceData in _player_mounts:
 		_initial_player_mount_ids.append(instance.instance_id)
+	for instance: ItemInstanceData in _market_items:
+		_initial_market_item_ids.append(instance.instance_id)
+	for instance: ItemInstanceData in _player_items:
+		_initial_player_item_ids.append(instance.instance_id)
 	return true
 
 
@@ -103,12 +120,16 @@ func get_settlement_type() -> int:
 func get_market_count(item_id: String) -> int:
 	if MountInstanceData.is_mount_item(item_id):
 		return _count_mounts(_market_mounts, item_id)
+	if ItemInstanceData.is_instance_item(item_id):
+		return _count_items(_market_items, item_id)
 	return maxi(0, int(_market_counts.get(item_id, 0)))
 
 
 func get_player_count(item_id: String) -> int:
 	if MountInstanceData.is_mount_item(item_id):
 		return _count_mounts(_player_mounts, item_id)
+	if ItemInstanceData.is_instance_item(item_id):
+		return _count_items(_player_items, item_id)
 	return maxi(0, int(_player_counts.get(item_id, 0)))
 
 
@@ -136,17 +157,43 @@ func get_player_mount_instances_for(item_id: String) -> Array[MountInstanceData]
 	return result
 
 
+func get_market_item_instances() -> Array[ItemInstanceData]:
+	return _market_items.duplicate()
+
+
+func get_player_item_instances() -> Array[ItemInstanceData]:
+	return _player_items.duplicate()
+
+
+func get_market_item_instances_for(item_id: String) -> Array[ItemInstanceData]:
+	var result: Array[ItemInstanceData] = []
+	for instance: ItemInstanceData in _market_items:
+		if instance != null and instance.item_id == item_id:
+			result.append(instance)
+	return result
+
+
+func get_player_item_instances_for(item_id: String) -> Array[ItemInstanceData]:
+	var result: Array[ItemInstanceData] = []
+	for instance: ItemInstanceData in _player_items:
+		if instance != null and instance.item_id == item_id:
+			result.append(instance)
+	return result
+
+
 # ---------------------------------------------------------------------------
 # 预览操作
 # ---------------------------------------------------------------------------
 
 
-## 市场 → 玩家。返回实际移动数量；马匹一次只能移动一匹。
+## 市场 → 玩家。返回实际移动数量；马匹/猪一次只能移动一件。
 func buy(item_id: String, amount: int = 1) -> int:
 	if market_manager == null or _market == null or amount <= 0:
 		return 0
 	if MountInstanceData.is_mount_item(item_id):
 		return buy_mount_instance(_first_mount_id(_market_mounts, item_id))
+	if ItemInstanceData.is_instance_item(item_id):
+		return buy_item_instance(_first_item_id(_market_items, item_id))
 	var available: int = get_market_count(item_id)
 	var moved: int = mini(amount, available)
 	if moved <= 0:
@@ -156,12 +203,14 @@ func buy(item_id: String, amount: int = 1) -> int:
 	return moved
 
 
-## 玩家 → 市场。返回实际移动数量；马匹一次只能移动一匹。
+## 玩家 → 市场。返回实际移动数量；马匹/猪一次只能移动一件。
 func sell(item_id: String, amount: int = 1) -> int:
 	if market_manager == null or _market == null or amount <= 0:
 		return 0
 	if MountInstanceData.is_mount_item(item_id):
 		return sell_mount_instance(_first_mount_id(_player_mounts, item_id))
+	if ItemInstanceData.is_instance_item(item_id):
+		return sell_item_instance(_first_item_id(_player_items, item_id))
 	var available: int = get_player_count(item_id)
 	var moved: int = mini(amount, available)
 	if moved <= 0:
@@ -197,12 +246,40 @@ func sell_mount_instance(instance_id: String) -> int:
 	return 0
 
 
+## 购买指定市场非堆叠商品实例；不存在时返回 0。
+func buy_item_instance(instance_id: String) -> int:
+	if instance_id.is_empty():
+		return 0
+	for index: int in range(_market_items.size()):
+		var instance := _market_items[index]
+		if instance != null and instance.instance_id == instance_id:
+			_market_items.remove_at(index)
+			_player_items.append(instance)
+			return 1
+	return 0
+
+
+## 出售指定玩家非堆叠商品实例；不存在时返回 0。
+func sell_item_instance(instance_id: String) -> int:
+	if instance_id.is_empty():
+		return 0
+	for index: int in range(_player_items.size()):
+		var instance := _player_items[index]
+		if instance != null and instance.instance_id == instance_id:
+			_player_items.remove_at(index)
+			_market_items.append(instance)
+			return 1
+	return 0
+
+
 ## 恢复打开交易时的预览；不触碰真实数据。
 func reset() -> void:
 	_market_counts = _initial_market_counts.duplicate(true)
 	_player_counts = _initial_player_counts.duplicate(true)
 	_market_mounts.clear()
 	_player_mounts.clear()
+	_market_items.clear()
+	_player_items.clear()
 	for instance_id: String in _initial_market_mount_ids:
 		var instance := _find_actual_market_mount(instance_id)
 		if instance != null:
@@ -211,6 +288,14 @@ func reset() -> void:
 		var instance: MountInstanceData = holder.get_mount_instance(instance_id)
 		if instance != null:
 			_player_mounts.append(instance)
+	for instance_id: String in _initial_market_item_ids:
+		var instance := _find_actual_market_item(instance_id)
+		if instance != null:
+			_market_items.append(instance)
+	for instance_id: String in _initial_player_item_ids:
+		var instance: ItemInstanceData = holder.get_item_instance(instance_id)
+		if instance != null:
+			_player_items.append(instance)
 
 
 # ---------------------------------------------------------------------------
@@ -218,11 +303,12 @@ func reset() -> void:
 # ---------------------------------------------------------------------------
 
 
-## 需提交给 MarketManager 的普通物品购买数量（不含马匹）。
+## 需提交给 MarketManager 的可堆叠物品购买数量（不含实例物品）。
 func get_purchase_counts() -> Dictionary:
 	var result: Dictionary = {}
 	for item_id: String in _initial_market_counts:
-		if MountInstanceData.is_mount_item(item_id):
+		if MountInstanceData.is_mount_item(item_id) \
+				or ItemInstanceData.is_instance_item(item_id):
 			continue
 		var delta: int = int(_initial_market_counts.get(item_id, 0)) \
 			- get_market_count(item_id)
@@ -231,11 +317,12 @@ func get_purchase_counts() -> Dictionary:
 	return result
 
 
-## 需提交给 MarketManager 的普通物品出售数量（不含马匹）。
+## 需提交给 MarketManager 的可堆叠物品出售数量（不含实例物品）。
 func get_sale_counts() -> Dictionary:
 	var result: Dictionary = {}
 	for item_id: String in _initial_player_counts:
-		if MountInstanceData.is_mount_item(item_id):
+		if MountInstanceData.is_mount_item(item_id) \
+				or ItemInstanceData.is_instance_item(item_id):
 			continue
 		var delta: int = int(_initial_player_counts.get(item_id, 0)) \
 			- get_player_count(item_id)
@@ -262,103 +349,137 @@ func get_sale_mount_instance_ids() -> Array[String]:
 	return result
 
 
-## 汇总预览购买（普通物品按数量、马匹按装备 ID 计数），供结果提示使用。
+## 购买的非堆叠商品实例 ID。
+func get_purchase_item_instance_ids() -> Array[String]:
+	var result: Array[String] = []
+	for instance: ItemInstanceData in _player_items:
+		if instance != null and not _initial_player_item_ids.has(instance.instance_id):
+			result.append(instance.instance_id)
+	return result
+
+
+## 出售的非堆叠商品实例 ID。
+func get_sale_item_instance_ids() -> Array[String]:
+	var result: Array[String] = []
+	for instance: ItemInstanceData in _market_items:
+		if instance != null and not _initial_market_item_ids.has(instance.instance_id):
+			result.append(instance.instance_id)
+	return result
+
+
+## 汇总预览购买（含实例商品），供结果提示使用。
 func get_purchase_items() -> Dictionary:
 	var result: Dictionary = get_purchase_counts()
-	var mount_ids: Array[String] = get_purchase_mount_instance_ids()
-	for instance_id: String in mount_ids:
+	for instance_id: String in get_purchase_mount_instance_ids():
 		var instance := _find_player_mount(instance_id)
 		if instance != null:
 			result[instance.equipment_id] = int(
 				result.get(instance.equipment_id, 0)
 			) + 1
+	for instance_id: String in get_purchase_item_instance_ids():
+		var instance := _find_player_item(instance_id)
+		if instance != null:
+			result[instance.item_id] = int(result.get(instance.item_id, 0)) + 1
 	return result
 
 
 func get_sale_items() -> Dictionary:
 	var result: Dictionary = get_sale_counts()
-	var mount_ids: Array[String] = get_sale_mount_instance_ids()
-	for instance_id: String in mount_ids:
+	for instance_id: String in get_sale_mount_instance_ids():
 		var instance := _find_market_mount(instance_id)
 		if instance != null:
 			result[instance.equipment_id] = int(
 				result.get(instance.equipment_id, 0)
 			) + 1
+	for instance_id: String in get_sale_item_instance_ids():
+		var instance := _find_market_item(instance_id)
+		if instance != null:
+			result[instance.item_id] = int(result.get(instance.item_id, 0)) + 1
 	return result
 
 
-func get_purchase_total() -> int:
-	var total: int = 0
+func get_purchase_total() -> float:
+	var total: float = 0.0
 	var counts: Dictionary = get_purchase_counts()
 	for item_id: String in counts:
-		var config := market_manager.get_goods_config(item_id)
-		if config != null:
-			total += config.buy_price * int(counts[item_id])
+		total += market_manager.get_buy_price(settlement_id, item_id) \
+			* float(int(counts[item_id]))
 	for instance_id: String in get_purchase_mount_instance_ids():
 		var instance := _find_player_mount(instance_id)
 		if instance == null:
 			continue
-		var config := market_manager.get_goods_config(instance.equipment_id)
-		if config != null:
-			total += config.buy_price
-	return total
+		total += market_manager.get_buy_price(settlement_id, instance.equipment_id)
+	for instance_id: String in get_purchase_item_instance_ids():
+		var instance := _find_player_item(instance_id)
+		if instance == null:
+			continue
+		total += market_manager.get_buy_price(settlement_id, instance.item_id)
+	return GoldUtils.normalize(total)
 
 
-func get_sale_total() -> int:
-	var total: int = 0
+func get_sale_total() -> float:
+	var total: float = 0.0
 	var counts: Dictionary = get_sale_counts()
 	for item_id: String in counts:
-		var config := market_manager.get_goods_config(item_id)
-		if config != null:
-			total += config.sell_price * int(counts[item_id])
+		total += market_manager.get_sell_price(settlement_id, item_id) \
+			* float(int(counts[item_id]))
 	for instance_id: String in get_sale_mount_instance_ids():
 		var instance := _find_market_mount(instance_id)
 		if instance == null:
 			continue
-		var config := market_manager.get_goods_config(instance.equipment_id)
-		if config != null:
-			total += config.sell_price
-	return total
+		total += market_manager.get_sell_price(settlement_id, instance.equipment_id)
+	for instance_id: String in get_sale_item_instance_ids():
+		var instance := _find_market_item(instance_id)
+		if instance == null:
+			continue
+		total += market_manager.get_sell_price(settlement_id, instance.item_id)
+	return GoldUtils.normalize(total)
 
 
 ## 正数表示玩家需支付，负数表示玩家将获得金币。
-func get_net_amount() -> int:
-	return get_purchase_total() - get_sale_total()
+func get_net_amount() -> float:
+	return GoldUtils.normalize(get_purchase_total() - get_sale_total())
 
 
 func has_preview() -> bool:
 	return not get_purchase_counts().is_empty() \
 		or not get_sale_counts().is_empty() \
 		or not get_purchase_mount_instance_ids().is_empty() \
-		or not get_sale_mount_instance_ids().is_empty()
+		or not get_sale_mount_instance_ids().is_empty() \
+		or not get_purchase_item_instance_ids().is_empty() \
+		or not get_sale_item_instance_ids().is_empty()
 
 
 func is_confirm_enabled() -> bool:
 	if not has_preview():
 		return false
-	var net: int = get_net_amount()
-	if net <= 0:
+	var net: float = get_net_amount()
+	if net <= 0.0:
 		return true
-	return int(holder.gold) >= net
+	return GoldUtils.can_afford(get_gold(), net)
 
 
-func get_gold() -> int:
-	return int(holder.gold) if holder != null else 0
+func get_gold() -> float:
+	return GoldUtils.normalize(float(holder.gold)) if holder != null else 0.0
 
 
 func get_status_text() -> String:
 	if not has_preview():
 		return "点击左右两侧的按钮移动物品，确认后才会结算。"
-	var purchase: int = get_purchase_total()
-	var sale: int = get_sale_total()
-	var net: int = purchase - sale
-	var text: String = "买入 %d 金币，卖出 %d 金币" % [purchase, sale]
-	if net > 0:
-		text += "，需支付 %d 金币（持有 %d）" % [net, get_gold()]
-		if get_gold() < net:
+	var purchase: float = get_purchase_total()
+	var sale: float = get_sale_total()
+	var net: float = GoldUtils.normalize(purchase - sale)
+	var text: String = "买入 %s 金币，卖出 %s 金币" % [
+		GoldUtils.format(purchase), GoldUtils.format(sale)
+	]
+	if net > 0.0:
+		text += "，需支付 %s 金币（持有 %s）" % [
+			GoldUtils.format(net), GoldUtils.format(get_gold())
+		]
+		if not GoldUtils.can_afford(get_gold(), net):
 			text += " · 金币不足"
-	elif net < 0:
-		text += "，将获得 %d 金币" % absi(net)
+	elif net < 0.0:
+		text += "，将获得 %s 金币" % GoldUtils.format(-net)
 	else:
 		text += "，无需支付金币"
 	return text
@@ -372,13 +493,15 @@ func commit() -> Dictionary:
 			"error": "没有待确认的交易",
 			"purchased_items": {},
 			"sold_items": {},
-			"purchase_total": 0,
-			"sale_total": 0,
-			"net_gold": 0,
-			"gold_paid": 0,
-			"gold_received": 0,
+			"purchase_total": 0.0,
+			"sale_total": 0.0,
+			"net_gold": 0.0,
+			"gold_paid": 0.0,
+			"gold_received": 0.0,
 			"purchased_mount_instance_ids": [],
 			"sold_mount_instance_ids": [],
+			"purchased_item_instance_ids": [],
+			"sold_item_instance_ids": [],
 		}
 	_trade_serial += 1
 	var trade_id: String = "trade_%s_%d_%d" % [
@@ -391,7 +514,9 @@ func commit() -> Dictionary:
 		holder,
 		trade_id,
 		get_purchase_mount_instance_ids(),
-		get_sale_mount_instance_ids()
+		get_sale_mount_instance_ids(),
+		get_purchase_item_instance_ids(),
+		get_sale_item_instance_ids()
 	)
 	if bool(result.get("success", false)):
 		refresh_from_state()
@@ -411,9 +536,24 @@ func _count_mounts(instances: Array[MountInstanceData], item_id: String) -> int:
 	return count
 
 
+func _count_items(instances: Array[ItemInstanceData], item_id: String) -> int:
+	var count: int = 0
+	for instance: ItemInstanceData in instances:
+		if instance != null and instance.item_id == item_id:
+			count += 1
+	return count
+
+
 func _first_mount_id(instances: Array[MountInstanceData], item_id: String) -> String:
 	for instance: MountInstanceData in instances:
 		if instance != null and instance.equipment_id == item_id:
+			return instance.instance_id
+	return ""
+
+
+func _first_item_id(instances: Array[ItemInstanceData], item_id: String) -> String:
+	for instance: ItemInstanceData in instances:
+		if instance != null and instance.item_id == item_id:
 			return instance.instance_id
 	return ""
 
@@ -432,8 +572,29 @@ func _find_player_mount(instance_id: String) -> MountInstanceData:
 	return null
 
 
+func _find_market_item(instance_id: String) -> ItemInstanceData:
+	for instance: ItemInstanceData in _market_items:
+		if instance != null and instance.instance_id == instance_id:
+			return instance
+	return null
+
+
+func _find_player_item(instance_id: String) -> ItemInstanceData:
+	for instance: ItemInstanceData in _player_items:
+		if instance != null and instance.instance_id == instance_id:
+			return instance
+	return null
+
+
 ## 重置交易时从真实市场数据找回初始马匹实例引用。
 func _find_actual_market_mount(instance_id: String) -> MountInstanceData:
 	if _market == null:
 		return null
 	return _market.get_mount_instance(instance_id)
+
+
+## 重置交易时从真实市场数据找回初始商品实例引用。
+func _find_actual_market_item(instance_id: String) -> ItemInstanceData:
+	if _market == null:
+		return null
+	return _market.get_item_instance(instance_id)

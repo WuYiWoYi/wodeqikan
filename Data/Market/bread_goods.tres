@@ -5,10 +5,22 @@
 [resource]
 script = ExtResource("1_marketgoodsconfig")
 item_id = "bread"
-buy_price = 2
-sell_price = 1
+buy_price = 1.0
+sell_price = 0.15
 initial_stock = 50
 is_tradeable = true
 scope = 1
 is_stackable = true
 batch_purchase_amounts = Array[int]([10, 50])
+village_buy_base_price = 0.3
+village_scarcity_price_min = 0.3
+village_scarcity_price_max = 1.5
+village_abundance_price_min = 0.1
+village_abundance_price_max = 0.3
+town_scarcity_price_min = 0.3
+town_scarcity_price_max = 1.5
+stock_cap_per_100_households = 200
+base_floor_per_100_households = 100
+village_initial_stock_ratio = 0.5
+daily_refill_ratio = 0.25
+associated_item_id = ""

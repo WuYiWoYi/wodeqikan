@@ -102,16 +102,16 @@ func get_preview_sale_count(item_id: String) -> int:
 	return int(_session.get_sale_items().get(item_id, 0))
 
 
-func get_purchase_total() -> int:
-	return _session.get_purchase_total() if _session != null else 0
+func get_purchase_total() -> float:
+	return _session.get_purchase_total() if _session != null else 0.0
 
 
-func get_sale_total() -> int:
-	return _session.get_sale_total() if _session != null else 0
+func get_sale_total() -> float:
+	return _session.get_sale_total() if _session != null else 0.0
 
 
-func get_net_amount() -> int:
-	return _session.get_net_amount() if _session != null else 0
+func get_net_amount() -> float:
+	return _session.get_net_amount() if _session != null else 0.0
 
 
 func is_confirm_enabled() -> bool:
@@ -142,7 +142,9 @@ func get_preview_player_count(item_id: String) -> int:
 func refresh() -> void:
 	if _context == null or _settlement == null or _session == null:
 		return
-	_gold_label.text = "当前金币：%d" % _context.player_profile.gold
+	_gold_label.text = "当前金币：%s" % GoldUtils.format(
+		float(_context.player_profile.gold)
+	)
 	_rebuild_market_list()
 	_rebuild_player_list()
 	_update_totals()
@@ -174,6 +176,12 @@ func _rebuild_market_list() -> void:
 			for instance: MountInstanceData in instances:
 				_add_market_mount_row(config, instance)
 				row_count += 1
+		elif ItemInstanceData.is_instance_item(item_id):
+			var item_instances: Array[ItemInstanceData] = \
+				_session.get_market_item_instances_for(item_id)
+			for instance: ItemInstanceData in item_instances:
+				_add_market_item_instance_row(config, instance)
+				row_count += 1
 		else:
 			_add_market_stackable_row(config)
 			row_count += 1
@@ -192,8 +200,11 @@ func _add_market_stackable_row(config: MarketGoodsConfig) -> void:
 	)
 	name_label.name = "MarketGoodsName_%s" % item_id
 	info.add_child(name_label)
-	var detail_text: String = "库存：%d    单价：%d" % [
-		preview_stock, maxi(0, config.buy_price)
+	var detail_text: String = "库存：%d    单价：%s" % [
+		preview_stock,
+		GoldUtils.format(
+			_context.market_manager.get_buy_price(_settlement.settlement_id, item_id)
+		)
 	]
 	if preview_stock <= 0:
 		detail_text += "    （已售罄）"
@@ -241,8 +252,13 @@ func _add_market_mount_row(
 	name_label.name = "MarketGoodsName_%s_%s" % [item_id, instance.instance_id]
 	info.add_child(name_label)
 	var detail := _make_label(
-		"市场待售 %d 匹 · 售价 %d" % [
-			_session.get_market_count(item_id), maxi(0, config.buy_price)
+		"市场待售 %d 匹 · 售价 %s" % [
+			_session.get_market_count(item_id),
+			GoldUtils.format(
+				_context.market_manager.get_buy_price(
+					_settlement.settlement_id, item_id
+				)
+			)
 		],
 		13
 	)
@@ -262,6 +278,50 @@ func _add_market_mount_row(
 	row.add_child(buy_button)
 
 
+## 非堆叠普通商品（猪等）：每件实例单独一行，单独买卖。
+func _add_market_item_instance_row(
+	config: MarketGoodsConfig,
+	instance: ItemInstanceData
+) -> void:
+	var item_id: String = config.item_id
+	var row := _make_row(
+		_market_list,
+		"MarketGoodsRow_%s_%s" % [item_id, instance.instance_id]
+	)
+	row.add_child(_make_item_icon(item_id))
+
+	var info := _make_info_column(row)
+	var display_name: String = _context.market_manager.get_item_display_name(item_id)
+	var name_label := _make_label(display_name, 16)
+	name_label.name = "MarketGoodsName_%s_%s" % [item_id, instance.instance_id]
+	info.add_child(name_label)
+	var detail := _make_label(
+		"市场待售 %d 件 · 售价 %s" % [
+			_session.get_market_count(item_id),
+			GoldUtils.format(
+				_context.market_manager.get_buy_price(
+					_settlement.settlement_id, item_id
+				)
+			)
+		],
+		13
+	)
+	detail.name = "MarketGoodsStock_%s_%s" % [item_id, instance.instance_id]
+	detail.modulate = INFO_MODULATE
+	info.add_child(detail)
+
+	var buy_button := _make_button(
+		"MarketBuyButton_%s_%s" % [item_id, instance.instance_id],
+		"购买",
+		Vector2(96.0, 32.0)
+	)
+	buy_button.disabled = not config.can_buy()
+	buy_button.pressed.connect(
+		_on_buy_item_instance_pressed.bind(instance.instance_id)
+	)
+	row.add_child(buy_button)
+
+
 func _rebuild_player_list() -> void:
 	_clear_children(_player_list)
 	var configs: Array[MarketGoodsConfig] = \
@@ -276,6 +336,12 @@ func _rebuild_player_list() -> void:
 				_session.get_player_mount_instances_for(item_id)
 			for instance: MountInstanceData in instances:
 				_add_player_mount_row(config, instance)
+				row_count += 1
+		elif ItemInstanceData.is_instance_item(item_id):
+			var item_instances: Array[ItemInstanceData] = \
+				_session.get_player_item_instances_for(item_id)
+			for instance: ItemInstanceData in item_instances:
+				_add_player_item_instance_row(config, instance)
 				row_count += 1
 		else:
 			if _session.get_player_count(item_id) <= 0:
@@ -299,7 +365,11 @@ func _add_player_stackable_row(config: MarketGoodsConfig) -> void:
 	info.add_child(name_label)
 	var detail_text: String = "数量：%d" % preview_count
 	if config.can_sell():
-		detail_text += "    收购价：%d" % config.sell_price
+		detail_text += "    收购价：%s" % GoldUtils.format(
+			_context.market_manager.get_sell_price(
+				_settlement.settlement_id, item_id
+			)
+		)
 	else:
 		detail_text += "    不可出售"
 	var detail := _make_label(detail_text, 13)
@@ -335,7 +405,11 @@ func _add_player_mount_row(
 	info.add_child(name_label)
 	var detail_text: String = "坐骑"
 	if config.can_sell():
-		detail_text += "    收购价：%d" % config.sell_price
+		detail_text += "    收购价：%s" % GoldUtils.format(
+			_context.market_manager.get_sell_price(
+				_settlement.settlement_id, item_id
+			)
+		)
 	else:
 		detail_text += "    不可出售"
 	var detail := _make_label(detail_text, 13)
@@ -352,6 +426,50 @@ func _add_player_mount_row(
 	sell_button.disabled = not config.can_sell()
 	sell_button.pressed.connect(
 		_on_sell_mount_pressed.bind(instance.instance_id)
+	)
+	row.add_child(sell_button)
+
+
+## 玩家持有的非堆叠普通商品（猪等）：每件实例单独出售。
+func _add_player_item_instance_row(
+	config: MarketGoodsConfig,
+	instance: ItemInstanceData
+) -> void:
+	var item_id: String = config.item_id
+	var row := _make_row(
+		_player_list,
+		"MarketPlayerRow_%s_%s" % [item_id, instance.instance_id]
+	)
+	row.add_child(_make_item_icon(item_id))
+
+	var info := _make_info_column(row)
+	var display_name: String = _context.market_manager.get_item_display_name(item_id)
+	var name_label := _make_label(display_name, 16)
+	name_label.name = "MarketPlayerName_%s_%s" % [item_id, instance.instance_id]
+	info.add_child(name_label)
+	var detail_text: String = "持有 1 件"
+	if config.can_sell():
+		detail_text += "    收购价：%s" % GoldUtils.format(
+			_context.market_manager.get_sell_price(
+				_settlement.settlement_id, item_id
+			)
+		)
+	else:
+		detail_text += "    不可出售"
+	var detail := _make_label(detail_text, 13)
+	detail.name = "MarketPlayerCount_%s_%s" % [item_id, instance.instance_id]
+	detail.modulate = INFO_MODULATE
+	info.add_child(detail)
+
+	var sell_button := _make_button(
+		"MarketSellButton_%s_%s" % [item_id, instance.instance_id],
+		"出售",
+		Vector2(96.0, 32.0)
+	)
+	sell_button.visible = config.can_sell()
+	sell_button.disabled = not config.can_sell()
+	sell_button.pressed.connect(
+		_on_sell_item_instance_pressed.bind(instance.instance_id)
 	)
 	row.add_child(sell_button)
 
@@ -451,6 +569,22 @@ func _on_sell_mount_pressed(instance_id: String) -> void:
 	refresh()
 
 
+func _on_buy_item_instance_pressed(instance_id: String) -> void:
+	if _session == null:
+		return
+	_session.buy_item_instance(instance_id)
+	_feedback_text = ""
+	refresh()
+
+
+func _on_sell_item_instance_pressed(instance_id: String) -> void:
+	if _session == null:
+		return
+	_session.sell_item_instance(instance_id)
+	_feedback_text = ""
+	refresh()
+
+
 func _on_reset_pressed() -> void:
 	if _session == null:
 		return
@@ -476,12 +610,12 @@ func _on_cancel_pressed() -> void:
 
 
 func _success_text(result: Dictionary) -> String:
-	var gold_paid: int = int(result.get("gold_paid", 0))
-	var gold_received: int = int(result.get("gold_received", 0))
-	if gold_paid > 0:
-		return "交易成功，支付 %d 金币。" % gold_paid
-	if gold_received > 0:
-		return "交易成功，获得 %d 金币。" % gold_received
+	var gold_paid: float = float(result.get("gold_paid", 0.0))
+	var gold_received: float = float(result.get("gold_received", 0.0))
+	if gold_paid > 0.0:
+		return "交易成功，支付 %s 金币。" % GoldUtils.format(gold_paid)
+	if gold_received > 0.0:
+		return "交易成功，获得 %s 金币。" % GoldUtils.format(gold_received)
 	return "交易成功。"
 
 
@@ -493,15 +627,15 @@ func _success_text(result: Dictionary) -> String:
 func _update_totals() -> void:
 	if _session == null:
 		return
-	var purchase_total: int = _session.get_purchase_total()
-	var sale_total: int = _session.get_sale_total()
-	var net_gold: int = _session.get_net_amount()
-	_purchase_total_label.text = "玩家购入：%d 金币" % purchase_total
-	_sale_total_label.text = "玩家售出：%d 金币" % sale_total
-	if net_gold > 0:
-		_net_label.text = "最终需要支付：%d 金币" % net_gold
-	elif net_gold < 0:
-		_net_label.text = "最终将获得：%d 金币" % (-net_gold)
+	var purchase_total: float = _session.get_purchase_total()
+	var sale_total: float = _session.get_sale_total()
+	var net_gold: float = _session.get_net_amount()
+	_purchase_total_label.text = "玩家购入：%s 金币" % GoldUtils.format(purchase_total)
+	_sale_total_label.text = "玩家售出：%s 金币" % GoldUtils.format(sale_total)
+	if net_gold > 0.0:
+		_net_label.text = "最终需要支付：%s 金币" % GoldUtils.format(net_gold)
+	elif net_gold < 0.0:
+		_net_label.text = "最终将获得：%s 金币" % GoldUtils.format(-net_gold)
 	else:
 		_net_label.text = "本次交易无需支付金币"
 
@@ -510,9 +644,12 @@ func _update_totals() -> void:
 	if not _feedback_text.is_empty():
 		_status_label.text = _feedback_text
 		_status_label.modulate = Color(1.0, 0.86, 0.55)
-	elif net_gold > int(_context.player_profile.gold):
-		_status_label.text = "金币不足：需要 %d 金币，当前 %d 金币" % [
-			net_gold, _context.player_profile.gold
+	elif net_gold > 0.0 and not GoldUtils.can_afford(
+		float(_context.player_profile.gold), net_gold
+	):
+		_status_label.text = "金币不足：需要 %s 金币，当前 %s 金币" % [
+			GoldUtils.format(net_gold),
+			GoldUtils.format(float(_context.player_profile.gold))
 		]
 		_status_label.modulate = Color(1.0, 0.55, 0.45)
 	else:

@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="ItemConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/item_config.gd" id="1_itemconfig"]
+
+[resource]
+script = ExtResource("1_itemconfig")
+item_id = "iron"
+display_name = "铁"
+description = "矿冶村庄的特产物资，可用于后续装备生产。"
+item_type = 1
+icon_texture_path = "res://art/我的骑砍临时美术/正式美术_其他/道具物品贴图/道具贴图_铁.png"
+is_stackable = true
+batch_purchase_amounts = Array[int]([10, 50])

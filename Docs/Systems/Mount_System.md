@@ -66,7 +66,7 @@ inventory:        Array[String]        # 兼容 UI/旧存档的“出现过的 I
 
 ## 5. 市场
 
-- 城镇市场可为每匹马生成独立库存实例；
+- 城镇市场可为每匹马生成独立库存实例；村庄也可把马配置为特产，按村庄动态库存与每日补货规则生成实例（见 [Inventory_Economy_System.md](Inventory_Economy_System.md) 第 4.4 节）；
 - 市场/玩家列表逐匹显示，按钮绑定 `instance_id`；
 - 旧接口按 `{ mount_id: count }` 买卖时，`MarketManager` 自动转换为具体实例 ID；
 - 市场记录 `initialized_items`，避免卖光后读档又被补满。

@@ -12,9 +12,10 @@ extends RefCounted
 ## v8 增加战斗经验五级制（旧 1–10 级折算）与 NPC 领主赎回记录。
 ## v9 增加全地图雇佣兵池、酒馆驻留/流动状态与雇佣兵身份字段。
 ## v10 增加玩家被俘状态、押送部队、俘虏恢复/逃脱计时与逃脱保护期。
-## 读取时保留 v1 → v10 的浅迁移入口，缺失字段按安全默认值恢复。
+## v11 增加村庄特产/户数/地图 key/破坏状态、非堆叠商品实例与小数金币。
+## 读取时保留 v1 → v11 的浅迁移入口，缺失字段按安全默认值恢复。
 
-const CURRENT_SCHEMA_VERSION: int = 10
+const CURRENT_SCHEMA_VERSION: int = 11
 ## 战斗经验等级上限；与 CombatExperience.MAX_LEVEL 保持一致。
 const MAX_COMBAT_LEVEL: int = 5
 
@@ -53,7 +54,8 @@ var lords: Dictionary = {}
 var houses: Dictionary = {}
 var kingdoms: Dictionary = {}
 var settlements: Dictionary = {}
-## 村庄/城镇市场库存：{ settlement_id: { stock, mount_instances, initialized_items } }。
+## 村庄/城镇市场库存：{ settlement_id: { stock, mount_instances, item_instances,
+## initialized_items, daily_production_day } }。
 ## 旧存档缺失时由 MarketManager 按当前商品配置初始化一次。
 var markets: Dictionary = {}
 ## NPC 领主赎回记录：{ ransom_id: { noble_id, status, due_world_seconds, ... } }。
@@ -178,6 +180,11 @@ static func from_dict(payload: Dictionary) -> SaveData:
 	# 俘虏恢复/逃脱计时由 CaptivityManager 在加载时以读档时刻初始化。
 	if save.schema_version < 10:
 		save.schema_version = 10
+	# v10 -> v11：金币改为小数（JSON 数字兼容读取）；地点缺失的 map_key/
+	# 特产/户数/经济状态、市场缺失的商品实例与每日补货日期由
+	# VillageSpecialtyConfig / SettlementData / MarketData 的默认值补齐。
+	if save.schema_version < 11:
+		save.schema_version = 11
 	# v4 -> v5：旧存档只有 lords，没有独立 nobles/houses/kingdoms；
 	# 具体政治数据由 WorldContext 在加载后迁移，不在这里伪造实体。
 	return save

@@ -19,6 +19,10 @@ var _detail_name_label: Label = null
 var _detail_type_label: Label = null
 var _detail_count_label: Label = null
 var _detail_description_label: Label = null
+var _slaughter_button: Button = null
+var _feedback_label: Label = null
+var _confirm_dialog: ConfirmationDialog = null
+var _pending_slaughter_item_id: String = ""
 var _item_buttons: Dictionary = {}
 
 
@@ -55,7 +59,9 @@ func get_display_item_ids() -> Array[String]:
 func refresh() -> void:
 	if _context == null or _item_list == null:
 		return
-	_gold_label.text = "当前金币：%d" % _context.player_profile.gold
+	_gold_label.text = "当前金币：%s" % GoldUtils.format(
+		float(_context.player_profile.gold)
+	)
 
 	var entries: Array[Dictionary] = _collect_entries()
 	_clear_children(_item_list)
@@ -139,6 +145,53 @@ func _apply_selection() -> void:
 	_detail_type_label.text = "类型：%s" % str(entry["type_text"])
 	_detail_count_label.text = "持有数量：%d" % int(entry["count"])
 	_detail_description_label.text = _item_description(_selected_item_id)
+	_update_slaughter_button(int(entry["count"]))
+
+
+## 只有猪与马可宰杀；按钮只发起意图，实际结算由 SlaughterManager 完成。
+func _update_slaughter_button(held_count: int) -> void:
+	if _slaughter_button == null:
+		return
+	var can_slaughter: bool = _context != null \
+		and _context.slaughter_manager != null \
+		and _context.slaughter_manager.can_slaughter(_selected_item_id)
+	_slaughter_button.visible = can_slaughter
+	_slaughter_button.disabled = not can_slaughter or held_count <= 0
+	if can_slaughter:
+		_slaughter_button.text = "宰杀（获得 %d 份肉）" % SlaughterManager.MEAT_PER_ANIMAL
+
+
+func _on_slaughter_pressed() -> void:
+	if _selected_item_id.is_empty() or _confirm_dialog == null:
+		return
+	_pending_slaughter_item_id = _selected_item_id
+	_confirm_dialog.dialog_text = \
+		"宰杀该牲畜后，将永久失去该牲畜，并获得%d单位肉。该操作无法撤回，是否继续？" \
+		% SlaughterManager.MEAT_PER_ANIMAL
+	_confirm_dialog.popup_centered()
+
+
+func _on_slaughter_confirmed() -> void:
+	if _pending_slaughter_item_id.is_empty() or _context == null \
+			or _context.slaughter_manager == null:
+		return
+	var item_id: String = _pending_slaughter_item_id
+	_pending_slaughter_item_id = ""
+	var display_name: String = _item_display_name(item_id)
+	var result: Dictionary = _context.slaughter_manager.slaughter(
+		_context.player_profile, item_id
+	)
+	if bool(result.get("success", false)):
+		_feedback_label.text = "已宰杀%s，获得 %d 份肉。" % [
+			display_name, int(result.get("meat_added", 0))
+		]
+		_feedback_label.modulate = Color(0.85, 0.95, 0.7)
+	else:
+		_feedback_label.text = "宰杀失败：%s" % str(result.get("error", "未知错误"))
+		_feedback_label.modulate = Color(1.0, 0.55, 0.45)
+	if not _item_buttons.has(_selected_item_id):
+		_selected_item_id = ""
+	refresh()
 
 
 func _find_entry(item_id: String) -> Dictionary:
@@ -306,6 +359,30 @@ func _build() -> void:
 	_detail_description_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_detail_description_label.custom_minimum_size = Vector2(300.0, 0.0)
 	detail_column.add_child(_detail_description_label)
+
+	_feedback_label = _make_label("", 14)
+	_feedback_label.name = "InventoryFeedbackLabel"
+	_feedback_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_feedback_label.modulate = Color(0.85, 0.95, 0.7)
+	detail_column.add_child(_feedback_label)
+
+	_slaughter_button = Button.new()
+	_slaughter_button.name = "InventorySlaughterButton"
+	_slaughter_button.text = "宰杀"
+	_slaughter_button.focus_mode = Control.FOCUS_NONE
+	_slaughter_button.custom_minimum_size = Vector2(200.0, 36.0)
+	_slaughter_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_slaughter_button.visible = false
+	_slaughter_button.pressed.connect(_on_slaughter_pressed)
+	detail_column.add_child(_slaughter_button)
+
+	_confirm_dialog = ConfirmationDialog.new()
+	_confirm_dialog.name = "InventorySlaughterConfirm"
+	_confirm_dialog.title = "宰杀确认"
+	_confirm_dialog.ok_button_text = "确认宰杀"
+	_confirm_dialog.cancel_button_text = "取消"
+	_confirm_dialog.confirmed.connect(_on_slaughter_confirmed)
+	add_child(_confirm_dialog)
 
 
 func _clear_children(container: Node) -> void:

@@ -13,6 +13,8 @@ const TextureRegion = preload("res://Scripts/Core/World/texture_region_utils.gd"
 const TAG_WIDTH: float = 240.0
 const TAG_HEIGHT: float = 36.0
 const BADGE_GAP: float = 8.0
+## 村庄特产图标位于名称右侧；不改变徽章与名称的相对布局。
+const SPECIALTY_ICON_SIZE: float = 18.0
 ## 半透明底板在内容四周的留白。
 const BACKGROUND_PADDING := Vector2(10.0, 4.0)
 const BACKGROUND_COLOR: Color = Color(0.05, 0.06, 0.08, 0.55)
@@ -30,6 +32,9 @@ var _background_style: StyleBoxFlat = null
 var _row: HBoxContainer = null
 var _badge: FamilyBadge = null
 var _name_label: Label = null
+## 村庄特产图标；非村庄或没有特产时不存在。纯 UI，不参与点击。
+var _specialty_icon: TextureRect = null
+var _specialty_icon_path: String = ""
 ## 由 WorldMap 通过统一关系接口写入；标签本身不判断政治关系。
 var _player_relation: int = FactionManager.PlayerRelation.NEUTRAL
 
@@ -147,12 +152,17 @@ func _ready() -> void:
 	size = Vector2(TAG_WIDTH, TAG_HEIGHT)
 
 
-func setup(data: SettlementData, family: FamilyConfig = null) -> void:
+func setup(
+	data: SettlementData,
+	family: FamilyConfig = null,
+	specialty_icon_path: String = ""
+) -> void:
 	settlement = data
 	_bound_family_id = family.family_id if family != null else (
 		data.family_id if data != null else ""
 	)
-	_create_contents(family)
+	_specialty_icon_path = specialty_icon_path
+	_create_contents(family, specialty_icon_path)
 	queue_redraw()
 	# 同步计算一次底板尺寸；WorldMap 每帧还会调用 update_background_layout()
 	# 以覆盖字体/文本布局延迟变化的情况。
@@ -195,6 +205,15 @@ func get_name_label() -> Label:
 	return _name_label
 
 
+## 村庄特产图标；未配置特产或贴图缺失时返回 null。
+func get_specialty_icon() -> TextureRect:
+	return _specialty_icon
+
+
+func get_specialty_icon_path() -> String:
+	return _specialty_icon_path
+
+
 ## 名称行容器；用于验证底板与内容的绘制顺序。
 func get_row_control() -> HBoxContainer:
 	return _row
@@ -233,7 +252,10 @@ func _resolve_background_color() -> Color:
 			return BACKGROUND_COLOR
 
 
-func _create_contents(family: FamilyConfig) -> void:
+func _create_contents(
+	family: FamilyConfig,
+	specialty_icon_path: String = ""
+) -> void:
 	for child: Node in get_children():
 		remove_child(child)
 		child.queue_free()
@@ -241,6 +263,12 @@ func _create_contents(family: FamilyConfig) -> void:
 	_row = null
 	_badge = null
 	_name_label = null
+	_specialty_icon = null
+
+	var specialty_texture: Texture2D = null
+	if not specialty_icon_path.is_empty() \
+			and ResourceLoader.exists(specialty_icon_path):
+		specialty_texture = load(specialty_icon_path) as Texture2D
 
 	# 半透明底板位于内容之后（先添加 => 绘制在底层），尺寸由内容决定。
 	_background = Panel.new()
@@ -261,6 +289,15 @@ func _create_contents(family: FamilyConfig) -> void:
 	_row.add_theme_constant_override("separation", int(BADGE_GAP))
 	_row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(_row)
+
+	# 右侧特产图标会加宽内容；左侧放置等宽占位，使徽章+名称保持原中心位置。
+	# HBox 在占位与图标两侧使用相同的 separation，因此占位宽度与图标一致即可平衡。
+	if specialty_texture != null:
+		var leading_spacer := Control.new()
+		leading_spacer.name = "SettlementSpecialtySpacer"
+		leading_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		leading_spacer.custom_minimum_size = Vector2(SPECIALTY_ICON_SIZE, 0.0)
+		_row.add_child(leading_spacer)
 
 	_badge = FamilyBadge.new()
 	_badge.name = "SettlementFamilyBadge"
@@ -286,6 +323,21 @@ func _create_contents(family: FamilyConfig) -> void:
 	_name_label.add_theme_constant_override("shadow_offset_x", 1)
 	_name_label.add_theme_constant_override("shadow_offset_y", 1)
 	_row.add_child(_name_label)
+
+	# 村庄特产图标：位于名称右侧，纯展示，不参与点击或悬浮。
+	if specialty_texture != null:
+		_specialty_icon = TextureRect.new()
+		_specialty_icon.name = "SettlementSpecialtyIcon"
+		_specialty_icon.texture = specialty_texture
+		_specialty_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		_specialty_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		_specialty_icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		_specialty_icon.custom_minimum_size = Vector2(
+			SPECIALTY_ICON_SIZE, SPECIALTY_ICON_SIZE
+		)
+		_specialty_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		_specialty_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_row.add_child(_specialty_icon)
 
 	# 名称或徽章变化时底板跟随内容尺寸，不写死宽度。
 	if not _row.resized.is_connected(_update_background):

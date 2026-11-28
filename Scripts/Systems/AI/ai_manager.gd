@@ -535,11 +535,14 @@ func _can_buy_supply_at(
 		var config := _market_manager.get_goods_config(item_id)
 		if config == null or not config.can_buy():
 			continue
-		if not config.is_available_at(settlement.settlement_type):
+		if not _market_manager.is_goods_available_at(config, settlement):
 			continue
 		if market.get_stock(item_id) <= 0:
 			continue
-		if config.buy_price > party.gold:
+		var unit_price: float = _market_manager.get_buy_price(
+			settlement.settlement_id, item_id
+		)
+		if unit_price <= 0.0 or unit_price > party.gold:
 			continue
 		return true
 	return false
@@ -564,17 +567,19 @@ func _execute_supply_purchase(
 	)
 
 	var purchases: Dictionary = {}
-	var remaining_gold: int = party.gold
+	var remaining_gold: float = party.gold
 	for item_id: String in item_ids:
 		var config := _market_manager.get_goods_config(item_id)
 		if config == null or not config.can_buy() \
-				or not config.is_available_at(settlement.settlement_type):
+				or not _market_manager.is_goods_available_at(config, settlement):
 			continue
-		if config.buy_price <= 0:
-			continue
-		var affordable: int = int(
-			floor(float(remaining_gold) / float(config.buy_price))
+		# 村庄价格随库存变化，必须按当前单价估算预算，不能读静态 buy_price。
+		var unit_price: float = _market_manager.get_buy_price(
+			settlement.settlement_id, item_id
 		)
+		if unit_price <= 0.0:
+			continue
+		var affordable: int = int(floor(remaining_gold / unit_price))
 		var quantity: int = mini(
 			int(needs[item_id]),
 			mini(market.get_stock(item_id), affordable)
@@ -582,7 +587,7 @@ func _execute_supply_purchase(
 		if quantity <= 0:
 			continue
 		purchases[item_id] = quantity
-		remaining_gold -= quantity * config.buy_price
+		remaining_gold -= float(quantity) * unit_price
 	if purchases.is_empty():
 		return false
 

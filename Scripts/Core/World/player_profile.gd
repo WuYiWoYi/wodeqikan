@@ -5,7 +5,8 @@ extends RefCounted
 ## 物品存储委托给 InventoryData：普通物品按数量堆叠，马匹按独立实例保存。
 ## inventory / item_counts 作为兼容访问入口保留，旧调用方无需改动。
 
-var gold: int = 0
+## 金币允许小数；所有写入统一经过 GoldUtils 归一到两位小数。
+var gold: float = 0.0
 var _data: InventoryData = InventoryData.new()
 
 ## 出现过的物品 ID 列表（兼容旧存档与 UI 枚举）。
@@ -23,22 +24,23 @@ var item_counts: Dictionary:
 		_data.stackable_counts = value
 
 
-func add_gold(amount: int) -> void:
-	if amount <= 0:
+func add_gold(amount: float) -> void:
+	if amount <= 0.0:
 		return
-	gold = maxi(0, gold + amount)
+	gold = GoldUtils.normalize(gold + amount)
 
 
-## 查询金币是否足够。
-func can_afford(amount: int) -> bool:
-	return amount >= 0 and gold >= amount
+## 查询金币是否足够；允许小数金额。
+func can_afford(amount: float) -> bool:
+	return GoldUtils.can_afford(gold, amount)
 
 
 ## 扣除金币；数量非法或余额不足时返回 false，不修改金币。
-func spend_gold(amount: int) -> bool:
-	if amount <= 0 or gold < amount:
+func spend_gold(amount: float) -> bool:
+	var normalized: float = GoldUtils.normalize(amount)
+	if normalized <= 0.0 or not GoldUtils.can_afford(gold, normalized):
 		return false
-	gold -= amount
+	gold = GoldUtils.normalize(gold - normalized)
 	return true
 
 
@@ -102,13 +104,46 @@ func restore_mount_instances(instances: Array[MountInstanceData]) -> void:
 	_data.restore_mount_instances(instances)
 
 
+func add_item_instance(instance: ItemInstanceData) -> bool:
+	return _data.add_item_instance(instance)
+
+
+func remove_item_instance(instance_id: String) -> ItemInstanceData:
+	return _data.remove_item_instance(instance_id)
+
+
+func take_item_instance(item_id: String) -> ItemInstanceData:
+	return _data.take_item_instance(item_id)
+
+
+func get_item_instance(instance_id: String) -> ItemInstanceData:
+	return _data.get_item_instance(instance_id)
+
+
+func has_item_instance(instance_id: String) -> bool:
+	return _data.has_item_instance(instance_id)
+
+
+func get_item_instances(item_id: String = "") -> Array[ItemInstanceData]:
+	return _data.get_item_instances(item_id)
+
+
+func get_all_item_instances() -> Array[ItemInstanceData]:
+	return _data.get_all_item_instances()
+
+
+func get_item_instance_count(item_id: String = "") -> int:
+	return _data.get_item_instance_count(item_id)
+
+
 ## 交易回滚专用：整体恢复背包，不生成新实例。
 func restore_inventory_state(
 	counts: Dictionary,
 	inventory_list: Array,
-	instances: Array
+	instances: Array,
+	item_instance_list: Array = []
 ) -> void:
-	_data.restore_state(inventory_list, counts, instances)
+	_data.restore_state(inventory_list, counts, instances, item_instance_list)
 
 
 func migrate_legacy_mount_counts() -> void:
@@ -119,7 +154,7 @@ func migrate_legacy_mount_counts() -> void:
 func restore_from(other: PlayerProfile) -> void:
 	if other == null:
 		return
-	gold = maxi(0, other.gold)
+	gold = GoldUtils.normalize(other.gold)
 	_data = other._data
 
 
@@ -139,12 +174,18 @@ func to_dict() -> Dictionary:
 		if instance != null:
 			instances.append(instance.to_dict())
 	payload["mount_instances"] = instances
+	var item_instance_payloads: Array[Dictionary] = []
+	for instance: ItemInstanceData in _data.item_instances:
+		if instance != null:
+			item_instance_payloads.append(instance.to_dict())
+	payload["item_instances"] = item_instance_payloads
 	return payload
 
 
 static func from_dict(data: Dictionary) -> PlayerProfile:
 	var profile := PlayerProfile.new()
-	profile.gold = maxi(0, int(data.get("gold", 0)))
+	profile.gold = GoldUtils.normalize(float(data.get("gold", 0.0)))
 	profile._data = InventoryData.from_dict(data)
 	profile._data.migrate_legacy_mount_counts()
+	profile._data.migrate_legacy_instance_counts()
 	return profile

@@ -491,7 +491,9 @@ func _current_player_prisoners() -> Array[String]:
 func _refresh_gold() -> void:
 	if _context == null:
 		return
-	_gold_label.text = "金币：%d" % _context.player_profile.gold
+	_gold_label.text = "金币：%s" % GoldUtils.format(
+		float(_context.player_profile.gold)
+	)
 
 
 func _refresh_sell_view() -> void:

@@ -6,6 +6,78 @@
 
 ---
 
+## 2026-11-28 · 村庄经济升级：特产、动态库存、比例价格、每日补货与牲畜宰杀
+
+### 变更
+
+- **价格体系**：`MarketGoodsConfig` 改为村庄标准价 + 紧缺/富足区间，购买价只按“当前库存 ÷ 动态上限”四段平滑插值，钳制配置区间、不随机；城镇仍用静态 `buy_price`，收购价全局静态。面包/草料/木材/猪/肉/鱼/铁/盐/马共 9 种商品数值按需求表写入 `.tres`。
+- **特产**：新增 `VillageSpecialtyConfig` 与 `Data/Settlements/village_specialties.tres`，按稳定 `map_key` 配置 35 个村庄的特产；`SettlementData` 新增 `map_key`，旧存档按显示名回退补齐。村庄商品 = 基础保底 + 本村特产 + 关联产出。
+- **动态库存**：上限 = `floor((base_floor_per_100_households + stock_cap_per_100_households) × households ÷ 100)`；面包保底 100/百户、草料 50/百户；取消目标库存、户数系数、日内缓慢恢复与恢复进度。
+- **每日补货**：每日 00:00 按上限 25% 补货（至少 1、不超过剩余空间、单日一次、跨日补算）；暂停与 `DESTROYED` 村庄不补，破坏后保留库存。
+- **猪与肉**：猪使用通用 `ItemInstanceData` 非堆叠实例，市场/背包逐件交易；猪特产的 `associated_item_id = "meat"` 使肉独立出现在同村市场（独立库存/上限/价格/补货）。
+- **牲畜宰杀**：新增 `SlaughterManager`，背包面板可宰杀猪或马，移除具体实例并获得 20 单位肉；确认文案与按钮按需求实现，失败恢复实例。
+- **小数金币**：`PlayerProfile.gold` / `PartyData.gold` 改为 `float`，新增 `GoldUtils` 统一两位小数、比较与显示；交易总额、日志、UI 与存档全部改为小数。
+- **交易**：`execute_player_trade()` / `execute_npc_trade()` 新增 `purchase_item_instance_ids` / `sale_item_instance_ids`；旧式数量传参会转换为实例；失败回滚覆盖商品实例。
+- **大地图 UI**：村庄名称标签右侧显示特产图标（UI 层、忽略点击、左侧等宽占位保持名称/旗帜中心不变）。
+- **存档**：Schema v10 → v11；市场新增 `item_instances`，地点新增 `map_key` / `economic_state`，金币改为小数；删除 `recovery_progress`。旧存档补默认值，不重置库存、不补发补货。
+
+### 验证
+
+- 重写 `village_stock_test`，更新 `market_manager_test`、`town_market_ui_test`、`ai_supply_purchase_test` 与 Schema v11 相关断言。
+- **未运行**：本轮环境没有可用的 Godot 可执行文件，测试未实际执行。
+
+### 文档
+
+- 更新 `Inventory_Economy_System.md`、`Settlement_System.md`、`Save_System.md`、`Current_Status.md`。
+- 同日早先的“村庄保底库存、库存上限、缓慢恢复与每日产出”条目已过时，仅作历史记录保留。
+
+---
+
+## 2026-11-28 · 村庄保底库存、库存上限、缓慢恢复与每日产出（已过时）
+
+### 变更
+
+- **村庄库存机制**：`MarketManager` 新增村庄库存目标、上限、日内缓慢恢复与每日 00:00 产出；面包目标 100、草料目标 50，由 `Data/Market/*.tres` 配置。
+- **上限与户数**：`SettlementData` 新增 `households`；上限 = 目标 + ceil(户数 × 系数)。新游戏暂以人口作为户数占位，户数变化只重算上限，不清空库存。
+- **恢复与产出**：`WorldSimulation` 每 tick 调用 `MarketManager.tick_village_stock()`。缓慢恢复按单位/游戏日连续累加；每日产出按缺口 30% 补充（至少 1、单日一次、跨日补算、暂停不结算）。
+- **交易**：玩家购买仍受实际库存限制；出售给村庄时超出上限的部分不进入库存，玩家按原规则获得金币；交易价格查询统一走 `MarketManager.get_buy_price()` / `get_sell_price()`。
+- **特产**：`SettlementData.village_specialty_item_ids` 按地点指定特产；目标/上限与购买价倍率来自 `MarketGoodsConfig`。当前默认无特产，具体数据待配置。
+- **存档**：新增 `households`、`village_specialty_item_ids`、`daily_production_day`、`recovery_progress`；均为安全默认增量字段，不提升 Schema（仍为 v10）。旧存档读档后首个 tick 以当前日为产出起点，不补发历史产出。
+
+### 验证
+
+- 新增并通过：`village_stock_test`（初始库存/目标/上限、户数变化、购买与库存不足、缓慢恢复、每日产出与单日去重、旧存档起点、出售上限、特产价格、序列化）。
+- 回归通过：`market_manager_test`、`save_migration_test`、`save_persistence_test`、`town_market_ui_test`、`settlement_interaction_test`、`ai_supply_purchase_test`。
+- `--import` 无脚本错误。
+
+### 文档
+
+- 更新 `Inventory_Economy_System.md`、`Settlement_System.md`、`Save_System.md`、`Current_Status.md`。
+
+---
+
+## 2026-11-27 · 2 级头盔样式 5 停用与多拉曼贵族专属头盔
+
+### 变更
+
+- **2 级头盔随机池**：从 `appearance_config.tres` 移除样式 5；随机、初始化与刷新装备不再生成该样式，1/2/3 级其他样式不变。样式 5 美术资源按要求保留，不参与随机。
+- **家族文化字段**：`FamilyConfig` 新增静态 `culture_id`，18 个 `Data/Families/*.tres` 按王国民族补齐（多拉曼/布吉多/洛里斯/蒙卡）；只服务外观映射，不进入存档。
+- **多拉曼贵族头盔**：`AppearanceConfig` 新增 `noble_culture_helmet_texture_paths` 映射，当前 `CULTURE_DORAMAN` → `头盔_3级_多拉曼盔.png`；`WorldContext` 注册只读文化解析器，`UnitVisual` 对贵族单位替换头盔并隐藏原缨饰。
+- **优先级**：国王盔 > 贵族文化盔 > 普通外观头盔 / 装备 `HEAD`；覆盖不写入 `appearance`、装备或存档，旧存档重建表现即可生效。
+- **范围隔离**：多拉曼普通士兵、其他文化贵族、其他等级头盔与缨饰规则不变。
+
+### 验证
+
+- 新增并通过：`noble_helmet_appearance_test`（多拉曼贵族/玩家贵族/普通士兵/洛里斯贵族/国王优先级/2 级随机池）。
+- 更新并通过：`family_appearance_test`、`king_helmet_appearance_test`。
+- `--import` 无脚本错误。
+
+### 文档
+
+- 更新 `Unit_System.md` 第 10 节。
+
+---
+
 ## 2026-11-27 · 家族领地所有权、17 家族贵族初始化与政治体系核定
 
 ### 变更

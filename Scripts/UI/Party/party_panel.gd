@@ -68,7 +68,9 @@ func refresh() -> void:
 	]
 	_speed_label.text = "移动速度：%.1f" % _party.movement_speed
 	_state_label.text = "部队状态：%s" % _battle_state_text(_party.battle_state)
-	_gold_label.text = "金币：%d" % _context.player_profile.gold
+	_gold_label.text = "金币：%s" % GoldUtils.format(
+		float(_context.player_profile.gold)
+	)
 	_wage_label.text = "每日工资：%d" % _context.party_manager.get_total_wage(
 		_party.party_id
 	)

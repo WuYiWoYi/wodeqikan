@@ -35,7 +35,7 @@ func _run() -> void:
 	_check(WorldInitializer.create_new_world(context), "初始化世界")
 	if not context.is_valid_world():
 		return
-	_check(SaveData.CURRENT_SCHEMA_VERSION == 10, "存档 Schema 版本为 10")
+	_check(SaveData.CURRENT_SCHEMA_VERSION == 11, "存档 Schema 版本为 11")
 
 	var player := context.get_player_party()
 	var bandit := _find_party_by_ai(context, PartyData.PartyAIType.BANDIT)
@@ -150,7 +150,7 @@ func _run() -> void:
 
 	var log_count_before_save: int = context.world_log_manager.get_entry_count()
 	var player_members_after_battle: int = player.member_unit_ids.size()
-	var saved_gold: int = context.player_profile.gold
+	var saved_gold: float = context.player_profile.gold
 	var saved_inventory: Array[String] = context.player_profile.inventory.duplicate()
 	var saved_counts: Dictionary = context.player_profile.item_counts.duplicate(true)
 	var saved_veteran_hp: int = veteran.current_hp if veteran != null else 0
@@ -171,7 +171,7 @@ func _run() -> void:
 	_check(loaded != null, "读取成功")
 	if loaded == null:
 		return
-	_check(loaded.schema_version == 10, "读回的 Schema 为 10")
+	_check(loaded.schema_version == 11, "读回的 Schema 为 11")
 
 	var restored := WorldContext.new()
 	restored.name = "SavePersistenceRestoredContext"

@@ -2,7 +2,7 @@
 
 **状态：** 阶段 8 已交付；2026-11-27 补全为六方势力（统治家族 + 附庸家族 + 民族），并改为家族独占领地所有权、17 家族 51 名指定贵族
 **相关代码：** `Scripts/Entities/Noble/`、`Scripts/Entities/House/`、`Scripts/Entities/Kingdom/`、`Scripts/Core/World/noble_manager.gd`、`house_manager.gd`、`kingdom_manager.gd`、`faction_manager.gd`、`world_initializer.gd`
-**存档：** Schema v10（政治字段自 v5 起为 `nobles` / `houses` / `kingdoms`，保留 `lords` 兼容副本；v10 追加 `people_name` 等可选字段）
+**存档：** Schema v11（政治字段自 v5 起为 `nobles` / `houses` / `kingdoms`，保留 `lords` 兼容副本；v10 追加 `people_name` 等可选字段；v11 为金币与村庄经济字段）
 
 ---
 

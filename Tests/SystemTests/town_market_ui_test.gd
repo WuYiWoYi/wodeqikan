@@ -131,7 +131,9 @@ func _test_inventory_panel() -> void:
 	var gold_label := inventory.find_child("InventoryGoldLabel", true, false) as Label
 	_check(
 		gold_label != null
-			and gold_label.text == "当前金币：%d" % _context.player_profile.gold,
+			and gold_label.text == "当前金币：%s" % GoldUtils.format(
+				float(_context.player_profile.gold)
+			),
 		"背包金币与实际金币一致"
 	)
 	var horse_item := inventory.find_child(
@@ -196,17 +198,20 @@ func _test_village_market_ui() -> void:
 	var stock_before: int = _context.market_manager.get_stock(
 		_village.settlement_id, "bread"
 	)
-	var gold_before: int = _context.player_profile.gold
+	var gold_before: float = _context.player_profile.gold
 	_press_button("MarketBuyButton_bread_10")
 	_check(_market.get_preview_purchase_count("bread") == 10, "批量按钮预览购买 10 份面包")
-	_check(_market.get_purchase_total() == 20, "面包批量购买总价为 20")
+	_check(
+		is_equal_approx(_market.get_purchase_total(), 3.0),
+		"面包批量购买按动态单价 0.3 计算，总价 3.0"
+	)
 	_check(
 		_context.player_profile.get_item_count("bread") == bread_before,
 		"村庄交易预览不修改真实背包"
 	)
 	_press_button("MarketResetButton")
 	_check(_market.get_preview_purchase_count("bread") == 0, "重置交易恢复打开时状态")
-	_check(_market.get_purchase_total() == 0, "重置后金额归零")
+	_check(_market.get_purchase_total() == 0.0, "重置后金额归零")
 
 	_press_button("MarketBuyButton_bread_10")
 	_press_button("MarketConfirmButton")
@@ -219,7 +224,10 @@ func _test_village_market_ui() -> void:
 			== stock_before - 10,
 		"村庄确认后市场库存减少 10"
 	)
-	_check(_context.player_profile.gold == gold_before - 20, "村庄确认后扣款正确")
+	_check(
+		is_equal_approx(_context.player_profile.gold, gold_before - 3.0),
+		"村庄确认后按 0.3 单价扣款 3.0"
+	)
 	_press_button("MarketCancelButton")
 	_close_settlement_panel()
 
@@ -257,14 +265,14 @@ func _test_open_market_and_preview() -> void:
 		_town.settlement_id, HORSE_ID
 	)
 	var count_before: int = _context.player_profile.get_item_count(HORSE_ID)
-	var gold_before: int = _context.player_profile.gold
+	var gold_before: float = _context.player_profile.gold
 	# 前面的村庄交易已合法写入日志；这里只验证预览不新增日志。
 	var log_before: int = _context.world_log_manager.get_entry_count()
 
 	_press_first("MarketBuyButton_%s_*" % HORSE_ID)
 	_check(_market.get_preview_purchase_count(HORSE_ID) == 1, "购买预览数量增加 1")
-	_check(_market.get_purchase_total() == 100, "购买总价实时计算为 100")
-	_check(_market.get_net_amount() == 100, "净交易金额实时计算为 100")
+	_check(_market.get_purchase_total() == 150.0, "购买总价实时计算为 150")
+	_check(_market.get_net_amount() == 150.0, "净交易金额实时计算为 150")
 	_check(_market.is_confirm_enabled(), "金币充足时可以确认交易")
 
 	# 预览不得提前修改任何真实数据。
@@ -321,7 +329,7 @@ func _test_confirm_and_log() -> void:
 		_town.settlement_id, HORSE_ID
 	)
 	var count_before: int = _context.player_profile.get_item_count(HORSE_ID)
-	var gold_before: int = _context.player_profile.gold
+	var gold_before: float = _context.player_profile.gold
 	var log_before: int = _context.world_log_manager.get_entry_count()
 
 	_press_first("MarketBuyButton_%s_*" % HORSE_ID)
@@ -335,7 +343,7 @@ func _test_confirm_and_log() -> void:
 		_context.player_profile.get_item_count(HORSE_ID) == count_before + 1,
 		"确认后玩家背包增加 1"
 	)
-	_check(_context.player_profile.gold == gold_before - 100, "确认后扣除 100 金币")
+	_check(_context.player_profile.gold == gold_before - 150.0, "确认后扣除 150 金币")
 	_check(_market.visible, "确认交易后市场保持打开")
 	_check(_market.get_preview_purchase_count(HORSE_ID) == 0, "确认后清空交易预览")
 	_check(not _market.is_confirm_enabled(), "确认后确认按钮重新禁用")
@@ -350,7 +358,7 @@ func _test_confirm_and_log() -> void:
 	)
 	_check(
 		last_entry.text.contains("购买了普通战马 ×1")
-			and last_entry.text.contains("支付 100 金币"),
+			and last_entry.text.contains("支付 150 金币"),
 		"交易日志记录物品与金币变化"
 	)
 
@@ -373,7 +381,7 @@ func _test_gold_insufficient() -> void:
 	_context.player_profile.gold = 10
 	_market.refresh()
 	_press_first("MarketBuyButton_%s_*" % HORSE_ID)
-	_check(_market.get_net_amount() == 100, "金币不足时仍显示应付金额")
+	_check(_market.get_net_amount() == 150.0, "金币不足时仍显示应付金额")
 	_check(not _market.is_confirm_enabled(), "金币不足时禁用确认交易")
 	_check(_market.get_status_text().contains("金币不足"), "界面明确提示金币不足")
 	_check(
@@ -391,7 +399,7 @@ func _test_save_reload_stock() -> void:
 	var stored_stock: int = _context.market_manager.get_stock(
 		_town.settlement_id, HORSE_ID
 	)
-	var stored_gold: int = _context.player_profile.gold
+	var stored_gold: float = _context.player_profile.gold
 	var stored_count: int = _context.player_profile.get_item_count(HORSE_ID)
 	_check(SaveManager.save_game(TEST_SLOT, _context.to_save_data()) == OK, "市场存档成功")
 	var loaded := SaveManager.load_game(TEST_SLOT)

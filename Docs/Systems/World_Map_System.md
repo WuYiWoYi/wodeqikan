@@ -552,7 +552,7 @@ WorldSimulation 更新 PartyData.world_position
 
 > 阶段 6 后续已改为原始村庄美术 + 徽章/名称组合，见第 12 节。
 
-- `SettlementIcon` 不再创建 `NameLabel`；`SettlementNameTag` 只显示文本。
+- `SettlementIcon` 不再创建 `NameLabel`；`SettlementNameTag` 显示家族徽章、地点名称，并在村庄特产存在时于名称右侧附加小图标。
 - `SettlementNameTag` 位于大地图固定 UI 层，每帧跟随地点世界坐标转换后的屏幕位置；文字大小不受缩放影响。
 - 名称水平居中，整体位于圆形标记正上方；间距 = 标记半径 × 相机缩放 + 10 屏幕像素，不会显示在标记下方。
 - 每个标签按 `SettlementData.settlement_id` 独立创建；同名村庄不会合并。
@@ -596,7 +596,7 @@ WorldSimulation 更新 PartyData.world_position
 | 元素 | 层级 | 职责 |
 |---|---|---|
 | `SettlementIcon` | 世界层（`world_entities`） | 原始村庄/城镇/城堡美术，统一按 `BUILDING_ART_SCALE = 1.5` 放大绘制；节点位置、节点缩放与点击判定不变 |
-| `SettlementNameTag` | 屏幕 UI 层（`SettlementNameLayer`） | 固定 240×36 的徽章 + 名称组合 |
+| `SettlementNameTag` | 屏幕 UI 层（`SettlementNameLayer`） | 固定 240×36 的徽章 + 名称组合（村庄可带 18×18 特产图标） |
 | `SettlementNameTag.FamilyBadge` | 名称组合内部 | 左侧圆形家族徽章，颜色来自 `FamilyConfig` |
 
 - 世界层不再绘制圆形村庄标记或旗帜，也不再携带名称。
@@ -743,7 +743,7 @@ WorldSimulation 更新 PartyData.world_position
 - `SettlementNameTag` 的圆形徽章优先读取 `SettlementData.family_id` 对应的 `FamilyConfig`：存在家族时显示家族旗帜与主色。
 - 地点没有家族归属时，继续使用原有建筑美术与名称，不生成空白徽章。
 - 每帧检查 `tag.get_bound_family_id()` 与当前 `settlement.family_id`，归属变化后重建徽章，避免继续显示旧家族旗帜。
-- 名称标签整体忽略鼠标；底板只包裹“徽章 + 名称”内容，尺寸随内容变化，不改变地点点击/悬浮判定。
+- 名称标签整体忽略鼠标；底板包裹“徽章 + 名称 + 可选特产图标”，尺寸随内容变化，不改变地点点击/悬浮判定。特产图标用左侧等宽占位平衡，名称与徽章的中心位置不变。
 - 圆形徽章使用 `CLIP_CHILDREN_AND_DRAW`：父节点自身的圆形底盘与边框必须绘制，同时把旗帜裁进圆内；使用 `CLIP_CHILDREN_ONLY` 会隐藏底盘，只剩图标与名称。
 
 ### 16.2 地点下方停留部队旗帜条

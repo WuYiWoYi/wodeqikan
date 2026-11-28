@@ -270,7 +270,7 @@ IdentitySelect (Control，全屏)
 
 - `WorldContext.to_save_data().player` 追加可选字段 `identity_id`、`identity_category_id`、`culture_id`、`identity_name`。
 - 读档恢复上述字段；旧存档缺少这些字段时保持为空，不影响加载。
-- `schema_version` 保持 v10：字段为可选追加，不改变既有结构语义。
+- 这些身份字段为可选追加，接入时未单独提升 Schema（当时为 v10）；当前 Schema 为 v11，字段随档保存。
 
 ## 9. 瓦伊拉家族美术资源
 

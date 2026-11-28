@@ -411,11 +411,15 @@ static func create_new_world(
 			settlement_type as SettlementData.SettlementType,
 			value.get("world_position", Vector2.ZERO),
 			economy.x,
-			economy.y
+			economy.y,
+			key
 		)
 		if settlement == null:
 			push_error("地点创建失败: %s" % key)
 			return false
+		# 特产与户数来自静态配置，只影响村庄经济，不写入地图定义。
+		if context.village_specialty_config != null:
+			context.village_specialty_config.apply_to_settlement(settlement, key)
 		settlement.family_id = str(value.get("family", ""))
 		if settlement_type == SettlementData.SettlementType.VILLAGE:
 			settlement.scene_path = DEFAULT_VILLAGE_SCENE_PATH
@@ -1416,6 +1420,7 @@ static func _create_settlement(
 	world_position: Vector2,
 	population: int,
 	prosperity: int,
+	map_key: String = "",
 	faction_id: String = LOCAL_FACTION_ID
 ) -> SettlementData:
 	return context.settlement_manager.create_settlement(
@@ -1424,5 +1429,6 @@ static func _create_settlement(
 		world_position,
 		faction_id,
 		population,
-		prosperity
+		prosperity,
+		map_key
 	)

@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="VillageSpecialtyConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/village_specialty_config.gd" id="1_villagespecialtyconfig"]
+
+[resource]
+script = ExtResource("1_villagespecialtyconfig")
+settlement_keys = Array[String](["bafle", "odester", "osway", "ektor_village", "ogavina", "kasman", "sagatos", "berk_na", "lidon", "duofer", "taina", "borvalas", "sados", "valemon", "achi", "krika", "vaila", "aderida", "frani", "kao", "michi", "laris", "dindani", "konlia", "betenu", "bari", "doro", "moxixi", "loriak", "os", "bunis", "fava", "brachy", "riban", "rosvik"])
+display_names = Array[String](["巴夫勒", "奥德斯特", "奥斯威", "埃克托", "奥加维纳", "卡斯曼", "萨加托斯", "伯克纳", "里唐", "多弗", "泰纳", "伯瓦拉斯", "萨多斯", "瓦勒蒙", "亚奇", "克里卡", "瓦伊拉", "亚德里达", "弗拉尼", "卡奥", "米奇", "拉里斯", "丁达尼", "康利亚", "贝特努", "巴里", "多罗", "墨西西", "洛里亚克", "欧斯", "布尼斯", "法瓦", "布拉奇", "里班", "罗斯维克"])
+specialty_item_ids = Array[String](["mount_horse_01", "fodder", "pig", "mount_horse_01", "bread", "bread", "fodder", "bread", "fish", "mount_horse_01", "mount_horse_01", "bread", "salt", "bread", "salt", "mount_horse_01", "fodder", "bread", "fodder", "pig", "bread", "mount_horse_01", "iron", "fish", "iron", "iron", "fodder", "wood", "fish", "fodder", "mount_horse_01", "bread", "wood", "fish", "pig"])
+households = Array[int]([])

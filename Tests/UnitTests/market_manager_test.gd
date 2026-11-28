@@ -48,8 +48,10 @@ func _run() -> void:
 
 	_check(_markets.get_stock(_town.settlement_id, HORSE_ID) == 3, "新城镇初始化 3 匹战马")
 	_check(_markets.get_market(_village.settlement_id) != null, "村庄拥有补给市场")
-	_check(_markets.get_stock(_village.settlement_id, BREAD_ID) == 50, "村庄初始化面包库存")
-	_check(_markets.get_stock(_village.settlement_id, FODDER_ID) == 50, "村庄初始化草料库存")
+	# 村庄初始库存 = 动态上限 × 初始比例 50%：
+	# 面包上限 200(特产位) + 100(保底) = 300 → 150；草料 100 + 50 = 150 → 75。
+	_check(_markets.get_stock(_village.settlement_id, BREAD_ID) == 150, "村庄初始化面包库存")
+	_check(_markets.get_stock(_village.settlement_id, FODDER_ID) == 75, "村庄初始化草料库存")
 	_check(_markets.get_stock(_village.settlement_id, HORSE_ID) == 0, "村庄不卖城镇限定马匹")
 	_check(_markets.get_market(_castle.settlement_id) == null, "城堡没有市场")
 	_check(_markets.get_stock(_town.settlement_id, TOKEN_ID) == 5, "初始化普通物品库存")
@@ -107,9 +109,9 @@ func _test_village_supply_trade() -> void:
 	_check(bool(result.get("success", false)), "村庄可以购买面包与草料")
 	_check(_profile.get_item_count(BREAD_ID) == 10, "购买后获得面包")
 	_check(_profile.get_item_count(FODDER_ID) == 10, "购买后获得草料")
-	_check(_markets.get_stock(_village.settlement_id, BREAD_ID) == 40, "村庄面包库存减少")
-	_check(_markets.get_stock(_village.settlement_id, FODDER_ID) == 40, "村庄草料库存减少")
-	_check(_profile.gold == 950, "村庄补给按单价结算")
+	_check(_markets.get_stock(_village.settlement_id, BREAD_ID) == 140, "村庄面包库存减少")
+	_check(_markets.get_stock(_village.settlement_id, FODDER_ID) == 65, "村庄草料库存减少")
+	_check(_profile.gold == 1000.0 - 3.0 - 5.0, "村庄补给按动态单价结算")
 	_check(_log.get_entry_count() == log_before + 1, "村庄玩家交易写入世界日志")
 
 	result = _markets.execute_player_trade(
@@ -117,7 +119,7 @@ func _test_village_supply_trade() -> void:
 	)
 	_check(bool(result.get("success", false)), "村庄可以收购面包")
 	_check(_profile.get_item_count(BREAD_ID) == 6, "出售后玩家面包减少")
-	_check(_markets.get_stock(_village.settlement_id, BREAD_ID) == 44, "出售后村庄库存恢复")
+	_check(_markets.get_stock(_village.settlement_id, BREAD_ID) == 144, "出售后村庄库存恢复")
 
 
 func _test_sale() -> void:
@@ -346,6 +348,9 @@ func _setup_fixture() -> bool:
 	_village = _settlements.create_settlement(
 		"测试村庄", SettlementData.SettlementType.VILLAGE, Vector2(200.0, 100.0)
 	)
+	_village.households = 100
+	# 测试村庄以面包、草料为主特产，用于验证叠加与动态库存。
+	_village.village_specialty_item_ids = [BREAD_ID, FODDER_ID]
 	_castle = _settlements.create_settlement(
 		"测试城堡", SettlementData.SettlementType.CASTLE, Vector2(300.0, 100.0)
 	)
@@ -390,22 +395,36 @@ func _register_goods(manager: MarketManager) -> bool:
 
 	var bread_goods := MarketGoodsConfig.new()
 	bread_goods.item_id = BREAD_ID
-	bread_goods.buy_price = 2
-	bread_goods.sell_price = 1
+	bread_goods.buy_price = 2.0
+	bread_goods.sell_price = 1.0
 	bread_goods.initial_stock = 50
 	bread_goods.scope = MarketGoodsConfig.MarketScope.VILLAGE_AND_TOWN
 	bread_goods.batch_purchase_amounts = [10, 50]
+	bread_goods.village_buy_base_price = 0.3
+	bread_goods.village_scarcity_price_min = 0.3
+	bread_goods.village_scarcity_price_max = 1.5
+	bread_goods.village_abundance_price_min = 0.1
+	bread_goods.village_abundance_price_max = 0.3
+	bread_goods.stock_cap_per_100_households = 200
+	bread_goods.base_floor_per_100_households = 100
 	if not manager.register_goods_config(bread_goods):
 		_check(false, "注册村庄面包商品")
 		return false
 
 	var fodder_goods := MarketGoodsConfig.new()
 	fodder_goods.item_id = FODDER_ID
-	fodder_goods.buy_price = 3
-	fodder_goods.sell_price = 1
+	fodder_goods.buy_price = 3.0
+	fodder_goods.sell_price = 1.0
 	fodder_goods.initial_stock = 50
 	fodder_goods.scope = MarketGoodsConfig.MarketScope.VILLAGE_AND_TOWN
 	fodder_goods.batch_purchase_amounts = [10, 50]
+	fodder_goods.village_buy_base_price = 0.5
+	fodder_goods.village_scarcity_price_min = 0.5
+	fodder_goods.village_scarcity_price_max = 2.0
+	fodder_goods.village_abundance_price_min = 0.2
+	fodder_goods.village_abundance_price_max = 0.5
+	fodder_goods.stock_cap_per_100_households = 100
+	fodder_goods.base_floor_per_100_households = 50
 	if not manager.register_goods_config(fodder_goods):
 		_check(false, "注册村庄草料商品")
 		return false

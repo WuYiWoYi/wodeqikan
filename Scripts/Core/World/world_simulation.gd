@@ -14,6 +14,8 @@ var _fief_recruitment_manager: FiefRecruitmentManager = null
 var _adventurer_recruitment_manager: AdventurerRecruitmentManager = null
 ## 阶段 12：每日补给消耗必须由统一的 SupplyManager 在 WorldTime 日边界结算。
 var _supply_manager: SupplyManager = null
+## 村庄库存的每日 00:00 补货；只依赖 WorldTime，暂停不推进。
+var _market_manager: MarketManager = null
 ## 阶段 13：伤兵治疗由 WorldTime 整小时边界结算，暂停时不会推进。
 var _wounded_healing_manager: WoundedHealingManager = null
 ## 阶段 13：领主赎回等待只按 WorldTime 推进，暂停时不会提前生成请求。
@@ -37,7 +39,8 @@ func bind(
 	wounded_healing_manager: WoundedHealingManager = null,
 	lord_ransom_manager: LordRansomManager = null,
 	mercenary_manager: MercenaryManager = null,
-	captivity_manager: CaptivityManager = null
+	captivity_manager: CaptivityManager = null,
+	market_manager: MarketManager = null
 ) -> void:
 	_unit_manager = unit_manager
 	_party_manager = party_manager
@@ -52,6 +55,7 @@ func bind(
 	_lord_ransom_manager = lord_ransom_manager
 	_mercenary_manager = mercenary_manager
 	_captivity_manager = captivity_manager
+	_market_manager = market_manager
 
 
 func on_world_tick(fixed_delta: float) -> void:
@@ -80,6 +84,11 @@ func on_world_tick(fixed_delta: float) -> void:
 	# 放在 AI 之前，保证 NPC 决策看到的是当天结算后的补给状态。
 	if _supply_manager != null:
 		_supply_manager.update_daily()
+
+	# 村庄库存：跨日每日补货（无缓慢恢复）。放在 AI 之前，
+	# 保证 NPC 采购决策看到的是本 tick 已补货的库存。
+	if _market_manager != null:
+		_market_manager.tick_village_stock(fixed_delta)
 
 	# 伤兵治疗同样只依赖 WorldTime；放在战斗/遭遇处理前，
 	# 避免同一 tick 内刚产生的伤兵立刻获得整小时治疗。

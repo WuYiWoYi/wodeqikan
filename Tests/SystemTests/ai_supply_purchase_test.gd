@@ -96,6 +96,8 @@ func _setup_fixture() -> bool:
 	_village = _settlements.create_settlement(
 		"测试村庄", SettlementData.SettlementType.VILLAGE, Vector2(100.0, 100.0)
 	)
+	# 动态库存按户数计算；0 户会得到 0 库存，AI 将无法补给。
+	_village.households = 100
 	_town = _settlements.create_settlement(
 		"测试城镇", SettlementData.SettlementType.TOWN, Vector2(500.0, 100.0)
 	)
@@ -162,7 +164,10 @@ func _test_purchase_uses_party_gold_and_stock() -> void:
 	_ai.tick(AIManager.PARTY_DECISION_INTERVAL)
 
 	_check(_party.get_item_count("bread") == 14, "NPC 按 7 天储备购买 14 份面包")
-	_check(_party.gold == 72, "采购从 NPC 自有金币扣除")
+	_check(
+		is_equal_approx(_party.gold, 100.0 - 14.0 * 0.3),
+		"采购按村庄动态单价 0.3 从 NPC 自有金币扣除"
+	)
 	_check(
 		_market.get_stock(_village.settlement_id, "bread") == stock_before - 14,
 		"采购减少村庄市场库存"

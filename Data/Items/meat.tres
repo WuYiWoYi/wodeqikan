@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="ItemConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Config/item_config.gd" id="1_itemconfig"]
+
+[resource]
+script = ExtResource("1_itemconfig")
+item_id = "meat"
+display_name = "肉"
+description = "猪特产村庄的关联产出。宰杀猪或马可获得 20 单位肉。"
+item_type = 0
+icon_texture_path = "res://art/我的骑砍临时美术/正式美术_其他/道具物品贴图/道具贴图_肉.png"
+is_stackable = true
+batch_purchase_amounts = Array[int]([10, 50])

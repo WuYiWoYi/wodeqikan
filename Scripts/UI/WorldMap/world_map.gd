@@ -896,7 +896,11 @@ func _build_settlement_name_tags() -> void:
 		tag.name = "SettlementNameTag_%s" % settlement.settlement_id
 		_settlement_name_layer.add_child(tag)
 		# 徽章读取地点实际家族归属；无家族时仅显示名称。
-		tag.setup(settlement, _get_family_config(settlement.family_id))
+		tag.setup(
+			settlement,
+			_get_family_config(settlement.family_id),
+			_get_specialty_icon_path(settlement)
+		)
 		_settlement_name_tags[settlement.settlement_id] = tag
 
 		# 每个地点独立的停留部队旗帜条；初始为空且隐藏。
@@ -922,9 +926,15 @@ func _update_settlement_name_tags() -> void:
 		) as SettlementNameTag
 		if tag == null:
 			continue
-		# 建筑所属家族变化时重建徽章，避免继续显示旧家族旗帜。
-		if tag.get_bound_family_id() != settlement.family_id:
-			tag.setup(settlement, _get_family_config(settlement.family_id))
+		# 建筑所属家族或村庄特产变化时重建，避免继续显示旧旗帜/图标。
+		var specialty_icon_path: String = _get_specialty_icon_path(settlement)
+		if tag.get_bound_family_id() != settlement.family_id \
+				or tag.get_specialty_icon_path() != specialty_icon_path:
+			tag.setup(
+				settlement,
+				_get_family_config(settlement.family_id),
+				specialty_icon_path
+			)
 		# 名称文本/徽章尺寸变化后同步半透明底板。
 		tag.update_background_layout()
 		var screen_position: Vector2 = (
@@ -941,6 +951,20 @@ func _update_settlement_name_tags() -> void:
 		)
 		tag.visible = visible_rect.has_point(screen_position)
 		tag.set_screen_position(anchor)
+
+
+## 村庄特产图标路径来自商品配置；城镇/城堡或没有特产时返回空字符串。
+func _get_specialty_icon_path(settlement: SettlementData) -> String:
+	if settlement == null or _context == null \
+			or _context.market_manager == null:
+		return ""
+	if settlement.settlement_type != SettlementData.SettlementType.VILLAGE:
+		return ""
+	for item_id: String in settlement.village_specialty_item_ids:
+		var path: String = _context.market_manager.get_item_icon_path(item_id)
+		if not path.is_empty() and ResourceLoader.exists(path):
+			return path
+	return ""
 
 
 ## 每帧重新计算“停留在地点上”的部队。
@@ -4604,7 +4628,7 @@ func _update_top_info() -> void:
 	if _context == null or _player_party == null:
 		return
 	if _money_label != null:
-		_money_label.text = str(_context.player_profile.gold)
+		_money_label.text = GoldUtils.format(float(_context.player_profile.gold))
 	if _party_speed_label != null:
 		_party_speed_label.text = "%.1f" % _get_party_speed(_player_party)
 	if _top_party_troop_label != null:

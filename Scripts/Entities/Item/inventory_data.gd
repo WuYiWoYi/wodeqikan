@@ -1,15 +1,17 @@
 class_name InventoryData
 extends RefCounted
-## 通用物品存储：普通可堆叠物品 + 独立马匹实例。
+## 通用物品存储：普通可堆叠物品 + 独立马匹实例 + 非堆叠普通商品实例。
 ##
 ## 玩家 PlayerProfile 与 NPC PartyData 共用本类，避免出现两套背包规则。
-## - stackable_counts: { item_id: 数量 }，面包、草料、晋升凭证等。
+## - stackable_counts: { item_id: 数量 }，面包、草料、肉等。
 ## - mount_instances: Array[MountInstanceData]，每匹马单独保存。
+## - item_instances: Array[ItemInstanceData]，猪等非堆叠普通商品每件单独保存。
 ## inventory 仅保留“出现过的物品 ID 列表”，用于兼容旧存档与 UI 快速枚举。
 
 var inventory: Array[String] = []
 var stackable_counts: Dictionary = {}
 var mount_instances: Array[MountInstanceData] = []
+var item_instances: Array[ItemInstanceData] = []
 
 
 # ---------------------------------------------------------------------------
@@ -24,6 +26,9 @@ func get_item_count(item_id: String) -> int:
 	if MountInstanceData.is_mount_item(normalized):
 		_migrate_legacy_mount_counts()
 		return get_mount_count(normalized)
+	if ItemInstanceData.is_instance_item(normalized):
+		_migrate_legacy_instance_counts()
+		return get_item_instance_count(normalized)
 	return maxi(0, int(stackable_counts.get(normalized, 0)))
 
 
@@ -66,12 +71,47 @@ func has_mount_instance(instance_id: String) -> bool:
 	return get_mount_instance(instance_id) != null
 
 
+func get_item_instance_count(item_id: String = "") -> int:
+	if item_id.is_empty():
+		return item_instances.size()
+	var count: int = 0
+	for instance: ItemInstanceData in item_instances:
+		if instance != null and instance.item_id == item_id:
+			count += 1
+	return count
+
+
+func get_all_item_instances() -> Array[ItemInstanceData]:
+	return item_instances.duplicate()
+
+
+func get_item_instances(item_id: String) -> Array[ItemInstanceData]:
+	var result: Array[ItemInstanceData] = []
+	for instance: ItemInstanceData in item_instances:
+		if instance != null and (item_id.is_empty() or instance.item_id == item_id):
+			result.append(instance)
+	return result
+
+
+func get_item_instance(instance_id: String) -> ItemInstanceData:
+	if instance_id.is_empty():
+		return null
+	for instance: ItemInstanceData in item_instances:
+		if instance != null and instance.instance_id == instance_id:
+			return instance
+	return null
+
+
+func has_item_instance(instance_id: String) -> bool:
+	return get_item_instance(instance_id) != null
+
+
 # ---------------------------------------------------------------------------
 # 增减
 # ---------------------------------------------------------------------------
 
 
-## 增加普通物品；马匹 ID 会转换为独立实例，绝不写入 stackable_counts。
+## 增加普通物品；马匹/非堆叠商品会转换为独立实例，绝不写入 stackable_counts。
 func add_item(item_id: String, count: int = 1) -> bool:
 	var normalized: String = item_id.strip_edges()
 	if normalized.is_empty() or count <= 0:
@@ -81,12 +121,17 @@ func add_item(item_id: String, count: int = 1) -> bool:
 			if not add_mount_instance(MountInstanceData.create_random(normalized)):
 				return false
 		return true
+	if ItemInstanceData.is_instance_item(normalized):
+		for i: int in range(count):
+			if not add_item_instance(ItemInstanceData.create_random(normalized)):
+				return false
+		return true
 	stackable_counts[normalized] = get_item_count(normalized) + count
 	_sync_inventory()
 	return true
 
 
-## 消耗普通物品或马匹实例；数量不足时不修改任何数据。
+## 消耗普通物品或实例；数量不足时不修改任何数据。
 func remove_item(item_id: String, count: int = 1) -> bool:
 	var normalized: String = item_id.strip_edges()
 	if normalized.is_empty() or count <= 0:
@@ -97,6 +142,15 @@ func remove_item(item_id: String, count: int = 1) -> bool:
 			return false
 		for i: int in range(count):
 			var instance := take_mount_instance(normalized)
+			if instance == null:
+				return false
+		return true
+	if ItemInstanceData.is_instance_item(normalized):
+		_migrate_legacy_instance_counts()
+		if get_item_instance_count(normalized) < count:
+			return false
+		for i: int in range(count):
+			var instance := take_item_instance(normalized)
 			if instance == null:
 				return false
 		return true
@@ -149,6 +203,43 @@ func take_mount_instance(item_id: String) -> MountInstanceData:
 	return null
 
 
+func add_item_instance(instance: ItemInstanceData) -> bool:
+	if instance == null:
+		return false
+	instance.sanitize()
+	if instance.instance_id.is_empty() or instance.item_id.is_empty():
+		return false
+	if has_item_instance(instance.instance_id):
+		push_error("商品实例 ID 重复，拒绝加入背包: %s" % instance.instance_id)
+		return false
+	# 非堆叠商品不能同时存在数量堆叠中。
+	stackable_counts.erase(instance.item_id)
+	item_instances.append(instance)
+	_sync_inventory()
+	return true
+
+
+func remove_item_instance(instance_id: String) -> ItemInstanceData:
+	for index: int in range(item_instances.size()):
+		var instance := item_instances[index]
+		if instance != null and instance.instance_id == instance_id:
+			item_instances.remove_at(index)
+			_sync_inventory()
+			return instance
+	return null
+
+
+## 取出指定商品 ID 的第一件实例；交易与宰杀都通过本入口。
+func take_item_instance(item_id: String) -> ItemInstanceData:
+	for index: int in range(item_instances.size()):
+		var instance := item_instances[index]
+		if instance != null and instance.item_id == item_id:
+			item_instances.remove_at(index)
+			_sync_inventory()
+			return instance
+	return null
+
+
 ## 读档回滚专用：整体替换实例列表。
 func restore_mount_instances(instances: Array[MountInstanceData]) -> void:
 	mount_instances.clear()
@@ -158,12 +249,21 @@ func restore_mount_instances(instances: Array[MountInstanceData]) -> void:
 	_sync_inventory()
 
 
-## 交易回滚专用：一次性恢复普通物品数量、物品 ID 列表与马匹实例。
+func restore_item_instances(instances: Array[ItemInstanceData]) -> void:
+	item_instances.clear()
+	for instance: ItemInstanceData in instances:
+		if instance != null:
+			item_instances.append(instance)
+	_sync_inventory()
+
+
+## 交易回滚专用：一次性恢复普通物品数量、物品 ID 列表与两类实例。
 ## 不生成新实例、不触发旧存档迁移，保证回滚后与快照完全一致。
 func restore_state(
 	inventory_list: Array,
 	counts: Dictionary,
-	instances: Array
+	instances: Array,
+	item_instance_list: Array = []
 ) -> void:
 	inventory.clear()
 	for value: Variant in inventory_list:
@@ -182,6 +282,11 @@ func restore_state(
 		var instance := value as MountInstanceData
 		if instance != null:
 			mount_instances.append(instance)
+	item_instances.clear()
+	for value: Variant in item_instance_list:
+		var instance := value as ItemInstanceData
+		if instance != null:
+			item_instances.append(instance)
 	_sync_inventory()
 
 
@@ -190,10 +295,14 @@ func restore_state(
 # ---------------------------------------------------------------------------
 
 
-## 旧存档可能把马匹放在 stackable_counts / item_counts 中；
+## 旧存档可能把马匹/猪放在 stackable_counts / item_counts 中；
 ## 这里只转换一次，转换后数量与前后的实例总数保持一致。
 func migrate_legacy_mount_counts() -> void:
 	_migrate_legacy_mount_counts()
+
+
+func migrate_legacy_instance_counts() -> void:
+	_migrate_legacy_instance_counts()
 
 
 func _migrate_legacy_mount_counts() -> void:
@@ -214,7 +323,25 @@ func _migrate_legacy_mount_counts() -> void:
 	_sync_inventory()
 
 
-## 保持 inventory 与两类存储一致：有数量/实例的 ID 出现一次，归零的移除。
+func _migrate_legacy_instance_counts() -> void:
+	if stackable_counts.is_empty():
+		return
+	var legacy_ids: Array[String] = []
+	for item_id_value: Variant in stackable_counts.keys():
+		var item_id: String = str(item_id_value)
+		if ItemInstanceData.is_instance_item(item_id):
+			legacy_ids.append(item_id)
+	for item_id: String in legacy_ids:
+		var count: int = maxi(0, int(stackable_counts.get(item_id, 0)))
+		stackable_counts.erase(item_id)
+		for index: int in range(count):
+			add_item_instance(ItemInstanceData.create_deterministic(
+				item_id, "legacy|%s|%d" % [item_id, index]
+			))
+	_sync_inventory()
+
+
+## 保持 inventory 与三类存储一致：有数量/实例的 ID 出现一次，归零的移除。
 func _sync_inventory() -> void:
 	var present: Dictionary = {}
 	for item_id_value: Variant in stackable_counts.keys():
@@ -224,6 +351,9 @@ func _sync_inventory() -> void:
 	for instance: MountInstanceData in mount_instances:
 		if instance != null and not instance.equipment_id.is_empty():
 			present[instance.equipment_id] = true
+	for instance: ItemInstanceData in item_instances:
+		if instance != null and not instance.item_id.is_empty():
+			present[instance.item_id] = true
 
 	var next_inventory: Array[String] = []
 	for item_id: String in inventory:
@@ -241,10 +371,15 @@ func to_dict() -> Dictionary:
 	for instance: MountInstanceData in mount_instances:
 		if instance != null:
 			instances.append(instance.to_dict())
+	var item_instance_payloads: Array[Dictionary] = []
+	for instance: ItemInstanceData in item_instances:
+		if instance != null:
+			item_instance_payloads.append(instance.to_dict())
 	return {
 		"inventory": inventory.duplicate(),
 		"stackable_counts": stackable_counts.duplicate(true),
 		"mount_instances": instances,
+		"item_instances": item_instance_payloads,
 	}
 
 
@@ -281,16 +416,33 @@ static func from_dict(data: Dictionary) -> InventoryData:
 				continue
 			storage.mount_instances.append(instance)
 
+	var item_instance_value: Variant = data.get("item_instances", [])
+	if item_instance_value is Array:
+		for value: Variant in item_instance_value:
+			if not value is Dictionary:
+				continue
+			var instance := ItemInstanceData.from_dict(value)
+			if instance.instance_id.is_empty() or instance.item_id.is_empty():
+				continue
+			if storage.has_item_instance(instance.instance_id):
+				continue
+			storage.item_instances.append(instance)
+
 	# 旧存档只有 inventory：每个条目按 1 件处理。
-	# 已有马匹实例的装备 ID 不能再补成堆叠数量，否则读档会凭空多出马匹。
+	# 已有实例的装备/商品 ID 不能再补成堆叠数量，否则读档会凭空多出物品。
 	for item_id: String in storage.inventory:
 		if storage.stackable_counts.has(item_id):
 			continue
 		if MountInstanceData.is_mount_item(item_id):
 			if storage.get_mount_count(item_id) == 0:
 				storage.stackable_counts[item_id] = 1
+		elif ItemInstanceData.is_instance_item(item_id):
+			if storage.get_item_instance_count(item_id) == 0:
+				storage.stackable_counts[item_id] = 1
 		else:
 			storage.stackable_counts[item_id] = 1
 
+	storage._migrate_legacy_mount_counts()
+	storage._migrate_legacy_instance_counts()
 	storage._sync_inventory()
 	return storage

@@ -280,7 +280,9 @@ func _stationed_mercenaries() -> Array[MercenaryData]:
 func _refresh() -> void:
 	if _context == null or _settlement == null:
 		return
-	_gold_label.text = "金币：%d" % _context.player_profile.gold
+	_gold_label.text = "金币：%s" % GoldUtils.format(
+		float(_context.player_profile.gold)
+	)
 	_clear_list()
 	var mercenaries := _stationed_mercenaries()
 	for mercenary: MercenaryData in mercenaries:

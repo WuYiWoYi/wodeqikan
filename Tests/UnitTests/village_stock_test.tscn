@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Tests/UnitTests/village_stock_test.gd" id="1_village_stock"]
+
+[node name="VillageStockTest" type="Node"]
+script = ExtResource("1_village_stock")

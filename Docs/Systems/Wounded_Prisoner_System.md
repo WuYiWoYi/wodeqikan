@@ -229,6 +229,6 @@ unit.prisoner_owner_party_id == party.party_id
 - [Combat_System.md](Combat_System.md)：结算顺序与负伤判定。
 - [Settlement_System.md](Settlement_System.md)：城镇酒馆入口。
 - [Captivity_System.md](Captivity_System.md)：俘虏恢复、玩家被俘与逃脱。
-- [Save_System.md](Save_System.md)：伤兵/俘虏字段与当前 Schema v10 迁移。
+- [Save_System.md](Save_System.md)：伤兵/俘虏字段与当前 Schema v11 迁移。
 - [Lord_Ransom_System.md](Lord_Ransom_System.md)：NPC 领主出售后的赎回流程。
 - [Time_System.md](Time_System.md)：WorldTime 与游戏小时。
